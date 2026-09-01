@@ -1,0 +1,13 @@
+/target/
+/Cargo.lock.bak
+*.log
+.DS_Store
+Thumbs.db
+.vs/
+.vscode/
+.idea/
+*.tmp
+*.bak
+
+.rivet_temp/
+*.bat

@@ -1,0 +1,244 @@
+import { LineEdit, ScrollView } from "std-widgets.slint";
+
+export struct FileListItem {
+    name: string,
+    type_name: string,
+    size_text: string,
+    modified_text: string,
+    icon-id: int,
+    selected: bool,
+}
+
+export global AppState {
+    in-out property <string> address_path: "";
+    in-out property <string> status_text: "Ready";
+    in-out property <[FileListItem]> files: [];
+    in-out property <[string]> tabs: [];
+    in-out property <int> active_tab: 0;
+    in-out property <bool> can_go_back: false;
+    in-out property <bool> can_go_forward: false;
+    in-out property <bool> can_go_parent: false;
+
+    pure callback request_navigate(string);
+    pure callback request_back();
+    pure callback request_forward();
+    pure callback request_parent();
+    pure callback request_refresh();
+    pure callback request_new_tab();
+    pure callback request_close_tab(int);
+    pure callback request_switch_tab(int);
+    pure callback request_select(int);
+    pure callback request_toggle(int);
+    pure callback request_range(int);
+    pure callback request_select_all();
+    pure callback request_activate(int);
+    pure callback request_new_folder();
+    pure callback request_rename(int);
+    pure callback request_sort(int);
+}
+
+component SidebarButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 28px;
+    background: selected ? #2a2d2e : transparent;
+    border-radius: 4px;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        Text {
+            text: root.text;
+            color: #d0d0d0;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "Kova";
+    min-width: 720px;
+    min-height: 480px;
+    background: #1e1e1e;
+
+    GridLayout {
+        Row {
+            tabs := HorizontalLayout {
+                padding: 4px;
+                spacing: 4px;
+                height: 34px;
+
+                for item[idx] in AppState.tabs: Rectangle {
+                    width: 140px;
+                    height: 26px;
+                    background: idx == AppState.active_tab ? #2a2d2e : #252526;
+                    border-radius: 4px;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 4px;
+                        spacing: 6px;
+                        Text {
+                            text: item;
+                            color: idx == AppState.active_tab ? #ffffff : #b0b0b0;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    TouchArea {
+                        clicked => { AppState.request_switch_tab(idx); }
+                        double-clicked => { AppState.request_close_tab(idx); }
+                    }
+                }
+
+                Rectangle {
+                    width: 28px;
+                    height: 26px;
+                    background: #2a2d2e;
+                    border-radius: 4px;
+                    Text { text: "+"; color: #ffffff; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { AppState.request_new_tab(); } }
+                }
+            }
+        }
+
+        Row {
+            toolbar := HorizontalLayout {
+                padding: 6px;
+                spacing: 6px;
+                height: 40px;
+
+                Rectangle {
+                    width: 28px; height: 26px; background: AppState.can_go_back ? #2a2d2e : #333333; border-radius: 4px;
+                    Text { text: "←"; color: AppState.can_go_back ? #ffffff : #666666; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { AppState.request_back(); } }
+                }
+                Rectangle {
+                    width: 28px; height: 26px; background: AppState.can_go_forward ? #2a2d2e : #333333; border-radius: 4px;
+                    Text { text: "→"; color: AppState.can_go_forward ? #ffffff : #666666; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { AppState.request_forward(); } }
+                }
+                Rectangle {
+                    width: 28px; height: 26px; background: AppState.can_go_parent ? #2a2d2e : #333333; border-radius: 4px;
+                    Text { text: "↑"; color: AppState.can_go_parent ? #ffffff : #666666; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { AppState.request_parent(); } }
+                }
+                Rectangle {
+                    width: 28px; height: 26px; background: #2a2d2e; border-radius: 4px;
+                    Text { text: "⟳"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { AppState.request_refresh(); } }
+                }
+
+                address := Rectangle {
+                    height: 26px;
+                    background: #2a2d2e;
+                    border-radius: 4px;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        LineEdit {
+                            text <=> AppState.address_path;
+                            accepted => { AppState.request_navigate(AppState.address_path); }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 90px; height: 26px; background: #2a2d2e; border-radius: 4px;
+                    Text { text: "New Folder"; color: #ffffff; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { AppState.request_new_folder(); } }
+                }
+            }
+        }
+
+        Row {
+            HorizontalLayout {
+                sidebar := Rectangle {
+                    width: 160px;
+                    background: #252526;
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 2px;
+
+                        Text { text: "Favorites"; color: #909090; font-size: 11px; font-weight: 600; }
+                        SidebarButton { text: "Home"; clicked => { AppState.request_navigate(""); } }
+                        SidebarButton { text: "Desktop"; clicked => { AppState.request_navigate(""); } }
+                        SidebarButton { text: "Documents"; clicked => { AppState.request_navigate(""); } }
+                        SidebarButton { text: "Downloads"; clicked => { AppState.request_navigate(""); } }
+
+                        Rectangle { height: 12px; }
+
+                        Text { text: "Drives"; color: #909090; font-size: 11px; font-weight: 600; }
+                        SidebarButton { text: "C:\\\\"; clicked => { AppState.request_navigate("C:\\"); } }
+                    }
+                }
+
+                file-list := Rectangle {
+                    background: #1e1e1e;
+                    VerticalLayout {
+                        padding: 0;
+                        Rectangle {
+                            height: 28px;
+                            background: #252526;
+                            header := HorizontalLayout {
+                                height: 100%;
+                                Text { text: "Name"; color: #a0a0a0; font-size: 12px; width: 45%; padding-left: 8px; vertical-alignment: center; }
+                                Text { text: "Type"; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
+                                Text { text: "Size"; color: #a0a0a0; font-size: 12px; width: 15%; vertical-alignment: center; }
+                                Text { text: "Modified"; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
+                            }
+                        }
+
+                        ScrollView {
+                            height: 100%;
+                            VerticalLayout {
+                                for item[idx] in AppState.files: Rectangle {
+                                    height: 26px;
+                                    background: item.selected ? #094771 : transparent;
+
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        Text { text: item.name; color: #d0d0d0; font-size: 13px; width: 45%; vertical-alignment: center; overflow: elide; }
+                                        Text { text: item.type_name; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
+                                        Text { text: item.size_text; color: #a0a0a0; font-size: 12px; width: 15%; vertical-alignment: center; }
+                                        Text { text: item.modified_text; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
+                                    }
+
+                                    TouchArea {
+                                        clicked => { AppState.request_select(idx); }
+                                        double-clicked => { AppState.request_activate(idx); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Row {
+            Rectangle {
+                height: 24px;
+                background: #007acc;
+                HorizontalLayout {
+                    padding: 4px;
+                    height: 100%;
+                    Text {
+                        text: AppState.status_text;
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

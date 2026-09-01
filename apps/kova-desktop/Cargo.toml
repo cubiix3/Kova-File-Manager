@@ -1,0 +1,24 @@
+[package]
+name = "kova-desktop"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kova-core = { workspace = true }
+kova-platform-windows = { workspace = true }
+kova-ops = { workspace = true }
+slint = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+
+[build-dependencies]
+slint-build = "1.11"
+
+[[bin]]
+name = "kova-desktop"
+path = "src/main.rs"

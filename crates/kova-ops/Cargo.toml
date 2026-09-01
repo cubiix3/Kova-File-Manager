@@ -1,0 +1,20 @@
+[package]
+name = "kova-ops"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kova-core = { workspace = true }
+kova-platform-windows = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+windows = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

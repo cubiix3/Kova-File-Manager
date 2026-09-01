@@ -1,0 +1,16 @@
+[package]
+name = "kova-platform-windows"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kova-core = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+windows = { workspace = true }
+
+[dev-dependencies]

@@ -1,0 +1,63 @@
+[workspace]
+members = [
+    "crates/kova-core",
+    "crates/kova-platform-windows",
+    "crates/kova-ops",
+    "apps/kova-desktop",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Kova Contributors"]
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Core
+kova-core = { path = "crates/kova-core" }
+kova-platform-windows = { path = "crates/kova-platform-windows" }
+kova-ops = { path = "crates/kova-ops" }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+
+# Windows bindings
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Globalization",
+    "Win32_System_Kernel",
+    "Win32_System_Registry",
+] }
+windows-version = "0.1"
+
+# Async / concurrency
+tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "fs", "macros", "time"] }
+tokio-util = "0.7"
+
+# UI
+slint = { version = "1.11", features = ["std"] }
+
+# Error handling
+thiserror = "2"
+
+# Time
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Misc
+uuid = { version = "1.16", features = ["v4"] }
+bitflags = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
