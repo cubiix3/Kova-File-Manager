@@ -8,6 +8,18 @@ pub enum SortColumn {
     Modified,
 }
 
+impl SortColumn {
+    /// Return a stable zero-based index used by the UI header.
+    pub fn as_index(self) -> usize {
+        match self {
+            SortColumn::Name => 0,
+            SortColumn::Type => 1,
+            SortColumn::Size => 2,
+            SortColumn::Modified => 3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortDirection {
     Ascending,
@@ -152,5 +164,13 @@ mod tests {
         );
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["folder", "file.a", "file.b"]);
+    }
+
+    #[test]
+    fn sort_column_index_is_stable() {
+        assert_eq!(SortColumn::Name.as_index(), 0);
+        assert_eq!(SortColumn::Type.as_index(), 1);
+        assert_eq!(SortColumn::Size.as_index(), 2);
+        assert_eq!(SortColumn::Modified.as_index(), 3);
     }
 }

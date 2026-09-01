@@ -176,6 +176,17 @@ impl AppController {
         self.snapshots.get(&self.tabs.active_id())
     }
 
+    pub fn sort_descriptor(&self) -> SortDescriptor {
+        self.tabs
+            .active()
+            .map(|t| t.sort)
+            .unwrap_or_else(SortDescriptor::by_name)
+    }
+
+    pub fn primary_selection(&self) -> Option<usize> {
+        self.tabs.active().and_then(|t| t.selection.primary())
+    }
+
     pub fn file_list_items(&self) -> Vec<FileListItem> {
         let Some(snapshot) = self.snapshots.get(&self.tabs.active_id()) else {
             return Vec::new();
@@ -297,5 +308,26 @@ mod tests {
         let snap = ctrl.snapshot().unwrap();
         assert_eq!(snap.entries.len(), 1);
         assert_eq!(snap.entries[0].name, "current-folder");
+    }
+
+    #[test]
+    fn out_of_order_results_keep_latest_navigation_visible() {
+        // Scenario: navigate A -> request 1, navigate B -> request 2.
+        // B completes, then A completes. The visible snapshot must remain B.
+        let initial = Location::new(std::path::PathBuf::from("C:\\dummy"));
+        let mut ctrl = AppController::new(initial);
+        let tab_id = ctrl.active_tab_id();
+
+        ctrl.record_request(tab_id, 1);
+        ctrl.record_request(tab_id, 2);
+
+        let b = dummy_snapshot(2, "current-b");
+        ctrl.apply_snapshot(tab_id, b);
+
+        let a = dummy_snapshot(1, "stale-a");
+        ctrl.apply_snapshot(tab_id, a);
+
+        let snap = ctrl.snapshot().unwrap();
+        assert_eq!(snap.entries[0].name, "current-b");
     }
 }

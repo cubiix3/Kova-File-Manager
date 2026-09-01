@@ -9,11 +9,17 @@ export struct FileListItem {
     selected: bool,
 }
 
+export struct DriveItem {
+    name: string,
+    path: string,
+}
+
 export global AppState {
     in-out property <string> address_path: "";
     in-out property <string> status_text: "Ready";
     in-out property <[FileListItem]> files: [];
     in-out property <[string]> tabs: [];
+    in-out property <[DriveItem]> drives: [];
     in-out property <int> active_tab: 0;
     in-out property <bool> can_go_back: false;
     in-out property <bool> can_go_forward: false;
@@ -23,6 +29,13 @@ export global AppState {
     in-out property <string> desktop_path: "";
     in-out property <string> documents_path: "";
     in-out property <string> downloads_path: "";
+
+    in-out property <int> sort_column: 0;
+    in-out property <bool> sort_ascending: true;
+
+    in-out property <bool> dialog_visible: false;
+    in-out property <string> dialog_title: "";
+    in-out property <string> dialog_value: "";
 
     pure callback request_navigate(string);
     pure callback request_back();
@@ -36,9 +49,12 @@ export global AppState {
     pure callback request_toggle(int);
     pure callback request_range(int);
     pure callback request_select_all();
+    pure callback request_clear_selection();
     pure callback request_activate(int);
     pure callback request_new_folder();
     pure callback request_rename(int);
+    pure callback request_dialog_confirm(string);
+    pure callback request_dialog_cancel();
     pure callback request_sort(int);
 }
 
@@ -73,15 +89,76 @@ component HeaderCell inherits Rectangle {
     height: 100%;
     HorizontalLayout {
         padding-left: 8px;
+        spacing: 4px;
         Text {
             text: root.text;
             color: #a0a0a0;
             font-size: 12px;
             vertical-alignment: center;
         }
+        Text {
+            text: AppState.sort_column == root.column ? (AppState.sort_ascending ? "▲" : "▼") : "";
+            color: #a0a0a0;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
     }
     TouchArea {
         clicked => { AppState.request_sort(root.column); }
+    }
+}
+
+component NameDialog inherits Rectangle {
+    in-out property <string> title <=> AppState.dialog_title;
+    in-out property <string> value <=> AppState.dialog_value;
+
+    visible: AppState.dialog_visible;
+    background: #00000088;
+
+    Rectangle {
+        width: 400px;
+        height: 140px;
+        background: #2a2d2e;
+        border-radius: 8px;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+
+            Text {
+                text: root.title;
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 600;
+            }
+
+            LineEdit {
+                text <=> AppState.dialog_value;
+                accepted => { AppState.request_dialog_confirm(AppState.dialog_value); }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+
+                Rectangle {
+                    width: 80px;
+                    height: 28px;
+                    background: #333333;
+                    border-radius: 4px;
+                    Text { text: "Cancel"; color: #d0d0d0; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { AppState.request_dialog_cancel(); } }
+                }
+                Rectangle {
+                    width: 80px;
+                    height: 28px;
+                    background: #007acc;
+                    border-radius: 4px;
+                    Text { text: "OK"; color: #ffffff; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { AppState.request_dialog_confirm(AppState.dialog_value); } }
+                }
+            }
+        }
     }
 }
 
@@ -157,7 +234,7 @@ export component MainWindow inherits Window {
                 }
                 Rectangle {
                     width: 28px; height: 26px; background: #2a2d2e; border-radius: 4px;
-                    Text { text: "⟳"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                    Text { text: "↻"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
                     TouchArea { clicked => { AppState.request_refresh(); } }
                 }
 
@@ -201,7 +278,10 @@ export component MainWindow inherits Window {
                         Rectangle { height: 12px; }
 
                         Text { text: "Drives"; color: #909090; font-size: 11px; font-weight: 600; }
-                        SidebarButton { text: "C:\\u005c"; target: "C:/"; }
+                        for drive[idx] in AppState.drives: SidebarButton {
+                            text: drive.name;
+                            target: drive.path;
+                        }
                     }
                 }
 
@@ -221,24 +301,69 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        ScrollView {
+                        FocusScope {
+                            width: 100%;
                             height: 100%;
-                            VerticalLayout {
-                                for item[idx] in AppState.files: Rectangle {
-                                    height: 26px;
-                                    background: item.selected ? #094771 : transparent;
 
-                                    HorizontalLayout {
-                                        padding-left: 8px;
-                                        Text { text: item.name; color: #d0d0d0; font-size: 13px; width: 45%; vertical-alignment: center; overflow: elide; }
-                                        Text { text: item.type_name; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
-                                        Text { text: item.size_text; color: #a0a0a0; font-size: 12px; width: 15%; vertical-alignment: center; }
-                                        Text { text: item.modified_text; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
-                                    }
+                            key-pressed(event) => {
+                                if event.text == "a" && event.modifiers.control {
+                                    AppState.request_select_all();
+                                    accept
+                                } else if event.text == "f5" {
+                                    AppState.request_refresh();
+                                    accept
+                                } else if event.text == "f2" {
+                                    AppState.request_rename(-1);
+                                    accept
+                                } else if event.text == "return" || event.text == "enter" {
+                                    AppState.request_activate(-1);
+                                    accept
+                                } else if event.text == "left" && event.modifiers.alt {
+                                    AppState.request_back();
+                                    accept
+                                } else if event.text == "right" && event.modifiers.alt {
+                                    AppState.request_forward();
+                                    accept
+                                } else if event.text == "up" && event.modifiers.alt {
+                                    AppState.request_parent();
+                                    accept
+                                } else if event.text == "l" && event.modifiers.control {
+                                    AppState.request_navigate(AppState.address_path);
+                                    accept
+                                } else {
+                                    reject
+                                }
+                            }
 
-                                    TouchArea {
-                                        clicked => { AppState.request_select(idx); }
-                                        double-clicked => { AppState.request_activate(idx); }
+                            ScrollView {
+                                height: 100%;
+                                VerticalLayout {
+                                    for item[idx] in AppState.files: Rectangle {
+                                        height: 26px;
+                                        background: item.selected ? #094771 : transparent;
+
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            Text { text: item.name; color: #d0d0d0; font-size: 13px; width: 45%; vertical-alignment: center; overflow: elide; }
+                                            Text { text: item.type_name; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
+                                            Text { text: item.size_text; color: #a0a0a0; font-size: 12px; width: 15%; vertical-alignment: center; }
+                                            Text { text: item.modified_text; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
+                                        }
+
+                                        TouchArea {
+                                            pointer-event(event) => {
+                                                if event.kind == PointerEventKind.down {
+                                                    if event.modifiers.control {
+                                                        AppState.request_toggle(idx);
+                                                    } else if event.modifiers.shift {
+                                                        AppState.request_range(idx);
+                                                    } else {
+                                                        AppState.request_select(idx);
+                                                    }
+                                                }
+                                            }
+                                            double-clicked => { AppState.request_activate(idx); }
+                                        }
                                     }
                                 }
                             }
@@ -265,4 +390,6 @@ export component MainWindow inherits Window {
             }
         }
     }
+
+    NameDialog {}
 }

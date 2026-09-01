@@ -105,7 +105,6 @@ fn classify_kind(metadata: &std::fs::Metadata, _path: &std::path::Path) -> FileK
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use tokio;
 
     #[tokio::test]
     async fn enumerate_project_root_contains_cargo_toml() {
@@ -114,5 +113,42 @@ mod tests {
         let names: Vec<&str> = snap.entries.iter().map(|e| e.name.as_str()).collect();
         assert!(names.contains(&"Cargo.toml"));
         assert!(names.contains(&"README.md"));
+    }
+
+    #[tokio::test]
+    #[ignore = "slow performance baseline"]
+    async fn enumerate_directory_performance_baseline() {
+        use std::time::Instant;
+        let root = std::env::temp_dir().join("kova-perf");
+        let _ = tokio::fs::remove_dir_all(&root).await;
+
+        let sizes = vec![100usize, 1_000, 10_000];
+        let runs = 5usize;
+        for size in sizes {
+            let dir = root.join(format!("entries_{}", size));
+            tokio::fs::create_dir_all(&dir).await.unwrap();
+            for i in 0..size {
+                let path = dir.join(format!("file_{:08}.txt", i));
+                tokio::fs::write(&path, b"x").await.unwrap();
+            }
+
+            let mut times = Vec::new();
+            for _ in 0..runs {
+                let loc = Location::new(dir.clone());
+                let start = Instant::now();
+                let snap = enumerate_directory(loc, 1).await.unwrap();
+                let elapsed = start.elapsed();
+                assert_eq!(snap.entries.len(), size);
+                times.push(elapsed.as_secs_f64() * 1000.0);
+            }
+
+            times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let min = times[0];
+            let median = times[runs / 2];
+            let max = times[times.len() - 1];
+            println!("entries={size} min={min:.2}ms median={median:.2}ms max={max:.2}ms");
+        }
+
+        let _ = tokio::fs::remove_dir_all(&root).await;
     }
 }

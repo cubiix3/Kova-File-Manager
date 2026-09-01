@@ -3,7 +3,7 @@ mod bridges;
 
 use app_state::AppController;
 use bridges::CommandDispatcher;
-use kova_core::domain::{KovaEvent, LocationInput};
+use kova_core::domain::{KovaEvent, LocationInput, SortDirection};
 use kova_ops::worker::{WorkerCommand, spawn_worker};
 use kova_platform_windows::known_folders::{KnownFolder, resolve_known_folder};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
@@ -12,6 +12,12 @@ use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
 
 slint::include_modules!();
+
+#[derive(Debug, Clone)]
+enum PendingDialog {
+    NewFolder,
+    Rename { index: usize },
+}
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
@@ -39,11 +45,14 @@ async fn main() {
     let app = MainWindow::new().unwrap();
     let ui = app.as_weak();
 
-    // Wire UI callbacks.
-    wire_callbacks(ui.clone(), dispatcher.clone());
+    let pending_dialog = Arc::new(Mutex::new(None::<PendingDialog>));
 
-    // Populate known-folder sidebar targets.
+    // Wire UI callbacks.
+    wire_callbacks(ui.clone(), dispatcher.clone(), Arc::clone(&pending_dialog));
+
+    // Populate sidebar targets.
     set_known_folder_paths(&ui);
+    set_drives(&ui);
 
     // Initial load.
     let start_tab = app_controller.lock().unwrap().active_tab_id();
@@ -110,6 +119,7 @@ async fn main() {
                     let mut ctrl = controller_for_events.lock().unwrap();
                     ctrl.set_status(format!("{}: {}", context, error_message));
                     update_ui(&ui, &ctrl);
+                    show_error_dialog(&ui, &error_message);
                 }
                 _ => {}
             }
@@ -135,7 +145,53 @@ fn set_known_folder_paths(ui: &Weak<MainWindow>) {
     }
 }
 
-fn wire_callbacks(ui: Weak<MainWindow>, dispatcher: CommandDispatcher) {
+fn set_drives(ui: &Weak<MainWindow>) {
+    let drives: Vec<DriveItem> = kova_platform_windows::volumes::list_local_drives()
+        .into_iter()
+        .map(|d| DriveItem {
+            name: d.letter.into(),
+            path: d.path.display().to_string().into(),
+        })
+        .collect();
+    if let Some(ui) = ui.upgrade() {
+        let model = VecModel::from(drives);
+        ui.global::<AppState>().set_drives(ModelRc::new(model));
+    }
+}
+
+fn show_dialog(
+    ui: &MainWindow,
+    title: &str,
+    value: &str,
+    mode: PendingDialog,
+    pending: &Arc<Mutex<Option<PendingDialog>>>,
+) {
+    let state = ui.global::<AppState>();
+    state.set_dialog_title(title.into());
+    state.set_dialog_value(value.into());
+    state.set_dialog_visible(true);
+    *pending.lock().unwrap() = Some(mode);
+}
+
+fn close_dialog(ui: &MainWindow, pending: &Arc<Mutex<Option<PendingDialog>>>) {
+    let state = ui.global::<AppState>();
+    state.set_dialog_visible(false);
+    state.set_dialog_value("".into());
+    *pending.lock().unwrap() = None;
+}
+
+fn show_error_dialog(ui: &MainWindow, message: &str) {
+    let state = ui.global::<AppState>();
+    state.set_dialog_title("Error".into());
+    state.set_dialog_value(message.into());
+    state.set_dialog_visible(true);
+}
+
+fn wire_callbacks(
+    ui: Weak<MainWindow>,
+    dispatcher: CommandDispatcher,
+    pending_dialog: Arc<Mutex<Option<PendingDialog>>>,
+) {
     let d = dispatcher.clone();
     ui.unwrap()
         .global::<AppState>()
@@ -219,22 +275,84 @@ fn wire_callbacks(ui: Weak<MainWindow>, dispatcher: CommandDispatcher) {
     let d = dispatcher.clone();
     ui.unwrap()
         .global::<AppState>()
+        .on_request_clear_selection(move || {
+            d.dispatch_clear_selection();
+        });
+
+    let d = dispatcher.clone();
+    ui.unwrap()
+        .global::<AppState>()
         .on_request_activate(move |idx: i32| {
             d.dispatch_activate(idx as usize);
         });
 
-    let d = dispatcher.clone();
+    let pending = Arc::clone(&pending_dialog);
+    let dialog_ui = ui.clone();
     ui.unwrap()
         .global::<AppState>()
         .on_request_new_folder(move || {
-            d.dispatch_new_folder();
+            if let Some(ui) = dialog_ui.upgrade() {
+                show_dialog(
+                    &ui,
+                    "New Folder",
+                    "New folder",
+                    PendingDialog::NewFolder,
+                    &pending,
+                );
+            }
         });
 
     let d = dispatcher.clone();
+    let pending = Arc::clone(&pending_dialog);
+    let dialog_ui = ui.clone();
     ui.unwrap()
         .global::<AppState>()
         .on_request_rename(move |idx: i32| {
-            d.dispatch_rename(idx as usize);
+            let name = d.item_name(idx as usize);
+            if let Some(ui) = dialog_ui.upgrade() {
+                show_dialog(
+                    &ui,
+                    "Rename",
+                    &name,
+                    PendingDialog::Rename {
+                        index: idx as usize,
+                    },
+                    &pending,
+                );
+            }
+        });
+
+    let d = dispatcher.clone();
+    let pending = Arc::clone(&pending_dialog);
+    let dialog_ui = ui.clone();
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_dialog_confirm(move |value: SharedString| {
+            let name = value.to_string();
+            let mode = pending.lock().unwrap().take();
+            if let Some(mode) = mode {
+                match mode {
+                    PendingDialog::NewFolder => {
+                        d.dispatch_new_folder_named(&name);
+                    }
+                    PendingDialog::Rename { index } => {
+                        d.dispatch_rename_to(index, &name);
+                    }
+                }
+            }
+            if let Some(ui) = dialog_ui.upgrade() {
+                close_dialog(&ui, &pending);
+            }
+        });
+
+    let pending = Arc::clone(&pending_dialog);
+    let dialog_ui = ui.clone();
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_dialog_cancel(move || {
+            if let Some(ui) = dialog_ui.upgrade() {
+                close_dialog(&ui, &pending);
+            }
         });
 
     let d = dispatcher.clone();
@@ -256,6 +374,12 @@ fn update_ui(ui: &MainWindow, controller: &AppController) {
         .set_can_go_forward(controller.can_go_forward());
     ui.global::<AppState>()
         .set_can_go_parent(controller.can_go_parent());
+
+    let sort = controller.sort_descriptor();
+    ui.global::<AppState>()
+        .set_sort_column(sort.column.as_index() as i32);
+    ui.global::<AppState>()
+        .set_sort_ascending(sort.direction == SortDirection::Ascending);
 
     let items: Vec<FileListItem> = controller
         .file_list_items()

@@ -59,6 +59,9 @@ impl CommandDispatcher {
         drop(ctrl);
 
         let location = resolve_input(&input, &base).map_err(|e| e.to_string())?;
+        if !location.path.exists() {
+            return Err(format!("path does not exist: {}", location.display()));
+        }
         {
             let mut ctrl = self.controller.lock().unwrap();
             ctrl.navigate(location.clone());
@@ -185,11 +188,18 @@ impl CommandDispatcher {
         }
     }
 
+    pub fn dispatch_clear_selection(&self) {
+        let mut ctrl = self.controller.lock().unwrap();
+        if let Some(sel) = ctrl.selection_mut() {
+            sel.clear();
+        }
+    }
+
     pub fn dispatch_activate(&self, index: usize) {
         let (tab_id, path, kind) = {
             let ctrl = self.controller.lock().unwrap();
             let tab_id = ctrl.active_tab_id();
-            let entry = match ctrl.snapshot().and_then(|s| s.entries.get(index)) {
+            let entry = match resolve_index(&ctrl, index) {
                 Some(e) => e.clone(),
                 None => return,
             };
@@ -214,28 +224,35 @@ impl CommandDispatcher {
         }
     }
 
-    pub fn dispatch_new_folder(&self) {
+    pub fn dispatch_new_folder_named(&self, name: &str) {
+        if name.is_empty() {
+            return;
+        }
         let parent = match self.controller.lock().unwrap().current_location().cloned() {
             Some(l) => l,
             None => return,
         };
         self.send(WorkerCommand::NewFolder {
             parent,
-            name: "New folder".into(),
+            name: name.to_string(),
         });
     }
 
-    pub fn dispatch_rename(&self, index: usize) {
-        let (path, new_name) = {
+    pub fn dispatch_rename_to(&self, index: usize, new_name: &str) {
+        if new_name.is_empty() {
+            return;
+        }
+        let path = {
             let ctrl = self.controller.lock().unwrap();
-            let entry = match ctrl.snapshot().and_then(|s| s.entries.get(index)) {
-                Some(e) => e.clone(),
+            match resolve_index(&ctrl, index).map(|e| e.path.clone()) {
+                Some(p) => p,
                 None => return,
-            };
-            let name = entry.name.clone();
-            (entry.path, format!("{}-renamed", name))
+            }
         };
-        self.send(WorkerCommand::Rename { path, new_name });
+        self.send(WorkerCommand::Rename {
+            path,
+            new_name: new_name.to_string(),
+        });
     }
 
     pub fn dispatch_sort(&self, column_index: usize) {
@@ -250,16 +267,23 @@ impl CommandDispatcher {
             let mut ctrl = self.controller.lock().unwrap();
             ctrl.set_sort(column);
         }
-        let (tab_id, location) = {
-            let ctrl = self.controller.lock().unwrap();
-            (
-                ctrl.active_tab_id(),
-                ctrl.current_location()
-                    .cloned()
-                    .unwrap_or_else(initial_location),
-            )
-        };
-        // Refresh so the newly sorted snapshot is shown.
-        self.request_enumeration(tab_id, location);
+        // Sorting is a pure view-model operation; no filesystem re-read needed.
     }
+
+    pub fn item_name(&self, index: usize) -> String {
+        let ctrl = self.controller.lock().unwrap();
+        resolve_index(&ctrl, index)
+            .map(|e| e.name.clone())
+            .unwrap_or_default()
+    }
+}
+
+fn resolve_index(ctrl: &AppController, index: usize) -> Option<&kova_core::domain::FileEntry> {
+    let snapshot = ctrl.snapshot()?;
+    let idx = if index == usize::MAX {
+        ctrl.primary_selection().unwrap_or(0)
+    } else {
+        index
+    };
+    snapshot.entries.get(idx)
 }

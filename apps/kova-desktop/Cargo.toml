@@ -17,8 +17,9 @@ tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 
 [build-dependencies]
-slint-build = "1.11"
+slint-build = "1.13"
 
 [[bin]]
 name = "kova-desktop"
 path = "src/main.rs"
+

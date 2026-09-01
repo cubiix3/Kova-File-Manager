@@ -45,7 +45,7 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "fs", "macros
 tokio-util = "0.7"
 
 # UI
-slint = { version = "1.11", features = ["std"] }
+slint = { version = "1.13", features = ["std"] }
 
 # Error handling
 thiserror = "2"
@@ -61,3 +61,4 @@ bitflags = "2"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+
