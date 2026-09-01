@@ -11,3 +11,6 @@ Thumbs.db
 
 .rivet_temp/
 *.bat
+
+# Machine-specific cargo linker overrides must never be committed
+/.cargo/
