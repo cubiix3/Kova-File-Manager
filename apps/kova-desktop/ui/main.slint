@@ -1,4 +1,22 @@
-import { LineEdit, ScrollView } from "std-widgets.slint";
+import { LineEdit, ListView } from "std-widgets.slint";
+
+// Theme tokens — central place for colors and metrics.
+export global Theme {
+    out property <color> window-bg: #1e1e1e;
+    out property <color> surface: #252526;
+    out property <color> surface-alt: #2a2d2e;
+    out property <color> surface-hover: #3a3d3e;
+    out property <color> surface-pressed: #1e90ff;
+    out property <color> surface-disabled: #333333;
+    out property <color> selection: #094771;
+    out property <color> border: #3c3c3c;
+    out property <color> text-primary: #f0f0f0;
+    out property <color> text-secondary: #d0d0d0;
+    out property <color> text-muted: #a0a0a0;
+    out property <color> text-disabled: #666666;
+    out property <color> accent: #1e90ff;
+    out property <color> statusbar-bg: #2d2d30;
+}
 
 export struct FileListItem {
     name: string,
@@ -37,25 +55,82 @@ export global AppState {
     in-out property <string> dialog_title: "";
     in-out property <string> dialog_value: "";
 
-    pure callback request_navigate(string);
-    pure callback request_back();
-    pure callback request_forward();
-    pure callback request_parent();
-    pure callback request_refresh();
-    pure callback request_new_tab();
-    pure callback request_close_tab(int);
-    pure callback request_switch_tab(int);
-    pure callback request_select(int);
-    pure callback request_toggle(int);
-    pure callback request_range(int);
-    pure callback request_select_all();
-    pure callback request_clear_selection();
-    pure callback request_activate(int);
-    pure callback request_new_folder();
-    pure callback request_rename(int);
-    pure callback request_dialog_confirm(string);
-    pure callback request_dialog_cancel();
-    pure callback request_sort(int);
+    callback request_navigate(string);
+    callback request_back();
+    callback request_forward();
+    callback request_parent();
+    callback request_refresh();
+    callback request_new_tab();
+    callback request_close_tab(int);
+    callback request_switch_tab(int);
+    callback request_select(int);
+    callback request_toggle(int);
+    callback request_range(int);
+    callback request_select_all();
+    callback request_clear_selection();
+    callback request_activate(int);
+    callback request_new_folder();
+    callback request_rename(int);
+    callback request_dialog_confirm(string);
+    callback request_dialog_cancel();
+    callback request_sort(int);
+}
+
+// Layout metrics (single source of truth for the window skeleton).
+export global Metrics {
+    out property <length> tabs-height: 34px;
+    out property <length> toolbar-height: 40px;
+    out property <length> statusbar-height: 24px;
+    out property <length> sidebar-width: 180px;
+    out property <length> header-height: 28px;
+}
+
+component ToolButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 26px;
+    width: 30px;
+    border-radius: 4px;
+    background: !enabled ? Theme.surface-disabled : (btn-ta.pressed ? Theme.accent : (btn-ta.has-hover ? Theme.surface-hover : Theme.surface-alt));
+
+    Text {
+        text: root.text;
+        color: enabled ? Theme.text-primary : Theme.text-disabled;
+        font-size: 14px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    btn-ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 26px;
+    width: 96px;
+    border-radius: 4px;
+    background: !enabled ? Theme.surface-disabled : (btn-ta.pressed ? Theme.accent : (btn-ta.has-hover ? Theme.surface-hover : Theme.surface-alt));
+
+    Text {
+        text: root.text;
+        color: enabled ? Theme.text-primary : Theme.text-disabled;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    btn-ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
 }
 
 component SidebarButton inherits Rectangle {
@@ -64,20 +139,20 @@ component SidebarButton inherits Rectangle {
     in property <bool> selected: false;
 
     height: 28px;
-    background: selected ? #2a2d2e : transparent;
+    background: selected ? Theme.selection : (side-ta.pressed ? Theme.accent : (side-ta.has-hover ? Theme.surface-hover : transparent));
     border-radius: 4px;
 
     HorizontalLayout {
         padding-left: 12px;
         Text {
             text: root.text;
-            color: #d0d0d0;
+            color: selected ? Theme.text-primary : Theme.text-secondary;
             font-size: 13px;
             vertical-alignment: center;
         }
     }
 
-    TouchArea {
+    side-ta := TouchArea {
         clicked => { if root.target != "" { AppState.request_navigate(root.target); } }
     }
 }
@@ -87,23 +162,26 @@ component HeaderCell inherits Rectangle {
     in property <int> column;
 
     height: 100%;
+    background: header-ta.pressed ? Theme.accent : (header-ta.has-hover ? Theme.surface-hover : transparent);
+
     HorizontalLayout {
         padding-left: 8px;
         spacing: 4px;
         Text {
             text: root.text;
-            color: #a0a0a0;
+            color: Theme.text-muted;
             font-size: 12px;
             vertical-alignment: center;
         }
         Text {
             text: AppState.sort_column == root.column ? (AppState.sort_ascending ? "▲" : "▼") : "";
-            color: #a0a0a0;
+            color: Theme.text-muted;
             font-size: 10px;
             vertical-alignment: center;
         }
     }
-    TouchArea {
+
+    header-ta := TouchArea {
         clicked => { AppState.request_sort(root.column); }
     }
 }
@@ -118,7 +196,7 @@ component NameDialog inherits Rectangle {
     Rectangle {
         width: 400px;
         height: 140px;
-        background: #2a2d2e;
+        background: Theme.surface-alt;
         border-radius: 8px;
 
         VerticalLayout {
@@ -127,7 +205,7 @@ component NameDialog inherits Rectangle {
 
             Text {
                 text: root.title;
-                color: #ffffff;
+                color: Theme.text-primary;
                 font-size: 14px;
                 font-weight: 600;
             }
@@ -144,18 +222,18 @@ component NameDialog inherits Rectangle {
                 Rectangle {
                     width: 80px;
                     height: 28px;
-                    background: #333333;
+                    background: cancel-ta.pressed ? Theme.accent : (cancel-ta.has-hover ? Theme.surface-hover : Theme.surface-disabled);
                     border-radius: 4px;
-                    Text { text: "Cancel"; color: #d0d0d0; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { clicked => { AppState.request_dialog_cancel(); } }
+                    Text { text: "Cancel"; color: Theme.text-secondary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    cancel-ta := TouchArea { clicked => { AppState.request_dialog_cancel(); } }
                 }
                 Rectangle {
                     width: 80px;
                     height: 28px;
-                    background: #007acc;
+                    background: ok-ta.pressed ? Theme.accent : (ok-ta.has-hover ? Theme.surface-hover : #007acc);
                     border-radius: 4px;
-                    Text { text: "OK"; color: #ffffff; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { clicked => { AppState.request_dialog_confirm(AppState.dialog_value); } }
+                    Text { text: "OK"; color: Theme.text-primary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    ok-ta := TouchArea { clicked => { AppState.request_dialog_confirm(AppState.dialog_value); } }
                 }
             }
         }
@@ -166,227 +244,252 @@ export component MainWindow inherits Window {
     title: "Kova";
     min-width: 720px;
     min-height: 480px;
-    background: #1e1e1e;
+    background: Theme.window-bg;
+    forward-focus: list-scope;
 
-    GridLayout {
-        Row {
-            tabs := HorizontalLayout {
-                padding: 4px;
-                spacing: 4px;
-                height: 34px;
+    // Window skeleton — absolute placement against the window, so every
+    // region has a well-defined, non-negotiable geometry.
+    tabs := HorizontalLayout {
+        y: 0;
+        x: 0;
+        width: parent.width;
+        height: Metrics.tabs-height;
+        padding: 4px;
+        padding-left: 8px;
+        spacing: 4px;
 
-                for item[idx] in AppState.tabs: Rectangle {
-                    width: 140px;
-                    height: 26px;
-                    background: idx == AppState.active_tab ? #2a2d2e : #252526;
-                    border-radius: 4px;
+        for item[idx] in AppState.tabs: Rectangle {
+            width: 150px;
+            height: 26px;
+            background: idx == AppState.active_tab ? Theme.selection : (tab-ta.pressed ? Theme.accent : (tab-ta.has-hover ? Theme.surface-hover : Theme.surface));
+            border-radius: 4px;
 
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 4px;
-                        spacing: 6px;
-                        Text {
-                            text: item;
-                            color: idx == AppState.active_tab ? #ffffff : #b0b0b0;
-                            font-size: 12px;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                    }
-
-                    TouchArea {
-                        clicked => { AppState.request_switch_tab(idx); }
-                        double-clicked => { AppState.request_close_tab(idx); }
-                    }
-                }
-
-                Rectangle {
-                    width: 28px;
-                    height: 26px;
-                    background: #2a2d2e;
-                    border-radius: 4px;
-                    Text { text: "+"; color: #ffffff; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { clicked => { AppState.request_new_tab(); } }
-                }
+            tab-ta := TouchArea {
+                clicked => { AppState.request_switch_tab(idx); }
             }
-        }
 
-        Row {
-            toolbar := HorizontalLayout {
-                padding: 6px;
-                spacing: 6px;
-                height: 40px;
-
-                Rectangle {
-                    width: 28px; height: 26px; background: AppState.can_go_back ? #2a2d2e : #333333; border-radius: 4px;
-                    Text { text: "←"; color: AppState.can_go_back ? #ffffff : #666666; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { clicked => { AppState.request_back(); } }
-                }
-                Rectangle {
-                    width: 28px; height: 26px; background: AppState.can_go_forward ? #2a2d2e : #333333; border-radius: 4px;
-                    Text { text: "→"; color: AppState.can_go_forward ? #ffffff : #666666; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { clicked => { AppState.request_forward(); } }
-                }
-                Rectangle {
-                    width: 28px; height: 26px; background: AppState.can_go_parent ? #2a2d2e : #333333; border-radius: 4px;
-                    Text { text: "↑"; color: AppState.can_go_parent ? #ffffff : #666666; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { clicked => { AppState.request_parent(); } }
-                }
-                Rectangle {
-                    width: 28px; height: 26px; background: #2a2d2e; border-radius: 4px;
-                    Text { text: "↻"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { clicked => { AppState.request_refresh(); } }
-                }
-
-                address := Rectangle {
-                    height: 26px;
-                    background: #2a2d2e;
-                    border-radius: 4px;
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        LineEdit {
-                            text <=> AppState.address_path;
-                            accepted => { AppState.request_navigate(AppState.address_path); }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    width: 90px; height: 26px; background: #2a2d2e; border-radius: 4px;
-                    Text { text: "New Folder"; color: #ffffff; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { clicked => { AppState.request_new_folder(); } }
-                }
-            }
-        }
-
-        Row {
             HorizontalLayout {
-                sidebar := Rectangle {
-                    width: 160px;
-                    background: #252526;
-                    VerticalLayout {
-                        padding: 8px;
-                        spacing: 2px;
+                padding-left: 10px;
+                padding-right: 4px;
+                spacing: 4px;
 
-                        Text { text: "Favorites"; color: #909090; font-size: 11px; font-weight: 600; }
-                        SidebarButton { text: "Home"; target: AppState.home_path; }
-                        SidebarButton { text: "Desktop"; target: AppState.desktop_path; }
-                        SidebarButton { text: "Documents"; target: AppState.documents_path; }
-                        SidebarButton { text: "Downloads"; target: AppState.downloads_path; }
+                Text {
+                    text: item;
+                    color: idx == AppState.active_tab ? Theme.text-primary : Theme.text-secondary;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
 
-                        Rectangle { height: 12px; }
+                Rectangle {
+                    width: 16px;
+                    height: 18px;
+                    background: close-ta.has-hover ? Theme.surface-hover : transparent;
+                    border-radius: 3px;
+                    Text {
+                        text: "×";
+                        color: idx == AppState.active_tab ? Theme.text-secondary : Theme.text-muted;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    close-ta := TouchArea {
+                        clicked => { AppState.request_close_tab(idx); }
+                    }
+                }
+            }
+        }
 
-                        Text { text: "Drives"; color: #909090; font-size: 11px; font-weight: 600; }
-                        for drive[idx] in AppState.drives: SidebarButton {
-                            text: drive.name;
-                            target: drive.path;
-                        }
+        Rectangle {
+            width: 28px;
+            height: 26px;
+            background: new-tab-ta.pressed ? Theme.accent : (new-tab-ta.has-hover ? Theme.surface-hover : Theme.surface-alt);
+            border-radius: 4px;
+            Text { text: "+"; color: Theme.text-primary; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+            new-tab-ta := TouchArea { clicked => { AppState.request_new_tab(); } }
+        }
+    }
+
+    toolbar := HorizontalLayout {
+        y: Metrics.tabs-height;
+        x: 0;
+        width: parent.width;
+        height: Metrics.toolbar-height;
+        padding: 6px;
+        padding-left: 8px;
+        spacing: 6px;
+
+        ToolButton { text: "←"; enabled: AppState.can_go_back; clicked => { AppState.request_back(); } }
+        ToolButton { text: "→"; enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } }
+        ToolButton { text: "↑"; enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } }
+        ToolButton { text: "↻"; enabled: true; clicked => { AppState.request_refresh(); } }
+
+        address := Rectangle {
+            height: 26px;
+            background: Theme.surface-alt;
+            border-radius: 4px;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                LineEdit {
+                    text <=> AppState.address_path;
+                    accepted => { AppState.request_navigate(AppState.address_path); }
+                }
+            }
+        }
+
+        TextButton { text: "New Folder"; clicked => { AppState.request_new_folder(); } }
+    }
+
+    // Content zone.
+    content := Rectangle {
+        y: Metrics.tabs-height + Metrics.toolbar-height;
+        x: 0;
+        width: parent.width;
+        height: parent.height - Metrics.tabs-height - Metrics.toolbar-height - Metrics.statusbar-height;
+
+        // Sidebar.
+        sidebar := Rectangle {
+            x: 0;
+            y: 0;
+            width: Metrics.sidebar-width;
+            height: parent.height;
+            background: Theme.surface;
+            VerticalLayout {
+                padding: 8px;
+                spacing: 2px;
+
+                Text { text: "Favorites"; color: Theme.text-muted; font-size: 11px; font-weight: 600; height: 16px; }
+                SidebarButton { text: "Home"; target: AppState.home_path; }
+                SidebarButton { text: "Desktop"; target: AppState.desktop_path; }
+                SidebarButton { text: "Documents"; target: AppState.documents_path; }
+                SidebarButton { text: "Downloads"; target: AppState.downloads_path; }
+
+                Rectangle { height: 12px; }
+
+                Text { text: "Drives"; color: Theme.text-muted; font-size: 11px; font-weight: 600; height: 16px; }
+                for drive[idx] in AppState.drives: SidebarButton {
+                    text: drive.name;
+                    target: drive.path;
+                }
+            }
+        }
+
+        // File list column.
+        file-list := Rectangle {
+            x: Metrics.sidebar-width;
+            y: 0;
+            width: parent.width - Metrics.sidebar-width;
+            height: parent.height;
+            background: Theme.window-bg;
+
+            Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: Metrics.header-height;
+                background: Theme.surface;
+                header := HorizontalLayout {
+                    height: 100%;
+                    HeaderCell { text: "Name"; column: 0; width: 320px; }
+                    HeaderCell { text: "Type"; column: 1; width: 120px; }
+                    HeaderCell { text: "Size"; column: 2; width: 90px; }
+                    HeaderCell { text: "Modified"; column: 3; width: 140px; }
+                }
+            }
+
+            list-scope := FocusScope {
+                x: 0;
+                y: Metrics.header-height;
+                width: parent.width;
+                height: parent.height - Metrics.header-height;
+
+                key-pressed(event) => {
+                    if event.text == "a" && event.modifiers.control {
+                        AppState.request_select_all();
+                        accept
+                    } else if event.text == Key.F5 {
+                        AppState.request_refresh();
+                        accept
+                    } else if event.text == Key.F2 {
+                        AppState.request_rename(-1);
+                        accept
+                    } else if event.text == Key.Return {
+                        AppState.request_activate(-1);
+                        accept
+                    } else if event.text == Key.LeftArrow && event.modifiers.alt {
+                        AppState.request_back();
+                        accept
+                    } else if event.text == Key.RightArrow && event.modifiers.alt {
+                        AppState.request_forward();
+                        accept
+                    } else if event.text == Key.UpArrow && event.modifiers.alt {
+                        AppState.request_parent();
+                        accept
+                    } else if event.text == "l" && event.modifiers.control {
+                        AppState.request_navigate(AppState.address_path);
+                        accept
+                    } else {
+                        reject
                     }
                 }
 
-                file-list := Rectangle {
-                    background: #1e1e1e;
-                    VerticalLayout {
-                        padding: 0;
-                        Rectangle {
-                            height: 28px;
-                            background: #252526;
-                            header := HorizontalLayout {
-                                height: 100%;
-                                HeaderCell { text: "Name"; column: 0; width: 45%; }
-                                HeaderCell { text: "Type"; column: 1; width: 20%; }
-                                HeaderCell { text: "Size"; column: 2; width: 15%; }
-                                HeaderCell { text: "Modified"; column: 3; width: 20%; }
-                            }
+                ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    for item[idx] in AppState.files: Rectangle {
+                        height: 26px;
+                        background: item.selected ? Theme.selection : (row-ta.pressed ? Theme.accent : (row-ta.has-hover ? Theme.surface-alt : transparent));
+
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            Text { text: item.name; color: item.selected ? Theme.text-primary : Theme.text-secondary; font-size: 13px; width: 320px; vertical-alignment: center; overflow: elide; }
+                            Text { text: item.type_name; color: item.selected ? Theme.text-primary : Theme.text-muted; font-size: 12px; width: 120px; vertical-alignment: center; overflow: elide; }
+                            Text { text: item.size_text; color: item.selected ? Theme.text-primary : Theme.text-muted; font-size: 12px; width: 90px; vertical-alignment: center; overflow: elide; }
+                            Text { text: item.modified_text; color: item.selected ? Theme.text-primary : Theme.text-muted; font-size: 12px; width: 140px; vertical-alignment: center; overflow: elide; }
                         }
 
-                        FocusScope {
-                            width: 100%;
-                            height: 100%;
-
-                            key-pressed(event) => {
-                                if event.text == "a" && event.modifiers.control {
-                                    AppState.request_select_all();
-                                    accept
-                                } else if event.text == "f5" {
-                                    AppState.request_refresh();
-                                    accept
-                                } else if event.text == "f2" {
-                                    AppState.request_rename(-1);
-                                    accept
-                                } else if event.text == "return" || event.text == "enter" {
-                                    AppState.request_activate(-1);
-                                    accept
-                                } else if event.text == "left" && event.modifiers.alt {
-                                    AppState.request_back();
-                                    accept
-                                } else if event.text == "right" && event.modifiers.alt {
-                                    AppState.request_forward();
-                                    accept
-                                } else if event.text == "up" && event.modifiers.alt {
-                                    AppState.request_parent();
-                                    accept
-                                } else if event.text == "l" && event.modifiers.control {
-                                    AppState.request_navigate(AppState.address_path);
-                                    accept
-                                } else {
-                                    reject
-                                }
-                            }
-
-                            ScrollView {
-                                height: 100%;
-                                VerticalLayout {
-                                    for item[idx] in AppState.files: Rectangle {
-                                        height: 26px;
-                                        background: item.selected ? #094771 : transparent;
-
-                                        HorizontalLayout {
-                                            padding-left: 8px;
-                                            Text { text: item.name; color: #d0d0d0; font-size: 13px; width: 45%; vertical-alignment: center; overflow: elide; }
-                                            Text { text: item.type_name; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
-                                            Text { text: item.size_text; color: #a0a0a0; font-size: 12px; width: 15%; vertical-alignment: center; }
-                                            Text { text: item.modified_text; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
-                                        }
-
-                                        TouchArea {
-                                            pointer-event(event) => {
-                                                if event.kind == PointerEventKind.down {
-                                                    if event.modifiers.control {
-                                                        AppState.request_toggle(idx);
-                                                    } else if event.modifiers.shift {
-                                                        AppState.request_range(idx);
-                                                    } else {
-                                                        AppState.request_select(idx);
-                                                    }
-                                                }
-                                            }
-                                            double-clicked => { AppState.request_activate(idx); }
-                                        }
+                        row-ta := TouchArea {
+                            pointer-event(event) => {
+                                if event.kind == PointerEventKind.down {
+                                    // Keep keyboard focus on the list scope so
+                                    // F2/F5/Enter/Ctrl+A keep working after clicks.
+                                    list-scope.focus();
+                                    if event.modifiers.control {
+                                        AppState.request_toggle(idx);
+                                    } else if event.modifiers.shift {
+                                        AppState.request_range(idx);
+                                    } else {
+                                        AppState.request_select(idx);
                                     }
                                 }
                             }
+                            double-clicked => { AppState.request_activate(idx); }
                         }
                     }
                 }
             }
         }
+    }
 
-        Row {
-            Rectangle {
-                height: 24px;
-                background: #007acc;
-                HorizontalLayout {
-                    padding: 4px;
-                    height: 100%;
-                    Text {
-                        text: AppState.status_text;
-                        color: #ffffff;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-                }
+    // Status bar — full width, pinned to the bottom.
+    statusbar := Rectangle {
+        y: parent.height - Metrics.statusbar-height;
+        x: 0;
+        width: parent.width;
+        height: Metrics.statusbar-height;
+        background: Theme.statusbar-bg;
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            height: 100%;
+            Text {
+                text: AppState.status_text;
+                color: Theme.text-secondary;
+                font-size: 12px;
+                vertical-alignment: center;
             }
         }
     }
