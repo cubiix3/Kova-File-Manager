@@ -245,3 +245,73 @@ Every failed operation must produce a visible status / info message. The UI must
 ## 9. License note
 
 Files is MIT-licensed. Concepts (callback wiring, selection state machine, navigation stack, sidebar item invocation) are adapted conceptually. No substantial code blocks are copied into Kova. Any future direct reuse of code from Files must retain the MIT copyright notice and document the source.
+
+---
+
+## 10. Runtime rescue findings (verified 2026-09)
+
+These are the root causes found while rescuing the Kova desktop runtime,
+with the Files concept that each fix corresponds to.
+
+### R1. UI updates from a worker thread
+
+Kova problem: `update_ui` was called from a tokio task. Slint property
+access off the UI thread panics or silently drops, so tabs, address bar
+and file model never rendered - the app looked like an empty prototype.
+
+Files reference: all WPF/WinUI updates happen on the dispatcher thread
+(`DispatcherQueue`, `CoreDispatcher`); background enumeration posts
+results through observable collections bound on the UI thread.
+
+Kova fix: worker events are forwarded into a `std::sync::mpsc` channel
+that a `slint::Timer` drains on the UI thread (`UI-thread event pump`).
+
+### R2. Percentages inside layouts resolve against the window
+
+Kova problem: `width: 100%` on sidebar buttons inflated the sidebar's
+preferred width to the full window, and the GridLayout content row
+(height: 100% of the window) overflowed the window. The whole file list
+was laid out past the right window edge; the status bar was below the
+window. The list looked empty although the model had 97 entries.
+
+Files reference: WinUI uses star-sizing (`Grid ColumnDefinition
+Width="*"`) which is always relative to the layout container.
+
+Kova fix: absolute window skeleton (tabs/toolbar/content/status placed
+with x/y/width/height against `parent.width/height`), fixed pixel
+columns, no `width: 100%` inside layouts, fixed heights for sidebar
+section headers (Texts otherwise absorb all extra vertical space).
+
+### R3. Recreating models breaks double-click
+
+Kova problem: every selection click rebuilt the whole files model.
+Slint recreated all row delegates, so the second click of a double-click
+landed on a new `TouchArea` and `double-clicked` never fired - folders
+could not be opened.
+
+Files reference: `ItemManipulationModel` selection updates mutate
+collection items in place instead of replacing the collection.
+
+Kova fix: keep one `VecModel` per list installed for the app lifetime;
+on update, compare rows and use `set_row_data` (identity preserved).
+
+### R4. Keyboard focus after mouse clicks
+
+Kova problem: F2/F5/Enter/Ctrl+A never fired because the list
+`FocusScope` never had keyboard focus; row clicks did not move focus.
+
+Files reference: `BaseLayoutPage` explicitly calls `FocusFileList`
+after operations.
+
+Kova fix: `forward-focus` on the window plus `list-scope.focus()` in
+the row pointer handler, so keyboard shortcuts work after clicks.
+
+### R5. Slint API verification process
+
+The previous agent invented `event.key == Key.A` which does not exist
+in Slint 1.13.1 (the project did not compile). Verified against the
+registry sources: `KeyEvent { text, modifiers, repeat }`, the `Key`
+namespace (Key.Return, Key.F5, Key.LeftArrow, ...), and that winit
+removes Ctrl before computing `logical_key`, so Ctrl+A arrives as
+`event.text == "a"` with `modifiers.control`. Slint's own widgets
+(`combobox-base.slint`, `listview.slint`) use `event.text == Key.X`.
