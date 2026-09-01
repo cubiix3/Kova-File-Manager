@@ -6,36 +6,38 @@ estimates or marketing numbers.
 ## Environment
 
 - OS: Windows 11 24H2 (Build 26200.9278)
-- CPU/ RAM: (to be filled after measurement)
+- CPU/ RAM: (host machine)
 - Disk: local NVMe / SSD
 - Rust: rustc 1.95.0 stable-x86_64-pc-windows-msvc
 - Build: `--release`
 
 ## Startup Time
 
-| Run | Window Visible (ms) |
-|-----|---------------------|
-| 1   | TBD                 |
-| 2   | TBD                 |
-| 3   | TBD                 |
-
-Measured with `tracing` span around `MainWindow::new()` through first paint
-event.
+Not measured in this baseline. The app launches and shows a window; a precise
+"first paint" measurement is deferred to a later milestone when Slint exposes
+a reliable paint event or we add an internal timer span.
 
 ## Directory Enumeration
 
-| Entries | Request → Result (ms) |
-|---------|------------------------|
-| 100     | TBD                    |
-| 1,000   | TBD                    |
-| 10,000  | TBD                    |
+Measured with `crates/kova-ops/src/enumerate.rs::enumerate_directory` on
+synthetic flat directories under `%TEMP%\kova-perf\`. Five runs per size;
+reported values in milliseconds.
 
-Tests use synthetic directories created under `%TEMP%\kova-perf\`. Reported
-after M0 runtime verification.
+| Entries | min (ms) | median (ms) | max (ms) |
+|---------|---------:|------------:|---------:|
+| 100     |     0.47 |        0.52 |     1.20 |
+| 1,000   |     8.83 |        9.30 |     9.49 |
+| 10,000  |    83.06 |       91.71 |    94.63 |
+
+Command used:
+
+```powershell
+.\scripts\cargo-msvc.ps1 cargo test --workspace -- --ignored enumerate_directory_performance_baseline --nocapture
+```
 
 ## UI
 
-- File list uses Slint `ListView`, which virtualizes items.
+- File list uses Slint `ScrollView` over a model of already-loaded entries.
 - No per-frame icon decoding.
 - Sorting and selection run in core on the main thread but operate only on the
   already-loaded snapshot; they do not touch disk.

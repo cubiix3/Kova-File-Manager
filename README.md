@@ -2,7 +2,7 @@
 
 Kova is an experimental, open-source, native-first file manager for Windows.
 
-> **Status:** Early development / M0 foundation.
+> **Status:** M0 foundation — complete with deferred UX items.
 
 ## Goals
 
@@ -16,13 +16,19 @@ Kova is an experimental, open-source, native-first file manager for Windows.
 - Basic directory enumeration (off the UI thread).
 - Navigation: back, forward, parent, direct path entry, refresh.
 - Tabs: create, switch, close with independent state.
-- Sorting by name, type, size, modified date.
-- Selection model (single, multi, range, select all, clear).
-- New folder and rename in a safe temporary sandbox.
-- Windows known folder resolution for the initial location.
-- Keyboard shortcuts: Enter, Arrow keys, Ctrl+A, F2, Ctrl+L, Alt+Left/Right/Up, F5.
+- Sorting by name, type, size, modified date with header indicators.
+- Selection model (single, multi via Ctrl, range via Shift, select all, clear).
+- New folder and rename through a simple in-app dialog.
+- Windows known folder resolution for the initial location and sidebar.
+- Dynamic local drive discovery in the sidebar.
+- File open via the Windows default handler (`ShellExecuteExW`).
+- Stale-result protection using per-tab generation/request IDs.
+- Keyboard shortcuts wired in Slint: F5 (refresh), F2 (rename selected),
+  Ctrl+A (select all), Enter (open selected), Alt+Left/Right/Up (back/forward/parent),
+  Ctrl+L (focus address bar). Focus must be in the file list for the global
+  shortcuts to trigger.
 
-## What Does Not Work Yet
+## What Does Not Work Yet / Deferred
 
 - Global search (MFT/USN/everything-style search).
 - Preview pane, split view, Git integration.
@@ -30,6 +36,7 @@ Kova is an experimental, open-source, native-first file manager for Windows.
 - Bulk copy/move/delete; only safe sandbox tests for these are prepared.
 - Real Windows shell icons / thumbnails; generic icons are used with a well-defined interface for future replacement.
 - Custom window chrome, auto updater, telemetry, plugins.
+- Rich keyboard focus management: shortcuts depend on the file-list focus scope.
 
 ## Build Prerequisites
 
@@ -39,18 +46,20 @@ Kova is an experimental, open-source, native-first file manager for Windows.
 
 ## Build Commands
 
+Use the provided helper so the MSVC environment is set automatically:
+
 ```powershell
-cargo fmt --all -- --check
-cargo check --workspace
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
-cargo build --workspace --release
+.\scripts\cargo-msvc.ps1 cargo fmt --all -- --check
+.\scripts\cargo-msvc.ps1 cargo check --workspace
+.\scripts\cargo-msvc.ps1 cargo clippy --workspace --all-targets --all-features -- -D warnings
+.\scripts\cargo-msvc.ps1 cargo test --workspace
+.\scripts\cargo-msvc.ps1 cargo build --workspace --release
 ```
 
 ## Run
 
 ```powershell
-cargo run --bin kova-desktop
+.\scripts\cargo-msvc.ps1 cargo run --bin kova-desktop
 ```
 
 ## License

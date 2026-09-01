@@ -14,12 +14,13 @@ selection, and safe file operations in a sandbox.
 - Directory enumeration off the UI thread.
 - Back / Forward / Parent / Refresh / direct path navigation.
 - Tabs with independent history.
-- Sorting by Name, Type, Size, Modified in both directions.
-- Selection: single, ctrl multi, shift range, select all, clear.
-- New Folder and Rename (in tests through a sandbox guard).
-- Windows known folder resolution for the initial location.
-- Keyboard shortcuts wired in architecture: Enter, Arrows, Ctrl+A, F2, Ctrl+L,
-  Alt+Left/Right/Up, F5 (Slint focus handling is not fully tuned yet).
+- Sorting by Name, Type, Size, Modified in both directions with header indicators.
+- Selection: single, Ctrl multi-select, Shift range-select, select all, clear.
+- New Folder and Rename through an in-app dialog (empty names rejected).
+- Windows known folder resolution for the initial location and sidebar.
+- Dynamic local drive enumeration in the sidebar.
+- File open via `ShellExecuteExW`.
+- Stale async result protection via per-tab generation IDs.
 
 ## Known Limitations
 
@@ -28,6 +29,7 @@ selection, and safe file operations in a sandbox.
 - No global search.
 - No preview pane.
 - No custom context menu.
+- Keyboard shortcuts require focus in the file-list scope.
 - No session persistence.
 
 ## Roadmap (post-M0)

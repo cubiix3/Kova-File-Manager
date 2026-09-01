@@ -31,8 +31,9 @@ Current `unsafe` usage:
 ## Destructive Operations
 
 For M0 only `New Folder` and `Rename` are exposed in the UI, and they operate on
-the current directory. Integration tests use `TestSandbox` which enforces that
-mutating targets live under a unique temporary root.
+the current directory. The UI dialog rejects empty names. Integration tests use
+`TestSandbox` which enforces that mutating targets live under a unique temporary
+root.
 
 Copy / Move / Delete are **not** exposed in the product UI. They are prepared
 as core functions but will only be enabled once they use Windows
@@ -58,3 +59,11 @@ All mutating integration tests:
 1. Create a unique directory under `%TEMP%\kova-tests\`.
 2. Verify the target path is inside that root before mutating.
 3. Clean up after the test.
+
+## Known Limitations
+
+- The sandbox guard rejects paths outside the test root but does not yet defend
+  against symlink/junction escape during traversal. This is acceptable for M0
+  because mutating operations are limited to `New Folder` / `Rename` in a
+  single user-selected directory and the guard is documented. A proper
+  traversal-aware guard is planned for the milestone that adds Copy/Move/Delete.

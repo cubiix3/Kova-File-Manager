@@ -13,17 +13,19 @@
 <repo-root>\
 ├── Cargo.toml
 ├── crates/
-│   ├── kova-core          — platform-independent domain logic
-│   ├── kova-platform-windows — Windows-specific APIs
-│   └── kova-ops           — filesystem operation execution
+│   ├── kova-core          → platform-independent domain logic
+│   ├── kova-platform-windows → Windows-specific APIs
+│   └── kova-ops           → filesystem operation execution
 ├── apps/
-│   └── kova-desktop       — Slint desktop application
+│   └── kova-desktop       → Slint desktop application
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── PRODUCT.md
 │   ├── SECURITY_AND_DATA_SAFETY.md
 │   ├── PERFORMANCE_BASELINE.md
 │   └── M0_REPORT.md
+├── scripts/
+│   └── cargo-msvc.ps1     → helper that loads the VS dev shell before cargo
 └── tests/
     └── fixtures/
 ```
@@ -43,7 +45,7 @@ Contains no `unsafe`, no Slint, no Win32 calls. Unit-testable in isolation.
 
 - Known folder resolution via `SHGetKnownFolderPath`
 - Path canonicalization and error classification
-- Logical drive enumeration
+- Logical drive enumeration (`GetLogicalDriveStringsW` / `GetDriveTypeW`)
 - Default application launching via `ShellExecuteExW`
 
 All `unsafe` blocks have a `SAFETY:` comment.
@@ -103,6 +105,12 @@ UI state update
 ## Safety
 
 See `docs/SECURITY_AND_DATA_SAFETY.md`.
+
+## Build Helper
+
+`scripts/cargo-msvc.ps1` locates Visual Studio 2022, imports the `vcvars64.bat`
+environment, and runs the requested cargo command. This removes the need to
+start a dedicated VS developer shell.
 
 ## Not in M0
 
