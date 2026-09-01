@@ -3,8 +3,9 @@ mod bridges;
 
 use app_state::AppController;
 use bridges::CommandDispatcher;
-use kova_core::domain::{KovaEvent, Location, LocationInput, TabId};
-use kova_ops::worker::{GenerationCounter, WorkerCommand, spawn_worker};
+use kova_core::domain::{KovaEvent, LocationInput};
+use kova_ops::worker::{WorkerCommand, spawn_worker};
+use kova_platform_windows::known_folders::{KnownFolder, resolve_known_folder};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -32,14 +33,17 @@ async fn main() {
     let dispatcher = CommandDispatcher::new(
         Arc::clone(&app_controller),
         cmd_tx.clone(),
-        GenerationCounter::default(),
+        Default::default(),
     );
 
     let app = MainWindow::new().unwrap();
     let ui = app.as_weak();
 
     // Wire UI callbacks.
-    wire_callbacks(ui.clone(), dispatcher);
+    wire_callbacks(ui.clone(), dispatcher.clone());
+
+    // Populate known-folder sidebar targets.
+    set_known_folder_paths(&ui);
 
     // Initial load.
     let start_tab = app_controller.lock().unwrap().active_tab_id();
@@ -49,11 +53,12 @@ async fn main() {
         .current_location()
         .cloned()
         .unwrap_or(initial);
-    request_enumeration(start_tab, start_loc, &cmd_tx);
+    dispatcher.request_enumeration(start_tab, start_loc);
 
     // Spawn event consumer that maps core events back into the UI.
     let ui_for_events = ui.clone();
     let controller_for_events = Arc::clone(&app_controller);
+    let reload_dispatcher = dispatcher.clone();
     tokio::spawn(async move {
         while let Some(event) = evt_rx.recv().await {
             let Some(ui) = ui_for_events.upgrade() else {
@@ -78,22 +83,23 @@ async fn main() {
                         update_ui(&ui, &ctrl);
                     }
                 }
-                KovaEvent::FolderCreated { parent, name } => {
-                    tracing::info!("Created folder {}/{}", parent.display(), name);
+                KovaEvent::FolderCreated { parent: _, name: _ } => {
                     let ctrl = controller_for_events.lock().unwrap();
                     let tab_id = ctrl.active_tab_id();
                     if let Some(loc) = ctrl.current_location().cloned() {
                         drop(ctrl);
-                        request_enumeration(tab_id, loc, &cmd_tx);
+                        reload_dispatcher.request_enumeration(tab_id, loc);
                     }
                 }
-                KovaEvent::ItemRenamed { old_path, new_path } => {
-                    tracing::info!("Renamed {} -> {}", old_path.display(), new_path.display());
+                KovaEvent::ItemRenamed {
+                    old_path: _,
+                    new_path: _,
+                } => {
                     let ctrl = controller_for_events.lock().unwrap();
                     let tab_id = ctrl.active_tab_id();
                     if let Some(loc) = ctrl.current_location().cloned() {
                         drop(ctrl);
-                        request_enumeration(tab_id, loc, &cmd_tx);
+                        reload_dispatcher.request_enumeration(tab_id, loc);
                     }
                 }
                 KovaEvent::OperationError {
@@ -111,6 +117,22 @@ async fn main() {
     });
 
     app.run().unwrap();
+}
+
+fn set_known_folder_paths(ui: &Weak<MainWindow>) {
+    fn path(folder: KnownFolder) -> SharedString {
+        resolve_known_folder(folder)
+            .map(|l| l.display())
+            .unwrap_or_default()
+            .into()
+    }
+    if let Some(ui) = ui.upgrade() {
+        let state = ui.global::<AppState>();
+        state.set_home_path(path(KnownFolder::Home));
+        state.set_desktop_path(path(KnownFolder::Desktop));
+        state.set_documents_path(path(KnownFolder::Documents));
+        state.set_downloads_path(path(KnownFolder::Downloads));
+    }
 }
 
 fn wire_callbacks(ui: Weak<MainWindow>, dispatcher: CommandDispatcher) {
@@ -221,15 +243,6 @@ fn wire_callbacks(ui: Weak<MainWindow>, dispatcher: CommandDispatcher) {
         .on_request_sort(move |col: i32| {
             d.dispatch_sort(col as usize);
         });
-}
-
-fn request_enumeration(tab_id: TabId, location: Location, tx: &mpsc::Sender<WorkerCommand>) {
-    let request_id = 0; // actual id set by dispatcher; this helper is for boot only
-    let _ = tx.try_send(WorkerCommand::Enumerate {
-        tab_id,
-        location,
-        request_id,
-    });
 }
 
 fn update_ui(ui: &MainWindow, controller: &AppController) {

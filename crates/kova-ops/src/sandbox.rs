@@ -88,4 +88,21 @@ mod tests {
         assert!(!sandbox.contains(Path::new("C:\\Windows")));
         fs::remove_dir_all(&root).ok();
     }
+
+    #[test]
+    fn sandbox_rejects_outside_path_for_mutation() {
+        let root = std::env::temp_dir().join(format!("kova-sandbox-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let sandbox = TestSandbox::new(root.clone());
+
+        let outside = Path::new("C:\\Windows\\notepad.exe");
+        let result = sandbox.require_inside(outside);
+        assert!(result.is_err(), "must reject outside path");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
 }

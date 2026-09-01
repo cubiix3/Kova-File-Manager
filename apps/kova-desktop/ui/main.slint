@@ -19,6 +19,11 @@ export global AppState {
     in-out property <bool> can_go_forward: false;
     in-out property <bool> can_go_parent: false;
 
+    in-out property <string> home_path: "";
+    in-out property <string> desktop_path: "";
+    in-out property <string> documents_path: "";
+    in-out property <string> downloads_path: "";
+
     pure callback request_navigate(string);
     pure callback request_back();
     pure callback request_forward();
@@ -39,8 +44,8 @@ export global AppState {
 
 component SidebarButton inherits Rectangle {
     in property <string> text;
+    in property <string> target: "";
     in property <bool> selected: false;
-    callback clicked();
 
     height: 28px;
     background: selected ? #2a2d2e : transparent;
@@ -57,7 +62,26 @@ component SidebarButton inherits Rectangle {
     }
 
     TouchArea {
-        clicked => { root.clicked(); }
+        clicked => { if root.target != "" { AppState.request_navigate(root.target); } }
+    }
+}
+
+component HeaderCell inherits Rectangle {
+    in property <string> text;
+    in property <int> column;
+
+    height: 100%;
+    HorizontalLayout {
+        padding-left: 8px;
+        Text {
+            text: root.text;
+            color: #a0a0a0;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+    TouchArea {
+        clicked => { AppState.request_sort(root.column); }
     }
 }
 
@@ -169,15 +193,15 @@ export component MainWindow inherits Window {
                         spacing: 2px;
 
                         Text { text: "Favorites"; color: #909090; font-size: 11px; font-weight: 600; }
-                        SidebarButton { text: "Home"; clicked => { AppState.request_navigate(""); } }
-                        SidebarButton { text: "Desktop"; clicked => { AppState.request_navigate(""); } }
-                        SidebarButton { text: "Documents"; clicked => { AppState.request_navigate(""); } }
-                        SidebarButton { text: "Downloads"; clicked => { AppState.request_navigate(""); } }
+                        SidebarButton { text: "Home"; target: AppState.home_path; }
+                        SidebarButton { text: "Desktop"; target: AppState.desktop_path; }
+                        SidebarButton { text: "Documents"; target: AppState.documents_path; }
+                        SidebarButton { text: "Downloads"; target: AppState.downloads_path; }
 
                         Rectangle { height: 12px; }
 
                         Text { text: "Drives"; color: #909090; font-size: 11px; font-weight: 600; }
-                        SidebarButton { text: "C:\\\\"; clicked => { AppState.request_navigate("C:\\"); } }
+                        SidebarButton { text: "C:\\u005c"; target: "C:/"; }
                     }
                 }
 
@@ -190,10 +214,10 @@ export component MainWindow inherits Window {
                             background: #252526;
                             header := HorizontalLayout {
                                 height: 100%;
-                                Text { text: "Name"; color: #a0a0a0; font-size: 12px; width: 45%; padding-left: 8px; vertical-alignment: center; }
-                                Text { text: "Type"; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
-                                Text { text: "Size"; color: #a0a0a0; font-size: 12px; width: 15%; vertical-alignment: center; }
-                                Text { text: "Modified"; color: #a0a0a0; font-size: 12px; width: 20%; vertical-alignment: center; }
+                                HeaderCell { text: "Name"; column: 0; width: 45%; }
+                                HeaderCell { text: "Type"; column: 1; width: 20%; }
+                                HeaderCell { text: "Size"; column: 2; width: 15%; }
+                                HeaderCell { text: "Modified"; column: 3; width: 20%; }
                             }
                         }
 

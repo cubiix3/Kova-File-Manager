@@ -4,6 +4,9 @@ use kova_core::domain::{
 };
 use std::collections::HashMap;
 
+#[cfg(test)]
+use kova_core::domain::{FileKind, FileMetadata};
+
 /// UI-facing representation of a single file list row.
 #[derive(Debug, Clone, Default)]
 pub struct FileListItem {
@@ -89,6 +92,10 @@ impl AppController {
     }
 
     pub fn apply_snapshot(&mut self, tab_id: TabId, snapshot: DirectorySnapshot) {
+        if !self.is_current_request(tab_id, snapshot.request_id) {
+            return;
+        }
+
         let tab = match self.tabs.get_mut(tab_id) {
             Some(t) => t,
             None => return,
@@ -110,8 +117,8 @@ impl AppController {
     pub fn is_current_request(&self, tab_id: TabId, request_id: u64) -> bool {
         self.request_ids
             .get(&tab_id)
-            .map(|&id| id == request_id)
-            .unwrap_or(true)
+            .map(|id| *id == request_id)
+            .unwrap_or(false)
     }
 
     pub fn record_request(&mut self, tab_id: TabId, request_id: u64) {
@@ -242,4 +249,53 @@ fn modified_text(entry: &FileEntry) -> String {
         .modified
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+fn dummy_snapshot(request_id: u64, name: &str) -> DirectorySnapshot {
+    DirectorySnapshot {
+        location: Location::new(std::path::PathBuf::from("C:\\dummy")),
+        request_id,
+        entries: vec![FileEntry {
+            name: name.into(),
+            path: std::path::PathBuf::from("C:\\dummy").join(name),
+            kind: FileKind::Directory,
+            metadata: FileMetadata {
+                size: None,
+                modified: None,
+                is_hidden: false,
+                is_system: false,
+                raw_attributes: 0,
+            },
+            icon_handle: None,
+        }],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_snapshot_is_rejected_after_newer_request() {
+        let initial = Location::new(std::path::PathBuf::from("C:\\dummy"));
+        let mut ctrl = AppController::new(initial);
+        let tab_id = ctrl.active_tab_id();
+
+        // Simulate request #1, then request #2 for the same tab.
+        ctrl.record_request(tab_id, 1);
+        ctrl.record_request(tab_id, 2);
+
+        // Snapshot from request #1 must be ignored.
+        let stale = dummy_snapshot(1, "stale-folder");
+        ctrl.apply_snapshot(tab_id, stale);
+        assert!(ctrl.snapshot().is_none());
+
+        // Snapshot from request #2 must be applied.
+        let current = dummy_snapshot(2, "current-folder");
+        ctrl.apply_snapshot(tab_id, current);
+        let snap = ctrl.snapshot().unwrap();
+        assert_eq!(snap.entries.len(), 1);
+        assert_eq!(snap.entries[0].name, "current-folder");
+    }
 }

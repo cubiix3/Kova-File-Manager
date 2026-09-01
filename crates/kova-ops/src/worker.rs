@@ -1,23 +1,43 @@
 use kova_core::domain::{KovaEvent, Location, TabId};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 
 /// Per-tab generation counter used to discard stale async results.
 #[derive(Debug, Default)]
 pub struct GenerationCounter {
-    current: HashMap<TabId, u64>,
+    current: Mutex<HashMap<TabId, AtomicU64>>,
+}
+
+impl Clone for GenerationCounter {
+    fn clone(&self) -> Self {
+        let inner = self.current.lock().unwrap();
+        Self {
+            current: Mutex::new(
+                inner
+                    .iter()
+                    .map(|(&k, v)| (k, AtomicU64::new(v.load(Ordering::SeqCst))))
+                    .collect(),
+            ),
+        }
+    }
 }
 
 impl GenerationCounter {
-    pub fn next(&mut self, tab_id: TabId) -> u64 {
-        let next = self.current.get(&tab_id).copied().unwrap_or(0) + 1;
-        self.current.insert(tab_id, next);
-        next
+    pub fn next(&self, tab_id: TabId) -> u64 {
+        let mut inner = self.current.lock().unwrap();
+        let counter = inner.entry(tab_id).or_insert_with(|| AtomicU64::new(0));
+        counter.fetch_add(1, Ordering::SeqCst) + 1
     }
 
     pub fn current(&self, tab_id: TabId) -> u64 {
-        self.current.get(&tab_id).copied().unwrap_or(0)
+        let inner = self.current.lock().unwrap();
+        inner
+            .get(&tab_id)
+            .map(|c| c.load(Ordering::SeqCst))
+            .unwrap_or(0)
     }
 }
 

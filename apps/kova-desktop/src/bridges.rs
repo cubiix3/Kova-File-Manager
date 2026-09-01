@@ -36,7 +36,7 @@ impl CommandDispatcher {
         self.generations.lock().unwrap().next(tab_id)
     }
 
-    fn request_enumeration(&self, tab_id: TabId, location: Location) {
+    pub fn request_enumeration(&self, tab_id: TabId, location: Location) {
         let request_id = self.next_request_id(tab_id);
         {
             let mut ctrl = self.controller.lock().unwrap();
