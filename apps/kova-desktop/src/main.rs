@@ -6,7 +6,8 @@ use bridges::CommandDispatcher;
 use kova_core::domain::{KovaEvent, LocationInput, SortDirection};
 use kova_ops::worker::{WorkerCommand, spawn_worker};
 use kova_platform_windows::known_folders::{KnownFolder, resolve_known_folder};
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
@@ -17,6 +18,21 @@ slint::include_modules!();
 enum PendingDialog {
     NewFolder,
     Rename { index: usize },
+}
+
+/// Mirrors the last path the UI address bar was programmatically set to, so
+/// update_ui does not clobber text the user is currently typing.
+type LastAddress = Arc<Mutex<String>>;
+
+/// Long-lived model handles. The same model instances stay installed in the
+/// Slint globals for the whole app lifetime and are updated in place, so row
+/// delegates (and their TouchAreas) keep their identity across updates.
+/// Recreating a model on every selection click would break Slint
+/// double-click detection, because the second click would land on a fresh
+/// row element.
+struct UiModels {
+    files: Rc<VecModel<FileListItem>>,
+    tabs: Rc<VecModel<SharedString>>,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -32,6 +48,9 @@ async fn main() {
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCommand>(64);
     let (evt_tx, mut evt_rx) = mpsc::channel::<KovaEvent>(64);
+    // Worker events are forwarded into a plain channel and drained by a Slint
+    // timer, because Slint properties must only be touched from the UI thread.
+    let (ui_evt_tx, ui_evt_rx) = std::sync::mpsc::channel::<KovaEvent>();
 
     spawn_worker(cmd_rx, evt_tx);
 
@@ -43,12 +62,31 @@ async fn main() {
     );
 
     let app = MainWindow::new().unwrap();
+
+    let files_model = Rc::new(VecModel::from(Vec::new()));
+    let tabs_model = Rc::new(VecModel::from(Vec::new()));
+    app.global::<AppState>()
+        .set_files(ModelRc::from(Rc::clone(&files_model)));
+    app.global::<AppState>()
+        .set_tabs(ModelRc::from(Rc::clone(&tabs_model)));
+    let ui_models = Rc::new(UiModels {
+        files: files_model,
+        tabs: tabs_model,
+    });
+
     let ui = app.as_weak();
 
     let pending_dialog = Arc::new(Mutex::new(None::<PendingDialog>));
+    let last_address: LastAddress = Arc::new(Mutex::new(String::new()));
 
     // Wire UI callbacks.
-    wire_callbacks(ui.clone(), dispatcher.clone(), Arc::clone(&pending_dialog));
+    wire_callbacks(
+        ui.clone(),
+        dispatcher.clone(),
+        Arc::clone(&pending_dialog),
+        Arc::clone(&last_address),
+        Rc::clone(&ui_models),
+    );
 
     // Populate sidebar targets.
     set_known_folder_paths(&ui);
@@ -64,67 +102,83 @@ async fn main() {
         .unwrap_or(initial);
     dispatcher.request_enumeration(start_tab, start_loc);
 
-    // Spawn event consumer that maps core events back into the UI.
-    let ui_for_events = ui.clone();
-    let controller_for_events = Arc::clone(&app_controller);
-    let reload_dispatcher = dispatcher.clone();
+    // Forward worker events into a std channel consumed by a Slint UI timer.
     tokio::spawn(async move {
         while let Some(event) = evt_rx.recv().await {
-            let Some(ui) = ui_for_events.upgrade() else {
-                break;
-            };
-            match event {
-                KovaEvent::DirectoryLoaded { tab_id, snapshot } => {
-                    let mut ctrl = controller_for_events.lock().unwrap();
-                    if ctrl.active_tab_id() == tab_id
-                        && ctrl.is_current_request(tab_id, snapshot.request_id)
-                    {
-                        ctrl.apply_snapshot(tab_id, snapshot);
-                        update_ui(&ui, &ctrl);
-                    }
-                }
-                KovaEvent::DirectoryError {
-                    tab_id, location, ..
-                } => {
-                    let mut ctrl = controller_for_events.lock().unwrap();
-                    if ctrl.active_tab_id() == tab_id {
-                        ctrl.set_status(format!("Error reading {}", location.display()));
-                        update_ui(&ui, &ctrl);
-                    }
-                }
-                KovaEvent::FolderCreated { parent: _, name: _ } => {
-                    let ctrl = controller_for_events.lock().unwrap();
-                    let tab_id = ctrl.active_tab_id();
-                    if let Some(loc) = ctrl.current_location().cloned() {
-                        drop(ctrl);
-                        reload_dispatcher.request_enumeration(tab_id, loc);
-                    }
-                }
-                KovaEvent::ItemRenamed {
-                    old_path: _,
-                    new_path: _,
-                } => {
-                    let ctrl = controller_for_events.lock().unwrap();
-                    let tab_id = ctrl.active_tab_id();
-                    if let Some(loc) = ctrl.current_location().cloned() {
-                        drop(ctrl);
-                        reload_dispatcher.request_enumeration(tab_id, loc);
-                    }
-                }
-                KovaEvent::OperationError {
-                    context,
-                    error_message,
-                } => {
-                    tracing::error!("{}: {}", context, error_message);
-                    let mut ctrl = controller_for_events.lock().unwrap();
-                    ctrl.set_status(format!("{}: {}", context, error_message));
-                    update_ui(&ui, &ctrl);
-                    show_error_dialog(&ui, &error_message);
-                }
-                _ => {}
-            }
+            let _ = ui_evt_tx.send(event);
         }
     });
+
+    // UI-thread event pump: process core events forwarded by the worker.
+    let ui_for_pump = ui.clone();
+    let controller_for_pump = Arc::clone(&app_controller);
+    let reload_dispatcher_pump = dispatcher.clone();
+    let last_address_pump = Arc::clone(&last_address);
+    let models_for_pump = Rc::clone(&ui_models);
+    let pump_timer = slint::Timer::default();
+    pump_timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(50),
+        move || {
+            let ui_ref = ui_for_pump.clone();
+            let ctrl_ref = Arc::clone(&controller_for_pump);
+            let reload_ref = reload_dispatcher_pump.clone();
+            let last_address_ref = Arc::clone(&last_address_pump);
+            let models_ref = Rc::clone(&models_for_pump);
+            while let Ok(event) = ui_evt_rx.try_recv() {
+                let Some(ui) = ui_ref.upgrade() else { return };
+                let mut ctrl = ctrl_ref.lock().unwrap();
+                match event {
+                    KovaEvent::DirectoryLoaded { tab_id, snapshot }
+                        if ctrl.active_tab_id() == tab_id
+                            && ctrl.is_current_request(tab_id, snapshot.request_id) =>
+                    {
+                        ctrl.apply_snapshot(tab_id, snapshot);
+                        tracing::info!(
+                            "controller: snapshot accepted tab={:?} files={} tabs={}",
+                            tab_id,
+                            ctrl.file_list_items().len(),
+                            ctrl.tab_labels().len()
+                        );
+                        update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
+                    }
+                    KovaEvent::DirectoryError {
+                        tab_id, location, ..
+                    } if ctrl.active_tab_id() == tab_id => {
+                        ctrl.set_status(format!("Error reading {}", location.display()));
+                        update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
+                    }
+                    KovaEvent::FolderCreated { .. } | KovaEvent::ItemRenamed { .. } => {
+                        let tab_id = ctrl.active_tab_id();
+                        if let Some(loc) = ctrl.current_location().cloned() {
+                            drop(ctrl);
+                            reload_ref.request_enumeration(tab_id, loc);
+                            return;
+                        }
+                    }
+                    KovaEvent::OperationError {
+                        context,
+                        error_message,
+                    } => {
+                        tracing::error!("{}: {}", context, error_message);
+                        ctrl.set_status(format!("{}: {}", context, error_message));
+                        update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
+                        show_error_dialog(&ui, &error_message);
+                    }
+                    _ => {}
+                }
+            }
+        },
+    );
+
+    // Render the initial controller state (tab, address bar, empty list) so
+    // the window is never blank while the first enumeration is in flight.
+    {
+        let ctrl = app_controller.lock().unwrap();
+        if let Some(ui) = ui.upgrade() {
+            update_ui(&ui, &ctrl, &last_address, &ui_models);
+        }
+    }
 
     app.run().unwrap();
 }
@@ -187,40 +241,93 @@ fn show_error_dialog(ui: &MainWindow, message: &str) {
     state.set_dialog_visible(true);
 }
 
+/// Re-sync the UI from the controller after a view-model-only mutation.
+fn sync_ui(
+    ui: &MainWindow,
+    dispatcher: &CommandDispatcher,
+    last_address: &LastAddress,
+    models: &UiModels,
+) {
+    let controller_arc = dispatcher.controller();
+    let ctrl = controller_arc.lock().unwrap();
+    update_ui(ui, &ctrl, last_address, models);
+}
+
+/// Show a user-visible error for a failed user action and re-sync the UI.
+fn show_action_error(
+    ui: &Weak<MainWindow>,
+    dispatcher: &CommandDispatcher,
+    last_address: &LastAddress,
+    models: &UiModels,
+    message: &str,
+) {
+    dispatcher.set_status_message(format!("Error: {message}"));
+    if let Some(ui) = ui.upgrade() {
+        sync_ui(&ui, dispatcher, last_address, models);
+    }
+}
+
 fn wire_callbacks(
     ui: Weak<MainWindow>,
     dispatcher: CommandDispatcher,
     pending_dialog: Arc<Mutex<Option<PendingDialog>>>,
+    last_address: LastAddress,
+    models: Rc<UiModels>,
 ) {
     let d = dispatcher.clone();
+    let ui_nav = ui.clone();
+    let last_nav = Arc::clone(&last_address);
+    let models_nav = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_navigate(move |path: SharedString| {
-            let _ = d.dispatch_navigate(LocationInput::new(path.to_string()));
+            if let Err(e) = d.dispatch_navigate(LocationInput::new(path.to_string())) {
+                show_action_error(&ui_nav, &d, &last_nav, &models_nav, &e);
+            }
         });
 
     let d = dispatcher.clone();
+    let ui_back = ui.clone();
+    let last_back = Arc::clone(&last_address);
+    let models_back = Rc::clone(&models);
     ui.unwrap().global::<AppState>().on_request_back(move || {
-        let _ = d.dispatch_back();
+        if let Err(e) = d.dispatch_back() {
+            show_action_error(&ui_back, &d, &last_back, &models_back, &e);
+        }
     });
 
     let d = dispatcher.clone();
+    let ui_fwd = ui.clone();
+    let last_fwd = Arc::clone(&last_address);
+    let models_fwd = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_forward(move || {
-            let _ = d.dispatch_forward();
+            if let Err(e) = d.dispatch_forward() {
+                show_action_error(&ui_fwd, &d, &last_fwd, &models_fwd, &e);
+            }
         });
 
     let d = dispatcher.clone();
+    let ui_parent = ui.clone();
+    let last_parent = Arc::clone(&last_address);
+    let models_parent = Rc::clone(&models);
     ui.unwrap().global::<AppState>().on_request_parent(move || {
-        let _ = d.dispatch_parent();
+        if let Err(e) = d.dispatch_parent() {
+            show_action_error(&ui_parent, &d, &last_parent, &models_parent, &e);
+        }
     });
 
     let d = dispatcher.clone();
+    let ui_refresh = ui.clone();
+    let last_refresh = Arc::clone(&last_address);
+    let models_refresh = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_refresh(move || {
-            let _ = d.dispatch_refresh();
+            if let Err(e) = d.dispatch_refresh() {
+                show_action_error(&ui_refresh, &d, &last_refresh, &models_refresh, &e);
+            }
         });
 
     let d = dispatcher.clone();
@@ -231,10 +338,15 @@ fn wire_callbacks(
         });
 
     let d = dispatcher.clone();
+    let ui_close = ui.clone();
+    let last_close = Arc::clone(&last_address);
+    let models_close = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_close_tab(move |idx: i32| {
-            let _ = d.dispatch_close_tab(idx as usize);
+            if let Err(e) = d.dispatch_close_tab(idx as usize) {
+                show_action_error(&ui_close, &d, &last_close, &models_close, &e);
+            }
         });
 
     let d = dispatcher.clone();
@@ -244,39 +356,84 @@ fn wire_callbacks(
             d.dispatch_switch_tab(idx as usize);
         });
 
+    // Selection and sorting are pure view-model operations: they change
+    // controller state that must be pushed back into the UI model.
     let d = dispatcher.clone();
+    let ui_sel = ui.clone();
+    let last_sel = Arc::clone(&last_address);
+    let models_sel = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_select(move |idx: i32| {
             d.dispatch_select_single(idx as usize);
+            if let Some(u) = ui_sel.upgrade() {
+                sync_ui(&u, &d, &last_sel, &models_sel);
+            }
         });
 
     let d = dispatcher.clone();
+    let ui_toggle = ui.clone();
+    let last_toggle = Arc::clone(&last_address);
+    let models_toggle = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_toggle(move |idx: i32| {
             d.dispatch_select_toggle(idx as usize);
+            if let Some(u) = ui_toggle.upgrade() {
+                sync_ui(&u, &d, &last_toggle, &models_toggle);
+            }
         });
 
     let d = dispatcher.clone();
+    let ui_range = ui.clone();
+    let last_range = Arc::clone(&last_address);
+    let models_range = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_range(move |idx: i32| {
             d.dispatch_select_range(idx as usize);
+            if let Some(u) = ui_range.upgrade() {
+                sync_ui(&u, &d, &last_range, &models_range);
+            }
         });
 
     let d = dispatcher.clone();
+    let ui_all = ui.clone();
+    let last_all = Arc::clone(&last_address);
+    let models_all = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_select_all(move || {
             d.dispatch_select_all();
+            if let Some(u) = ui_all.upgrade() {
+                sync_ui(&u, &d, &last_all, &models_all);
+            }
         });
 
     let d = dispatcher.clone();
+    let ui_clear = ui.clone();
+    let last_clear = Arc::clone(&last_address);
+    let models_clear = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_clear_selection(move || {
             d.dispatch_clear_selection();
+            if let Some(u) = ui_clear.upgrade() {
+                sync_ui(&u, &d, &last_clear, &models_clear);
+            }
+        });
+
+    let d = dispatcher.clone();
+    let ui_sort = ui.clone();
+    let last_sort = Arc::clone(&last_address);
+    let models_sort = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_sort(move |col: i32| {
+            d.dispatch_sort(col as usize);
+            if let Some(u) = ui_sort.upgrade() {
+                sync_ui(&u, &d, &last_sort, &models_sort);
+            }
         });
 
     let d = dispatcher.clone();
@@ -325,10 +482,21 @@ fn wire_callbacks(
     let d = dispatcher.clone();
     let pending = Arc::clone(&pending_dialog);
     let dialog_ui = ui.clone();
+    let ui_status = ui.clone();
+    let status_dispatcher = dispatcher.clone();
+    let last_status = Arc::clone(&last_address);
+    let models_status = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_dialog_confirm(move |value: SharedString| {
-            let name = value.to_string();
+            let name = value.trim().to_string();
+            if name.is_empty() {
+                status_dispatcher.set_status_message("Name must not be empty".into());
+                if let Some(u) = ui_status.upgrade() {
+                    sync_ui(&u, &status_dispatcher, &last_status, &models_status);
+                }
+                return;
+            }
             let mode = pending.lock().unwrap().take();
             if let Some(mode) = mode {
                 match mode {
@@ -354,18 +522,25 @@ fn wire_callbacks(
                 close_dialog(&ui, &pending);
             }
         });
-
-    let d = dispatcher.clone();
-    ui.unwrap()
-        .global::<AppState>()
-        .on_request_sort(move |col: i32| {
-            d.dispatch_sort(col as usize);
-        });
 }
 
-fn update_ui(ui: &MainWindow, controller: &AppController) {
-    ui.global::<AppState>()
-        .set_address_path(controller.address_path().into());
+fn update_ui(
+    ui: &MainWindow,
+    controller: &AppController,
+    last_address: &LastAddress,
+    models: &UiModels,
+) {
+    // Only touch the address bar when the navigation state actually changed;
+    // otherwise a background refresh would clobber text being typed.
+    let address = controller.address_path();
+    {
+        let mut last = last_address.lock().unwrap();
+        if *last != address {
+            *last = address.clone();
+            ui.global::<AppState>().set_address_path(address.into());
+        }
+    }
+
     ui.global::<AppState>()
         .set_status_text(controller.status_text().into());
     ui.global::<AppState>()
@@ -393,16 +568,30 @@ fn update_ui(ui: &MainWindow, controller: &AppController) {
             selected: item.selected,
         })
         .collect();
-    let model = VecModel::from(items);
-    ui.global::<AppState>().set_files(ModelRc::new(model));
+    if models.files.row_count() != items.len() {
+        models.files.set_vec(items);
+    } else {
+        for (i, item) in items.into_iter().enumerate() {
+            if models.files.row_data(i) != Some(item.clone()) {
+                models.files.set_row_data(i, item);
+            }
+        }
+    }
 
     let tabs: Vec<SharedString> = controller
         .tab_labels()
         .into_iter()
         .map(SharedString::from)
         .collect();
-    let tab_model = VecModel::from(tabs);
-    ui.global::<AppState>().set_tabs(ModelRc::new(tab_model));
+    if models.tabs.row_count() != tabs.len() {
+        models.tabs.set_vec(tabs);
+    } else {
+        for (i, label) in tabs.into_iter().enumerate() {
+            if models.tabs.row_data(i) != Some(label.clone()) {
+                models.tabs.set_row_data(i, label);
+            }
+        }
+    }
     ui.global::<AppState>()
         .set_active_tab(controller.active_tab_index() as i32);
 }

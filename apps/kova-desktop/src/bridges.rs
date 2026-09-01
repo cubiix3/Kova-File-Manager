@@ -28,6 +28,16 @@ impl CommandDispatcher {
         }
     }
 
+    /// Access the shared controller for UI re-sync after view-model mutations.
+    pub fn controller(&self) -> Arc<Mutex<AppController>> {
+        Arc::clone(&self.controller)
+    }
+
+    /// Set a user-visible status message.
+    pub fn set_status_message(&self, text: String) {
+        self.controller.lock().unwrap().set_status(text);
+    }
+
     fn send(&self, cmd: WorkerCommand) {
         let _ = self.tx.try_send(cmd);
     }
@@ -196,13 +206,18 @@ impl CommandDispatcher {
     }
 
     pub fn dispatch_activate(&self, index: usize) {
+        tracing::debug!("activate: request index={}", index);
         let (tab_id, path, kind) = {
             let ctrl = self.controller.lock().unwrap();
             let tab_id = ctrl.active_tab_id();
             let entry = match resolve_index(&ctrl, index) {
                 Some(e) => e.clone(),
-                None => return,
+                None => {
+                    tracing::warn!("activate: no entry at index {}", index);
+                    return;
+                }
             };
+            tracing::debug!("activate: entry {} kind={:?}", entry.name, entry.kind);
             (tab_id, entry.path.clone(), entry.kind)
         };
 
@@ -239,16 +254,22 @@ impl CommandDispatcher {
     }
 
     pub fn dispatch_rename_to(&self, index: usize, new_name: &str) {
+        tracing::debug!("rename: request index={} name={}", index, new_name);
         if new_name.is_empty() {
+            tracing::warn!("rename: empty name");
             return;
         }
         let path = {
             let ctrl = self.controller.lock().unwrap();
             match resolve_index(&ctrl, index).map(|e| e.path.clone()) {
                 Some(p) => p,
-                None => return,
+                None => {
+                    tracing::warn!("rename: no entry at index {}", index);
+                    return;
+                }
             }
         };
+        tracing::debug!("rename: sending for {}", path.display());
         self.send(WorkerCommand::Rename {
             path,
             new_name: new_name.to_string(),

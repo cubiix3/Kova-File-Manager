@@ -76,9 +76,21 @@ pub fn spawn_worker(mut rx: mpsc::Receiver<WorkerCommand>, tx: mpsc::Sender<Kova
                     location,
                     request_id,
                 } => {
+                    tracing::info!(
+                        "worker: enumerate tab={:?} loc={} request={}",
+                        tab_id,
+                        location.display(),
+                        request_id
+                    );
                     match crate::enumerate::enumerate_directory(location.clone(), request_id).await
                     {
                         Ok(snapshot) => {
+                            tracing::info!(
+                                "worker: loaded tab={:?} request={} entries={}",
+                                tab_id,
+                                request_id,
+                                snapshot.entries.len()
+                            );
                             let _ = tx
                                 .send(KovaEvent::DirectoryLoaded { tab_id, snapshot })
                                 .await;
