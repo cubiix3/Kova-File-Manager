@@ -24,14 +24,26 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Find-VsVarsBatch {
-    $editions = @("Community", "Professional", "Enterprise")
-    foreach ($edition in $editions) {
-        $candidate = "C:\Program Files\Microsoft Visual Studio\2022\$edition\VC\Auxiliary\Build\vcvars64.bat"
-        if (Test-Path $candidate) {
-            return $candidate
+    # Visual Studio changed its installation layout over time: classic
+    # releases live under a four-digit year folder ("2022"), newer ones
+    # under a version-number folder ("18"). Probe every installed root and
+    # edition instead of hard-coding a single layout.
+    $roots = @()
+    $vsDir = "C:\Program Files\Microsoft Visual Studio"
+    if (Test-Path $vsDir) {
+        $roots = Get-ChildItem -LiteralPath $vsDir -Directory |
+            Sort-Object Name -Descending |
+            ForEach-Object { $_.FullName }
+    }
+    foreach ($root in $roots) {
+        foreach ($edition in @("Community", "Professional", "Enterprise")) {
+            $candidate = Join-Path $root "$edition\VC\Auxiliary\Build\vcvars64.bat"
+            if (Test-Path $candidate) {
+                return $candidate
+            }
         }
     }
-    throw "vcvars64.bat not found. Install Visual Studio 2022 with the Desktop development with C++ workload."
+    throw "vcvars64.bat not found. Install Visual Studio with the Desktop development with C++ workload."
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
