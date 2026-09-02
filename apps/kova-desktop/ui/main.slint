@@ -1,4 +1,4 @@
-import { LineEdit, ListView } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
 
 // Theme tokens — central place for colors and metrics.
 export global Theme {
@@ -7,6 +7,9 @@ export global Theme {
     out property <color> surface-alt: #26262b;
     out property <color> surface-hover: #2c2c33;
     out property <color> surface-pressed: #33333b;
+    // Sidebar is one step above the content background so the shell reads as
+    // "navigation chrome" vs. "document area" (Files/Explorer pattern).
+    out property <color> sidebar-bg: #1e1e23;
     out property <color> selection: #0e466e;
     out property <color> selection-strong: #12507f;
     out property <color> border: #3a3a42;
@@ -18,6 +21,7 @@ export global Theme {
     out property <color> accent: #2f81f7;
     out property <color> danger: #e5534b;
     out property <color> statusbar-bg: #1e1e22;
+    out property <color> shadow: #00000066;
 }
 
 export struct FileListItem {
@@ -103,15 +107,16 @@ export global AppState {
 // Layout metrics (single source of truth for the window skeleton).
 export global Metrics {
     out property <length> tabs-height: 36px;
-    out property <length> toolbar-height: 44px;
-    out property <length> statusbar-height: 24px;
+    out property <length> toolbar-height: 46px;
+    out property <length> statusbar-height: 26px;
     out property <length> sidebar-width: 220px;
-    out property <length> header-height: 30px;
-    out property <length> row-height: 26px;
-    out property <length> icon-size: 17px;
+    out property <length> header-height: 32px;
+    out property <length> row-height: 28px;
+    out property <length> icon-size: 18px;
+    out property <length> icon-size-sm: 16px;
     out property <length> col-type: 130px;
     out property <length> col-size: 96px;
-    out property <length> col-modified: 148px;
+    out property <length> col-modified: 150px;
 }
 
 // TouchArea that additionally reacts to the mouse back/forward buttons
@@ -132,67 +137,86 @@ component NavTouchArea inherits TouchArea {
 }
 
 // --- Vector toolbar glyphs (viewbox 16x16, self-centering) -----------------
+// All icons accept a `tint` so disabled states can dim them.
 
 component IconBack inherits Path {
+    in property <color> tint: Theme.text-secondary;
     width: 16px;
     height: 16px;
     viewbox-width: 16;
     viewbox-height: 16;
     fill: transparent;
-    stroke: Theme.text-secondary;
+    stroke: root.tint;
     stroke-width: 1.7px;
     commands: "M 10.2 2.8 L 5 8 L 10.2 13.2";
 }
 
 component IconForward inherits Path {
+    in property <color> tint: Theme.text-secondary;
     width: 16px;
     height: 16px;
     viewbox-width: 16;
     viewbox-height: 16;
     fill: transparent;
-    stroke: Theme.text-secondary;
+    stroke: root.tint;
     stroke-width: 1.7px;
     commands: "M 5.8 2.8 L 11 8 L 5.8 13.2";
 }
 
 component IconUp inherits Path {
+    in property <color> tint: Theme.text-secondary;
     width: 16px;
     height: 16px;
     viewbox-width: 16;
     viewbox-height: 16;
     fill: transparent;
-    stroke: Theme.text-secondary;
+    stroke: root.tint;
     stroke-width: 1.7px;
     commands: "M 2.8 10.2 L 8 5 L 13.2 10.2";
 }
 
 component IconRefresh inherits Path {
+    in property <color> tint: Theme.text-secondary;
     width: 16px;
     height: 16px;
     viewbox-width: 16;
     viewbox-height: 16;
     fill: transparent;
-    stroke: Theme.text-secondary;
+    stroke: root.tint;
     stroke-width: 1.6px;
     commands: "M 13.2 8 C 13.2 10.87 10.87 13.2 8 13.2 C 5.13 13.2 2.8 10.87 2.8 8 C 2.8 5.13 5.13 2.8 8 2.8";
 }
 
 component IconRefreshArrow inherits Path {
+    in property <color> tint: Theme.text-secondary;
     width: 16px;
     height: 16px;
     viewbox-width: 16;
     viewbox-height: 16;
-    fill: Theme.text-secondary;
+    fill: root.tint;
     commands: "M 10.7 2.8 L 8.1 0.7 L 8.1 4.9 Z";
 }
 
 component IconFolderNew inherits Path {
+    in property <color> tint: Theme.text-secondary;
     width: 16px;
     height: 16px;
     viewbox-width: 16;
     viewbox-height: 16;
-    fill: Theme.text-secondary;
+    fill: root.tint;
     commands: "M 1.5 4.4 C 1.5 3.5 2.2 2.8 3.1 2.8 L 6 2.8 L 7.2 4.3 L 12.9 4.3 C 13.8 4.3 14.5 5 14.5 5.9 L 14.5 11.6 C 14.5 12.5 13.8 13.2 12.9 13.2 L 3.1 13.2 C 2.2 13.2 1.5 12.5 1.5 11.6 Z";
+}
+
+// Large outline folder for the empty state (viewbox 24x24).
+component IconEmptyFolder inherits Path {
+    width: 44px;
+    height: 44px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    fill: transparent;
+    stroke: Theme.text-disabled;
+    stroke-width: 1.6px;
+    commands: "M 3 7.5 C 3 6.4 3.9 5.1 5 5.1 L 8.6 5.1 L 10.8 7.6 L 19 7.6 C 20.1 7.6 21 8.5 21 9.6 L 21 16.5 C 21 17.6 20.1 18.9 19 18.9 L 5 18.9 C 3.9 18.9 3 17.6 3 16.5 Z";
 }
 
 // --- Controls --------------------------------------------------------------
@@ -201,8 +225,8 @@ component NavIconButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked();
 
-    height: 28px;
-    min-width: 30px;
+    height: 30px;
+    min-width: 32px;
     border-radius: 5px;
     background: !enabled
         ? transparent
@@ -220,13 +244,13 @@ component NewFolderButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked();
 
-    height: 28px;
-    border-radius: 5px;
+    height: 30px;
+    border-radius: 6px;
     background: btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : Theme.surface-alt);
 
     HorizontalLayout {
-        padding-left: 9px;
-        padding-right: 10px;
+        padding-left: 10px;
+        padding-right: 11px;
         spacing: 6px;
         alignment: center;
 
@@ -246,8 +270,69 @@ component NewFolderButton inherits Rectangle {
 
 component ToolSeparator inherits Rectangle {
     width: 1px;
-    height: 16px;
+    height: 18px;
     background: Theme.border-subtle;
+}
+
+// Themed single-line text field (address bar, dialogs). Built directly on
+// TextInput so the visual language (radius, borders, focus ring) matches the
+// rest of Kova instead of the stock widget style.
+component InputField inherits Rectangle {
+    in property <string> placeholder: "";
+    in property <length> font-size: 12.5px;
+    in-out property <string> text <=> ti.text;
+    callback accepted();
+
+    public function focus-field() { ti.focus(); }
+    public function select-all-text() { ti.select-all(); }
+
+    forward-focus: ti;
+    height: 30px;
+    border-radius: 6px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: ti.has-focus ? Theme.accent : (fld-ta.has-hover ? Theme.border : Theme.border-subtle);
+
+    // Click-to-focus for the padding area around the text. The TextInput on
+    // top handles clicks within the text region itself (caret placement,
+    // selection).
+    fld-ta := TouchArea {
+        clicked => { ti.focus(); }
+    }
+
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        alignment: center;
+
+        ti := TextInput {
+            font-size: root.font-size;
+            color: Theme.text-primary;
+            selection-background-color: Theme.selection-strong;
+            selection-foreground-color: Theme.text-primary;
+            accepted => { root.accepted(); }
+        }
+    }
+
+    Text {
+        text: root.placeholder;
+        visible: ti.text == "";
+        color: Theme.text-disabled;
+        font-size: root.font-size;
+        x: 10px;
+        height: parent.height;
+        vertical-alignment: center;
+    }
+
+    ContextMenuArea {
+        Menu {
+            MenuItem { title: "Cut"; activated => { ti.cut(); } }
+            MenuItem { title: "Copy"; activated => { ti.copy(); } }
+            MenuItem { title: "Paste"; activated => { ti.paste(); } }
+            MenuSeparator { }
+            MenuItem { title: "Select All"; activated => { ti.select-all(); } }
+        }
+    }
 }
 
 component SidebarButton inherits Rectangle {
@@ -267,8 +352,9 @@ component SidebarButton inherits Rectangle {
 
         Image {
             source: root.icon;
-            width: Metrics.icon-size;
-            height: Metrics.icon-size;
+            width: Metrics.icon-size-sm;
+            height: Metrics.icon-size-sm;
+            image-rendering: smooth;
         }
 
         Text {
@@ -289,31 +375,32 @@ component SidebarButton inherits Rectangle {
 component DriveRow inherits Rectangle {
     in property <DriveItem> drive;
 
-    height: 40px;
-    border-radius: 5px;
+    height: 44px;
+    border-radius: 6px;
     background: drive-ta.pressed ? Theme.surface-pressed : (drive-ta.has-hover ? Theme.surface-hover : transparent);
 
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
-        spacing: 9px;
+        spacing: 10px;
         alignment: center;
 
         Image {
             source: drive.icon;
-            width: 19px;
-            height: 19px;
+            width: 20px;
+            height: 20px;
+            image-rendering: smooth;
         }
 
         VerticalLayout {
-            spacing: 4px;
-            padding-top: 5px;
-            padding-bottom: 5px;
+            spacing: 5px;
+            padding-top: 6px;
+            padding-bottom: 6px;
             horizontal-stretch: 1;
 
             Text {
                 text: drive.name;
-                color: Theme.text-secondary;
+                color: Theme.text-primary;
                 font-size: 12.5px;
                 vertical-alignment: center;
                 overflow: elide;
@@ -342,7 +429,7 @@ component DriveRow inherits Rectangle {
             vertical-alignment: center;
             horizontal-alignment: right;
             overflow: elide;
-            width: 96px;
+            width: 92px;
         }
     }
 
@@ -352,10 +439,10 @@ component DriveRow inherits Rectangle {
 }
 
 component SectionLabel inherits Text {
-    height: 20px;
+    height: 22px;
     color: Theme.text-muted;
-    font-size: 10.5px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 700;
     vertical-alignment: center;
 }
 
@@ -363,13 +450,19 @@ component HeaderCell inherits Rectangle {
     in property <string> text;
     in property <int> column;
     in property <length> text-indent: 8px;
+    in property <bool> right-align: false;
 
     height: 100%;
     background: header-ta.pressed ? Theme.surface-pressed : (header-ta.has-hover ? Theme.surface-hover : transparent);
 
     HorizontalLayout {
-        padding-left: root.text-indent;
+        padding-left: root.right-align ? 0 : root.text-indent;
+        padding-right: root.right-align ? 0px : 6px;
         spacing: 4px;
+        // Right-aligned columns (Size) push label and arrow to the edge so
+        // they line up with the right-aligned cell values.
+        alignment: root.right-align ? end : start;
+
         Text {
             text: root.text;
             color: Theme.text-muted;
@@ -380,7 +473,7 @@ component HeaderCell inherits Rectangle {
         Text {
             text: AppState.sort_column == root.column ? (AppState.sort_ascending ? "▲" : "▼") : "";
             color: Theme.accent;
-            font-size: 10px;
+            font-size: 9.5px;
             vertical-alignment: center;
         }
     }
@@ -395,27 +488,30 @@ component NameDialog inherits Rectangle {
     in-out property <string> value <=> AppState.dialog_value;
 
     visible: AppState.dialog_visible;
-    background: #00000099;
+    background: #000000aa;
 
     // Swallow every input that lands on the dimmed backdrop so clicks and
     // mouse buttons cannot reach the file list behind the dialog.
     dialog-blocker := TouchArea {}
 
     Rectangle {
-        width: 380px;
-        height: 150px;
+        width: 400px;
+        height: 168px;
         background: Theme.surface-alt;
-        border-radius: 10px;
+        border-radius: 8px;
         border-width: 1px;
         border-color: Theme.border;
+        drop-shadow-blur: 20px;
+        drop-shadow-color: Theme.shadow;
+        drop-shadow-offset-y: 6px;
 
         VerticalLayout {
-            padding: 16px;
-            spacing: 12px;
+            padding: 18px;
+            spacing: 14px;
 
             Text {
                 text: root.title;
-                color: Theme.text-primary;
+                color: root.title == "Error" ? Theme.danger : Theme.text-primary;
                 font-size: 14px;
                 font-weight: 600;
             }
@@ -431,7 +527,9 @@ component NameDialog inherits Rectangle {
                     }
                 }
 
-                name-input := LineEdit {
+                name-input := InputField {
+                    height: 32px;
+                    font-size: 13px;
                     text <=> AppState.dialog_value;
                     accepted => { AppState.request_dialog_confirm(AppState.dialog_value); }
                 }
@@ -442,19 +540,21 @@ component NameDialog inherits Rectangle {
                 alignment: end;
 
                 Rectangle {
-                    width: 80px;
-                    height: 28px;
+                    width: 84px;
+                    height: 30px;
                     background: cancel-ta.pressed ? Theme.surface-pressed : (cancel-ta.has-hover ? Theme.surface-hover : Theme.surface-hover);
-                    border-radius: 5px;
-                    Text { text: "Cancel"; color: Theme.text-secondary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.border-subtle;
+                    Text { text: "Cancel"; color: Theme.text-primary; font-size: 12.5px; horizontal-alignment: center; vertical-alignment: center; }
                     cancel-ta := TouchArea { clicked => { AppState.request_dialog_cancel(); } }
                 }
                 Rectangle {
-                    width: 80px;
-                    height: 28px;
+                    width: 84px;
+                    height: 30px;
                     background: ok-ta.pressed ? Theme.selection-strong : (ok-ta.has-hover ? Theme.selection : Theme.accent);
-                    border-radius: 5px;
-                    Text { text: "OK"; color: Theme.text-primary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    border-radius: 6px;
+                    Text { text: "OK"; color: Theme.text-primary; font-size: 12.5px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                     ok-ta := TouchArea { clicked => { AppState.request_dialog_confirm(AppState.dialog_value); } }
                 }
             }
@@ -463,8 +563,8 @@ component NameDialog inherits Rectangle {
 
     changed visible => {
         if self.visible {
-            name-input.focus();
-            name-input.select-all();
+            name-input.focus-field();
+            name-input.select-all-text();
         }
     }
 }
@@ -532,6 +632,7 @@ export component MainWindow inherits Window {
                         text: item;
                         color: idx == AppState.active_tab ? Theme.text-primary : Theme.text-secondary;
                         font-size: 12px;
+                        font-weight: idx == AppState.active_tab ? 600 : 400;
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
@@ -540,8 +641,8 @@ export component MainWindow inherits Window {
                     Rectangle {
                         width: 18px;
                         height: 18px;
-                        border-radius: 3px;
-                        background: close-ta.has-hover ? Theme.surface-hover : transparent;
+                        border-radius: 4px;
+                        background: close-ta.has-hover ? Theme.surface-pressed : transparent;
                         visible: close-ta.has-hover || idx == AppState.active_tab;
                         Text {
                             text: "×";
@@ -589,34 +690,32 @@ export component MainWindow inherits Window {
             height: parent.height;
             padding: 8px;
             padding-left: 8px;
-            spacing: 4px;
+            spacing: 5px;
 
-            NavIconButton { enabled: AppState.can_go_back; clicked => { AppState.request_back(); } IconBack { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
-            NavIconButton { enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } IconForward { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
-            NavIconButton { enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } IconUp { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
+            NavIconButton { enabled: AppState.can_go_back; clicked => { AppState.request_back(); } IconBack { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
+            NavIconButton { enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } IconForward { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
+            NavIconButton { enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } IconUp { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
             ToolSeparator {}
             NavIconButton { clicked => { AppState.request_refresh(); } IconRefresh { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } IconRefreshArrow { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
             ToolSeparator {}
 
-            Rectangle {
-                height: 28px;
+            address-field := InputField {
+                height: 30px;
                 horizontal-stretch: 1;
-                background: Theme.surface;
-                border-radius: 6px;
-                border-width: 1px;
-                border-color: address-input.has-focus ? Theme.accent : Theme.border-subtle;
-
-                address-input := LineEdit {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    height: parent.height;
-                    text <=> AppState.address_path;
-                    accepted => { AppState.request_navigate(AppState.address_path); }
-                }
+                text <=> AppState.address_path;
+                accepted => { AppState.request_navigate(AppState.address_path); }
             }
 
             ToolSeparator {}
             NewFolderButton { clicked => { AppState.request_new_folder(); } }
+        }
+
+        // Hairline that separates the navigation chrome from the content.
+        Rectangle {
+            y: parent.height - 1px;
+            height: 1px;
+            width: parent.width;
+            background: Theme.border-subtle;
         }
     }
 
@@ -633,7 +732,7 @@ export component MainWindow inherits Window {
             y: 0;
             width: Metrics.sidebar-width;
             height: parent.height;
-            background: Theme.window-bg;
+            background: Theme.sidebar-bg;
 
             sidebar-nav := NavTouchArea {
                 x: 0;
@@ -647,19 +746,29 @@ export component MainWindow inherits Window {
                 y: 0;
                 width: parent.width;
                 height: parent.height;
-                padding: 8px;
-                spacing: 2px;
+                padding: 10px;
+                padding-top: 12px;
+                spacing: 1px;
 
-                SectionLabel { text: "Quick Access"; }
+                SectionLabel { text: "QUICK ACCESS"; }
                 SidebarButton { text: "Home"; icon: AppState.home_icon; target: AppState.home_path; selected: AppState.address_path == AppState.home_path; }
                 SidebarButton { text: "Desktop"; icon: AppState.desktop_icon; target: AppState.desktop_path; selected: AppState.address_path == AppState.desktop_path; }
                 SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; selected: AppState.address_path == AppState.documents_path; }
                 SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; selected: AppState.address_path == AppState.downloads_path; }
 
-                Rectangle { height: 10px; }
+                Rectangle { height: 12px; }
 
-                SectionLabel { text: "Drives"; }
+                SectionLabel { text: "DRIVES"; }
                 for drive in AppState.drives: DriveRow { drive: drive; }
+            }
+
+            // Hairline between sidebar and file area.
+            Rectangle {
+                x: parent.width - 1px;
+                y: 0;
+                width: 1px;
+                height: parent.height;
+                background: Theme.border-subtle;
             }
         }
 
@@ -697,9 +806,10 @@ export component MainWindow inherits Window {
                     y: 0;
                     width: parent.width;
                     height: parent.height;
-                    HeaderCell { text: "Name"; column: 0; horizontal-stretch: 1; min-width: 260px; text-indent: 31px; }
+                    spacing: 6px;
+                    HeaderCell { text: "Name"; column: 0; horizontal-stretch: 1; min-width: 260px; text-indent: 32px; }
                     HeaderCell { text: "Type"; column: 1; width: Metrics.col-type; text-indent: 0px; }
-                    HeaderCell { text: "Size"; column: 2; width: Metrics.col-size; text-indent: 0px; }
+                    HeaderCell { text: "Size"; column: 2; width: Metrics.col-size; text-indent: 0px; right-align: true; }
                     HeaderCell { text: "Modified"; column: 3; width: Metrics.col-modified; text-indent: 0px; }
                 }
 
@@ -786,8 +896,8 @@ export component MainWindow inherits Window {
                             // Standard "focus address bar" shortcut (browser /
                             // Explorer behavior): focus + select all, so typing
                             // replaces the current path.
-                            address-input.focus();
-                            address-input.select-all();
+                            address-field.focus-field();
+                            address-field.select-all-text();
                             accept
                         } else {
                             reject
@@ -800,7 +910,20 @@ export component MainWindow inherits Window {
 
                         for item[idx] in AppState.files: Rectangle {
                             height: Metrics.row-height;
-                            background: item.selected ? Theme.selection : (row-ta.pressed ? Theme.surface-pressed : (row-ta.has-hover ? Theme.surface-hover : transparent));
+
+                            // Rounded hover/selection pill inset from the row
+                            // edges — the modern Files/OneDrive look. The
+                            // hit target stays the full row.
+                            row-pill := Rectangle {
+                                x: 4px;
+                                y: 2px;
+                                width: parent.width - 8px;
+                                height: parent.height - 4px;
+                                border-radius: 5px;
+                                background: item.selected
+                                    ? (row-ta.has-hover ? Theme.selection-strong : Theme.selection)
+                                    : (row-ta.pressed ? Theme.surface-pressed : (row-ta.has-hover ? Theme.surface-hover : transparent));
+                            }
 
                             HorizontalLayout {
                                 x: 0;
@@ -819,7 +942,9 @@ export component MainWindow inherits Window {
 
                                 Text {
                                     text: item.name;
-                                    color: item.selected ? Theme.text-primary : Theme.text-secondary;
+                                    color: item.selected
+                                        ? Theme.text-primary
+                                        : (item.is-dir ? Theme.text-primary : Theme.text-secondary);
                                     font-size: 12.5px;
                                     min-width: 240px;
                                     horizontal-stretch: 1;
@@ -872,15 +997,39 @@ export component MainWindow inherits Window {
                         height: parent.height;
                         visible: AppState.files.length == 0;
 
-                        Text {
-                            text: AppState.loading ? "Loading…" : "This folder is empty";
-                            color: AppState.loading ? Theme.text-secondary : Theme.text-muted;
-                            font-size: 13px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                        VerticalLayout {
                             width: parent.width;
-                            y: parent.height / 2 - 12px;
-                            height: 24px;
+                            y: parent.height / 2 - 54px;
+                            height: 108px;
+                            spacing: 8px;
+                            alignment: start;
+
+                            IconEmptyFolder {
+                                height: AppState.loading ? 0px : 44px;
+                                visible: !AppState.loading;
+                            }
+
+                            Text {
+                                text: AppState.loading ? "Loading…" : "This folder is empty";
+                                color: AppState.loading ? Theme.text-secondary : Theme.text-primary;
+                                font-size: 13.5px;
+                                font-weight: AppState.loading ? 400 : 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                width: parent.width;
+                                height: 22px;
+                            }
+
+                            Text {
+                                text: "Right-click the empty area for New Folder, Paste and Refresh.";
+                                color: Theme.text-muted;
+                                font-size: 11.5px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                width: parent.width;
+                                height: 18px;
+                                visible: !AppState.loading;
+                            }
                         }
                     }
                 }
@@ -903,13 +1052,22 @@ export component MainWindow inherits Window {
             height: parent.height;
         }
 
+        // Hairline separating the status bar from the content.
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: 1px;
+            background: Theme.border-subtle;
+        }
+
         HorizontalLayout {
             x: 0;
             y: 0;
             width: parent.width;
             height: parent.height;
-            padding-left: 10px;
-            padding-right: 10px;
+            padding-left: 12px;
+            padding-right: 12px;
             spacing: 8px;
 
             Text {
@@ -923,9 +1081,9 @@ export component MainWindow inherits Window {
 
             Text {
                 text: AppState.selected_count > 0
-                    ? AppState.item_count + " items · " + AppState.selected_count + " selected"
+                    ? AppState.selected_count + " of " + AppState.item_count + " selected"
                     : AppState.item_count + " items";
-                color: Theme.text-muted;
+                color: AppState.selected_count > 0 ? Theme.text-secondary : Theme.text-muted;
                 font-size: 11.5px;
                 vertical-alignment: center;
             }
