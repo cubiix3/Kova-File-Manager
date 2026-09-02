@@ -2,7 +2,9 @@ use kova_core::domain::{FileEntry, FileKind, FileMetadata, IconHandle};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use windows::Win32::Foundation::MAX_PATH;
-use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDriveStringsW};
+use windows::Win32::Storage::FileSystem::{
+    GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW,
+};
 use windows::core::PCWSTR;
 
 const DRIVE_FIXED: u32 = 3;
@@ -14,6 +16,10 @@ const DRIVE_RAMDISK: u32 = 6;
 pub struct DriveInfo {
     pub letter: String,
     pub path: PathBuf,
+    /// Total size in bytes; 0 when unknown (e.g. removable without media).
+    pub total_bytes: u64,
+    /// Free bytes; 0 when unknown.
+    pub free_bytes: u64,
 }
 
 /// Enumerate local logical drives as returned by Windows. Only fixed and
@@ -34,7 +40,13 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
             let path = PathBuf::from(&os_string);
             if is_included_drive_type(&path) {
                 let letter = os_string.to_string_lossy().into_owned();
-                Some(DriveInfo { letter, path })
+                let (total_bytes, free_bytes) = drive_capacity(&path);
+                Some(DriveInfo {
+                    letter,
+                    path,
+                    total_bytes,
+                    free_bytes,
+                })
             } else {
                 None
             }
@@ -42,6 +54,27 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
         .collect();
 
     drives
+}
+
+/// Capacity of a drive root in (total, free) bytes; (0, 0) when unavailable.
+fn drive_capacity(root: &std::path::Path) -> (u64, u64) {
+    let wide: Vec<u16> = root
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut total: u64 = 0;
+    let mut free: u64 = 0;
+    // SAFETY: both out-pointers are valid for the duration of the call.
+    unsafe {
+        let _ = GetDiskFreeSpaceExW(
+            PCWSTR(wide.as_ptr()),
+            None,
+            Some(&mut total),
+            Some(&mut free),
+        );
+    }
+    (total, free)
 }
 
 fn is_included_drive_type(path: &std::path::Path) -> bool {
@@ -74,5 +107,19 @@ mod tests {
         let drives = list_local_drives();
         // At least the system drive should be present on a real Windows box.
         assert!(!drives.is_empty(), "expected at least one local drive");
+        // The system drive must report a plausible capacity.
+        let system = drives
+            .iter()
+            .find(|d| {
+                d.path.starts_with(
+                    std::env::var("SystemDrive")
+                        .unwrap_or_else(|_| "C:".into())
+                        .replace(':', ""),
+                )
+            })
+            .or_else(|| drives.first())
+            .unwrap();
+        assert!(system.total_bytes > 0, "fixed drives report a total size");
+        assert!(system.free_bytes <= system.total_bytes);
     }
 }
