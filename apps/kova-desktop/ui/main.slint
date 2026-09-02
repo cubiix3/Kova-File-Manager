@@ -3,24 +3,24 @@ import { ListView } from "std-widgets.slint";
 // Theme tokens — central place for colors and metrics.
 export global Theme {
     out property <color> window-bg: #1b1b1f;
-    out property <color> surface: #1f1f23;
+    // Raised fill used by the address bar and other inset controls.
+    out property <color> surface: #202025;
     out property <color> surface-alt: #26262b;
-    out property <color> surface-hover: #2c2c33;
-    out property <color> surface-pressed: #33333b;
+    out property <color> surface-hover: #2d2d34;
+    out property <color> surface-pressed: #35353d;
     // Sidebar is one step above the content background so the shell reads as
     // "navigation chrome" vs. "document area" (Files/Explorer pattern).
     out property <color> sidebar-bg: #1e1e23;
     out property <color> selection: #0e466e;
     out property <color> selection-strong: #12507f;
     out property <color> border: #3a3a42;
-    out property <color> border-subtle: #2a2a31;
+    out property <color> border-subtle: #2b2b32;
     out property <color> text-primary: #f2f2f4;
     out property <color> text-secondary: #c9c9d1;
     out property <color> text-muted: #98989f;
     out property <color> text-disabled: #63636e;
     out property <color> accent: #2f81f7;
     out property <color> danger: #e5534b;
-    out property <color> statusbar-bg: #1e1e22;
     out property <color> shadow: #00000066;
 }
 
@@ -106,11 +106,11 @@ export global AppState {
 
 // Layout metrics (single source of truth for the window skeleton).
 export global Metrics {
-    out property <length> tabs-height: 36px;
-    out property <length> toolbar-height: 46px;
-    out property <length> statusbar-height: 26px;
+    out property <length> tabs-height: 34px;
+    out property <length> toolbar-height: 44px;
+    out property <length> statusbar-height: 24px;
     out property <length> sidebar-width: 220px;
-    out property <length> header-height: 32px;
+    out property <length> header-height: 30px;
     out property <length> row-height: 28px;
     out property <length> icon-size: 18px;
     out property <length> icon-size-sm: 16px;
@@ -136,7 +136,7 @@ component NavTouchArea inherits TouchArea {
     }
 }
 
-// --- Vector toolbar glyphs (viewbox 16x16, self-centering) -----------------
+// --- Vector glyphs (viewbox 16x16 unless noted, self-centering) ------------
 // All icons accept a `tint` so disabled states can dim them.
 
 component IconBack inherits Path {
@@ -207,6 +207,32 @@ component IconFolderNew inherits Path {
     commands: "M 1.5 4.4 C 1.5 3.5 2.2 2.8 3.1 2.8 L 6 2.8 L 7.2 4.3 L 12.9 4.3 C 13.8 4.3 14.5 5 14.5 5.9 L 14.5 11.6 C 14.5 12.5 13.8 13.2 12.9 13.2 L 3.1 13.2 C 2.2 13.2 1.5 12.5 1.5 11.6 Z";
 }
 
+// Small close glyph for tab chips (viewbox 10x10).
+component IconClose inherits Path {
+    in property <color> tint: Theme.text-muted;
+    width: 8px;
+    height: 8px;
+    viewbox-width: 10;
+    viewbox-height: 10;
+    fill: transparent;
+    stroke: root.tint;
+    stroke-width: 1.3px;
+    commands: "M 2 2 L 8 8 M 8 2 L 2 8";
+}
+
+// Small plus glyph for the new-tab button (viewbox 10x10).
+component IconPlus inherits Path {
+    in property <color> tint: Theme.text-secondary;
+    width: 10px;
+    height: 10px;
+    viewbox-width: 10;
+    viewbox-height: 10;
+    fill: transparent;
+    stroke: root.tint;
+    stroke-width: 1.4px;
+    commands: "M 5 1.5 L 5 8.5 M 1.5 5 L 8.5 5";
+}
+
 // Large outline folder for the empty state (viewbox 24x24).
 component IconEmptyFolder inherits Path {
     width: 44px;
@@ -221,13 +247,16 @@ component IconEmptyFolder inherits Path {
 
 // --- Controls --------------------------------------------------------------
 
+// Square 32x32 navigation button (Back / Forward / Up). The glyph is passed
+// as a child and must be centered by the caller.
 component NavIconButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked();
 
-    height: 30px;
-    min-width: 32px;
-    border-radius: 5px;
+    // Explicit width: without it the toolbar layout stretches the button.
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
     background: !enabled
         ? transparent
         : (btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : transparent));
@@ -240,21 +269,31 @@ component NavIconButton inherits Rectangle {
     @children
 }
 
+// Compact "New Folder" action aligned with the nav buttons.
 component NewFolderButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked();
 
-    height: 30px;
+    // Keep the preferred (content) width inside the toolbar layout.
+    horizontal-stretch: 0;
+    height: 32px;
     border-radius: 6px;
     background: btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : Theme.surface-alt);
 
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 11px;
+        padding-left: 9px;
+        padding-right: 10px;
         spacing: 6px;
         alignment: center;
 
-        IconFolderNew {}
+        VerticalLayout {
+            alignment: center;
+            IconFolderNew {
+                width: 14px;
+                height: 14px;
+                tint: Theme.text-secondary;
+            }
+        }
         Text {
             text: "New Folder";
             color: Theme.text-primary;
@@ -268,18 +307,18 @@ component NewFolderButton inherits Rectangle {
     }
 }
 
-component ToolSeparator inherits Rectangle {
-    width: 1px;
-    height: 18px;
-    background: Theme.border-subtle;
-}
-
 // Themed single-line text field (address bar, dialogs). Built directly on
 // TextInput so the visual language (radius, borders, focus ring) matches the
 // rest of Kova instead of the stock widget style.
+//
+// `quiet` renders the field without a resting border (address bar style);
+// `right-inset` reserves space so trailing @children (e.g. the embedded
+// refresh button) do not overlap the text.
 component InputField inherits Rectangle {
     in property <string> placeholder: "";
     in property <length> font-size: 12.5px;
+    in property <length> right-inset: 10px;
+    in property <bool> quiet: false;
     in-out property <string> text <=> ti.text;
     callback accepted();
 
@@ -287,11 +326,13 @@ component InputField inherits Rectangle {
     public function select-all-text() { ti.select-all(); }
 
     forward-focus: ti;
-    height: 30px;
+    height: 32px;
     border-radius: 6px;
     background: Theme.surface;
     border-width: 1px;
-    border-color: ti.has-focus ? Theme.accent : (fld-ta.has-hover ? Theme.border : Theme.border-subtle);
+    border-color: ti.has-focus
+        ? Theme.accent
+        : (fld-ta.has-hover ? Theme.border-subtle : (root.quiet ? transparent : Theme.border-subtle));
 
     // Click-to-focus for the padding area around the text. The TextInput on
     // top handles clicks within the text region itself (caret placement,
@@ -302,7 +343,7 @@ component InputField inherits Rectangle {
 
     VerticalLayout {
         padding-left: 10px;
-        padding-right: 10px;
+        padding-right: root.right-inset;
         alignment: center;
 
         ti := TextInput {
@@ -333,6 +374,8 @@ component InputField inherits Rectangle {
             MenuItem { title: "Select All"; activated => { ti.select-all(); } }
         }
     }
+
+    @children
 }
 
 component SidebarButton inherits Rectangle {
@@ -341,26 +384,29 @@ component SidebarButton inherits Rectangle {
     in property <string> target: "";
     in property <bool> selected: false;
 
-    height: 28px;
+    height: 26px;
     border-radius: 5px;
     background: selected ? Theme.selection : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.surface-hover : transparent));
 
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 8px;
+        padding-left: 9px;
+        padding-right: 7px;
         spacing: 8px;
 
-        Image {
-            source: root.icon;
-            width: Metrics.icon-size-sm;
-            height: Metrics.icon-size-sm;
-            image-rendering: smooth;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: Metrics.icon-size-sm;
+                height: Metrics.icon-size-sm;
+                image-rendering: smooth;
+            }
         }
 
         Text {
             text: root.text;
             color: selected ? Theme.text-primary : Theme.text-secondary;
-            font-size: 12.5px;
+            font-size: 12px;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
@@ -372,64 +418,74 @@ component SidebarButton inherits Rectangle {
     }
 }
 
+// Drive entry: icon + name/free-space line over a full-width usage bar. The
+// detail text keeps its preferred width (the name elides first) so free-space
+// information is not cut off early, and the bar aligns with the text column.
 component DriveRow inherits Rectangle {
     in property <DriveItem> drive;
 
-    height: 44px;
+    height: 46px;
     border-radius: 6px;
     background: drive-ta.pressed ? Theme.surface-pressed : (drive-ta.has-hover ? Theme.surface-hover : transparent);
 
     HorizontalLayout {
-        padding-left: 10px;
+        padding-left: 9px;
         padding-right: 10px;
         spacing: 10px;
-        alignment: center;
 
-        Image {
-            source: drive.icon;
-            width: 20px;
-            height: 20px;
-            image-rendering: smooth;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: drive.icon;
+                width: 20px;
+                height: 20px;
+                image-rendering: smooth;
+            }
         }
 
         VerticalLayout {
-            spacing: 5px;
-            padding-top: 6px;
-            padding-bottom: 6px;
+            spacing: 6px;
+            padding-top: 7px;
+            padding-bottom: 7px;
             horizontal-stretch: 1;
 
-            Text {
-                text: drive.name;
-                color: Theme.text-primary;
-                font-size: 12.5px;
-                vertical-alignment: center;
-                overflow: elide;
+            HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: drive.name;
+                    color: Theme.text-primary;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                Text {
+                    text: drive.detail;
+                    color: Theme.text-muted;
+                    font-size: 10px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    visible: drive.detail != "";
+                }
             }
 
             Rectangle {
-                height: 3px;
-                border-radius: 1.5px;
-                background: Theme.border-subtle;
+                height: 4px;
+                border-radius: 2px;
+                background: Theme.surface-pressed;
+                visible: drive.detail != "";
 
                 Rectangle {
                     x: 0;
                     y: 0;
                     height: parent.height;
                     width: parent.width * Math.clamp(drive.usage, 0, 1);
-                    border-radius: 1.5px;
+                    border-radius: 2px;
                     background: drive.usage > 0.9 ? Theme.danger : Theme.accent;
                 }
             }
-        }
-
-        Text {
-            text: drive.detail;
-            color: Theme.text-muted;
-            font-size: 10.5px;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-            overflow: elide;
-            width: 92px;
         }
     }
 
@@ -439,7 +495,7 @@ component DriveRow inherits Rectangle {
 }
 
 component SectionLabel inherits Text {
-    height: 22px;
+    height: 20px;
     color: Theme.text-muted;
     font-size: 10px;
     font-weight: 700;
@@ -466,14 +522,14 @@ component HeaderCell inherits Rectangle {
         Text {
             text: root.text;
             color: Theme.text-muted;
-            font-size: 11.5px;
+            font-size: 11px;
             font-weight: 600;
             vertical-alignment: center;
         }
         Text {
             text: AppState.sort_column == root.column ? (AppState.sort_ascending ? "▲" : "▼") : "";
             color: Theme.accent;
-            font-size: 9.5px;
+            font-size: 9px;
             vertical-alignment: center;
         }
     }
@@ -577,7 +633,10 @@ export component MainWindow inherits Window {
     forward-focus: list-scope;
 
     // Window skeleton — absolute placement against the window, so every
-    // region has a well-defined, non-negotiable geometry.
+    // region has a well-defined, non-negotiable geometry. Tabs and toolbar
+    // share the window background and read as one chrome block; a single
+    // hairline below the toolbar separates chrome from content.
+
     tabs := Rectangle {
         y: 0;
         x: 0;
@@ -599,12 +658,12 @@ export component MainWindow inherits Window {
             height: parent.height;
             padding: 4px;
             padding-left: 6px;
-            spacing: 3px;
+            spacing: 2px;
             alignment: start;
 
             for item[idx] in AppState.tabs: Rectangle {
-                width: 176px;
-                height: 28px;
+                width: 180px;
+                height: 26px;
                 border-radius: 6px;
                 background: idx == AppState.active_tab ? Theme.surface-alt : (tab-ta.pressed ? Theme.surface-pressed : (tab-ta.has-hover ? Theme.surface-hover : transparent));
 
@@ -612,7 +671,7 @@ export component MainWindow inherits Window {
                     clicked => { AppState.request_switch_tab(idx); }
                 }
 
-                // Active tab gets a thin accent underline.
+                // Active tab marker: a short, subtle accent underline.
                 Rectangle {
                     x: 10px;
                     y: parent.height - 3px;
@@ -625,8 +684,8 @@ export component MainWindow inherits Window {
 
                 HorizontalLayout {
                     padding-left: 10px;
-                    padding-right: 4px;
-                    spacing: 4px;
+                    padding-right: 3px;
+                    spacing: 5px;
 
                     Text {
                         text: item;
@@ -638,32 +697,38 @@ export component MainWindow inherits Window {
                         horizontal-stretch: 1;
                     }
 
-                    Rectangle {
-                        width: 18px;
-                        height: 18px;
-                        border-radius: 4px;
-                        background: close-ta.has-hover ? Theme.surface-pressed : transparent;
-                        visible: close-ta.has-hover || idx == AppState.active_tab;
-                        Text {
-                            text: "×";
-                            color: close-ta.has-hover ? Theme.text-primary : Theme.text-muted;
-                            font-size: 12px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        close-ta := NavTouchArea {
-                            clicked => { AppState.request_close_tab(idx); }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 18px;
+                            height: 18px;
+                            border-radius: 4px;
+                            background: close-ta.has-hover ? Theme.surface-hover : transparent;
+                            visible: close-ta.has-hover || idx == AppState.active_tab;
+
+                            IconClose {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                tint: close-ta.has-hover ? Theme.text-primary : Theme.text-muted;
+                            }
+
+                            close-ta := NavTouchArea {
+                                clicked => { AppState.request_close_tab(idx); }
+                            }
                         }
                     }
                 }
             }
 
             Rectangle {
-                width: 28px;
-                height: 28px;
+                width: 26px;
+                height: 26px;
                 border-radius: 6px;
                 background: new-tab-ta.pressed ? Theme.surface-pressed : (new-tab-ta.has-hover ? Theme.surface-hover : transparent);
-                Text { text: "+"; color: Theme.text-secondary; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                IconPlus {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
                 new-tab-ta := NavTouchArea { clicked => { AppState.request_new_tab(); } }
             }
         }
@@ -683,30 +748,62 @@ export component MainWindow inherits Window {
             height: parent.height;
         }
 
+        // One compact, connected row: navigation cluster — wide central
+        // address bar (with embedded refresh) — New Folder. All controls
+        // share the same 32px height and corner radius.
         HorizontalLayout {
             x: 0;
             y: 0;
             width: parent.width;
             height: parent.height;
-            padding: 8px;
+            padding: 6px;
             padding-left: 8px;
-            spacing: 5px;
+            padding-right: 8px;
+            spacing: 4px;
 
             NavIconButton { enabled: AppState.can_go_back; clicked => { AppState.request_back(); } IconBack { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
             NavIconButton { enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } IconForward { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
             NavIconButton { enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } IconUp { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
-            ToolSeparator {}
-            NavIconButton { clicked => { AppState.request_refresh(); } IconRefresh { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } IconRefreshArrow { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
-            ToolSeparator {}
 
             address-field := InputField {
-                height: 30px;
+                height: 32px;
                 horizontal-stretch: 1;
+                quiet: true;
+                right-inset: 32px;
                 text <=> AppState.address_path;
                 accepted => { AppState.request_navigate(AppState.address_path); }
+
+                // Refresh lives inside the address bar (browser/Explorer
+                // pattern) so the toolbar stays a single connected unit.
+                refresh-btn := Rectangle {
+                    x: parent.width - self.width - 3px;
+                    y: (parent.height - self.height) / 2;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 5px;
+                    background: refresh-ta.pressed ? Theme.surface-pressed : (refresh-ta.has-hover ? Theme.surface-hover : transparent);
+
+                    IconRefresh {
+                        width: 14px;
+                        height: 14px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        tint: Theme.text-secondary;
+                    }
+                    IconRefreshArrow {
+                        width: 14px;
+                        height: 14px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        tint: Theme.text-secondary;
+                    }
+
+                    refresh-ta := NavTouchArea {
+                        clicked => { AppState.request_refresh(); }
+                    }
+                }
             }
 
-            ToolSeparator {}
             NewFolderButton { clicked => { AppState.request_new_folder(); } }
         }
 
@@ -746,8 +843,8 @@ export component MainWindow inherits Window {
                 y: 0;
                 width: parent.width;
                 height: parent.height;
-                padding: 10px;
-                padding-top: 12px;
+                padding: 8px;
+                padding-top: 10px;
                 spacing: 1px;
 
                 SectionLabel { text: "QUICK ACCESS"; }
@@ -756,7 +853,7 @@ export component MainWindow inherits Window {
                 SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; selected: AppState.address_path == AppState.documents_path; }
                 SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; selected: AppState.address_path == AppState.downloads_path; }
 
-                Rectangle { height: 12px; }
+                Rectangle { height: 10px; }
 
                 SectionLabel { text: "DRIVES"; }
                 for drive in AppState.drives: DriveRow { drive: drive; }
@@ -919,7 +1016,7 @@ export component MainWindow inherits Window {
                                 y: 2px;
                                 width: parent.width - 8px;
                                 height: parent.height - 4px;
-                                border-radius: 5px;
+                                border-radius: 6px;
                                 background: item.selected
                                     ? (row-ta.has-hover ? Theme.selection-strong : Theme.selection)
                                     : (row-ta.pressed ? Theme.surface-pressed : (row-ta.has-hover ? Theme.surface-hover : transparent));
@@ -933,11 +1030,14 @@ export component MainWindow inherits Window {
                                 padding-left: 8px;
                                 spacing: 6px;
 
-                                Image {
-                                    source: AppState.icons[item.icon-id];
-                                    width: Metrics.icon-size;
-                                    height: Metrics.icon-size;
-                                    image-rendering: smooth;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        source: AppState.icons[item.icon-id];
+                                        width: Metrics.icon-size;
+                                        height: Metrics.icon-size;
+                                        image-rendering: smooth;
+                                    }
                                 }
 
                                 Text {
@@ -1012,7 +1112,7 @@ export component MainWindow inherits Window {
                             Text {
                                 text: AppState.loading ? "Loading…" : "This folder is empty";
                                 color: AppState.loading ? Theme.text-secondary : Theme.text-primary;
-                                font-size: 13.5px;
+                                font-size: 13px;
                                 font-weight: AppState.loading ? 400 : 600;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -1037,13 +1137,14 @@ export component MainWindow inherits Window {
         }
     }
 
-    // Status bar — full width, pinned to the bottom.
+    // Status bar — full width, pinned to the bottom, same background as the
+    // window so it stays visually quiet.
     statusbar := Rectangle {
         y: parent.height - Metrics.statusbar-height;
         x: 0;
         width: parent.width;
         height: Metrics.statusbar-height;
-        background: Theme.statusbar-bg;
+        background: Theme.window-bg;
 
         statusbar-nav := NavTouchArea {
             x: 0;
@@ -1072,8 +1173,8 @@ export component MainWindow inherits Window {
 
             Text {
                 text: AppState.status_text;
-                color: Theme.text-secondary;
-                font-size: 11.5px;
+                color: Theme.text-muted;
+                font-size: 11px;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
                 overflow: elide;
@@ -1084,7 +1185,7 @@ export component MainWindow inherits Window {
                     ? AppState.selected_count + " of " + AppState.item_count + " selected"
                     : AppState.item_count + " items";
                 color: AppState.selected_count > 0 ? Theme.text-secondary : Theme.text-muted;
-                font-size: 11.5px;
+                font-size: 11px;
                 vertical-alignment: center;
             }
         }
