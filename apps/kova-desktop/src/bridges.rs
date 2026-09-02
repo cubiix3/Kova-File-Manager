@@ -135,6 +135,25 @@ impl CommandDispatcher {
         self.request_enumeration(id, initial);
     }
 
+    /// Open the entry at `index` in a brand-new tab. Only directories are
+    /// valid targets. The new tab becomes active and starts with a fresh
+    /// history rooted at the target location.
+    pub fn dispatch_open_in_new_tab(&self, index: usize) -> Result<(), String> {
+        let location = {
+            let ctrl = self.controller.lock().unwrap();
+            let entry = resolve_index(&ctrl, index).ok_or("no entry at index")?;
+            if entry.kind != FileKind::Directory {
+                return Err("only folders can be opened in a new tab".into());
+            }
+            canonicalize_location(&entry.path).map_err(|e| e.to_string())?
+        };
+        let id = {
+            let mut ctrl = self.controller.lock().unwrap();
+            ctrl.new_tab(location.clone())
+        };
+        self.request_enumeration(id, location);
+        Ok(())
+    }
     pub fn dispatch_close_tab(&self, index: usize) -> Result<(), String> {
         let new_active = {
             let mut ctrl = self.controller.lock().unwrap();
@@ -206,7 +225,6 @@ impl CommandDispatcher {
     }
 
     pub fn dispatch_activate(&self, index: usize) {
-        tracing::debug!("activate: request index={}", index);
         let (tab_id, path, kind) = {
             let ctrl = self.controller.lock().unwrap();
             let tab_id = ctrl.active_tab_id();
@@ -217,7 +235,6 @@ impl CommandDispatcher {
                     return;
                 }
             };
-            tracing::debug!("activate: entry {} kind={:?}", entry.name, entry.kind);
             (tab_id, entry.path.clone(), entry.kind)
         };
 
@@ -254,7 +271,6 @@ impl CommandDispatcher {
     }
 
     pub fn dispatch_rename_to(&self, index: usize, new_name: &str) {
-        tracing::debug!("rename: request index={} name={}", index, new_name);
         if new_name.is_empty() {
             tracing::warn!("rename: empty name");
             return;
@@ -269,11 +285,23 @@ impl CommandDispatcher {
                 }
             }
         };
-        tracing::debug!("rename: sending for {}", path.display());
         self.send(WorkerCommand::Rename {
             path,
             new_name: new_name.to_string(),
         });
+    }
+
+    /// Copy the full Windows path of the entry at `index` to the clipboard.
+    pub fn dispatch_copy_path(&self, index: usize) -> Result<(), String> {
+        let path = {
+            let ctrl = self.controller.lock().unwrap();
+            resolve_index(&ctrl, index)
+                .map(|e| e.path.clone())
+                .ok_or("no entry at index")?
+        };
+        kova_platform_windows::clipboard::set_clipboard_text(&path.display().to_string())
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub fn dispatch_sort(&self, column_index: usize) {

@@ -3,10 +3,15 @@ mod bridges;
 
 use app_state::AppController;
 use bridges::CommandDispatcher;
-use kova_core::domain::{KovaEvent, LocationInput, SortDirection};
+use kova_core::domain::{IconHandle, KovaEvent, LocationInput, SortDirection};
 use kova_ops::worker::{WorkerCommand, spawn_worker};
 use kova_platform_windows::known_folders::{KnownFolder, resolve_known_folder};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
+use kova_platform_windows::shell_icons::{IconBitmap, IconCache, IconKey, icon_key_for};
+use slint::{
+    ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel, Weak,
+};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -20,9 +25,117 @@ enum PendingDialog {
     Rename { index: usize },
 }
 
+/// One resolved icon batch coming back from the icon worker thread.
+#[derive(Debug)]
+struct IconResolved {
+    key: IconKey,
+    bitmap: Option<IconBitmap>,
+}
+
+/// A request for the icon worker thread.
+#[derive(Debug)]
+struct IconRequest {
+    key: IconKey,
+}
+
 /// Mirrors the last path the UI address bar was programmatically set to, so
 /// update_ui does not clobber text the user is currently typing.
 type LastAddress = Arc<Mutex<String>>;
+
+/// UI-side icon registry. Maps icon cache keys to ids in the Slint icon
+/// model, dedupes in-flight requests, and hands resolved images to the UI.
+/// Lives on the UI thread only.
+struct IconStore {
+    model: Rc<VecModel<slint::Image>>,
+    ids: HashMap<IconKey, u32>,
+    pending: HashSet<IconKey>,
+}
+
+impl IconStore {
+    fn new(model: Rc<VecModel<slint::Image>>) -> Self {
+        Self {
+            model,
+            ids: HashMap::new(),
+            pending: HashSet::new(),
+        }
+    }
+
+    /// Insert a resolved bitmap as a new icon id, or return the existing id
+    /// when the key was resolved before.
+    fn intern(&mut self, key: &IconKey, bitmap: Option<&IconBitmap>) -> Option<u32> {
+        if let Some(id) = self.ids.get(key) {
+            return Some(*id);
+        }
+        let bitmap = bitmap?;
+        // The id doubles as the index into the Slint icon model, so
+        // derive it from the model itself: pre-seeded slots occupy
+        // 0..N and every intern appends exactly one row.
+        let id = self.model.row_count() as u32;
+        self.model.push(image_from_bitmap(bitmap));
+        self.ids.insert(key.clone(), id);
+        Some(id)
+    }
+
+    /// Register a pre-seeded id for a generic key (no bitmap push).
+    fn register_preseeded(&mut self, key: IconKey, id: u32) {
+        self.ids.insert(key, id);
+    }
+
+    fn mark_pending(&mut self, key: IconKey) {
+        self.pending.insert(key);
+    }
+
+    fn take_pending(&mut self, key: &IconKey) -> bool {
+        self.pending.remove(key)
+    }
+
+    fn id_for(&self, key: &IconKey) -> Option<u32> {
+        self.ids.get(key).copied()
+    }
+}
+
+fn image_from_bitmap(bitmap: &IconBitmap) -> slint::Image {
+    let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(bitmap.width, bitmap.height);
+    buffer.make_mut_bytes().copy_from_slice(&bitmap.rgba);
+    slint::Image::from_rgba8_premultiplied(buffer)
+}
+
+/// Resolve the generic icon ids (0..=4) synchronously at startup so rows and
+/// sidebar entries always have something meaningful to show before async
+/// resolution completes.
+fn preseed_icon_store(store: &mut IconStore, icons_model: &Rc<VecModel<slint::Image>>) {
+    let cache = IconCache::new();
+    let generics: [(IconKey, u32); 5] = [
+        (IconKey::Folder, 0),
+        (IconKey::File, 1),
+        (IconKey::Symlink, 2),
+        (IconKey::Drive(system_drive_root()), 3),
+        (IconKey::UnknownType, 4),
+    ];
+    for (key, id) in generics {
+        let bitmap = cache.get_or_resolve(&key);
+        let image = bitmap.as_ref().map(image_from_bitmap);
+        let slot = id as usize;
+        match image {
+            Some(image) => {
+                while icons_model.row_count() <= slot {
+                    icons_model.push(slint::Image::default());
+                }
+                icons_model.set_row_data(slot, image);
+            }
+            None => {
+                tracing::warn!("generic icon {key:?} could not be resolved");
+            }
+        }
+        store.register_preseeded(key, id);
+    }
+}
+
+fn system_drive_root() -> std::path::PathBuf {
+    std::env::var("SystemDrive")
+        .map(|d| std::path::PathBuf::from(format!("{d}\\").to_uppercase()))
+        .unwrap_or_else(|_| std::path::PathBuf::from("C:\\"))
+}
 
 /// Long-lived model handles. The same model instances stay installed in the
 /// Slint globals for the whole app lifetime and are updated in place, so row
@@ -51,8 +164,30 @@ async fn main() {
     // Worker events are forwarded into a plain channel and drained by a Slint
     // timer, because Slint properties must only be touched from the UI thread.
     let (ui_evt_tx, ui_evt_rx) = std::sync::mpsc::channel::<KovaEvent>();
+    let (icon_req_tx, icon_req_rx) = std::sync::mpsc::channel::<IconRequest>();
+    let (icon_res_tx, icon_res_rx) = std::sync::mpsc::channel::<IconResolved>();
 
     spawn_worker(cmd_rx, evt_tx);
+
+    // Dedicated icon worker thread. Shell icon resolution must not run
+    // concurrently (see shell_icons::SHELL_ICON_LOCK) and must not block
+    // directory enumeration, so it lives outside the Tokio runtime.
+    {
+        let res_tx = icon_res_tx.clone();
+        std::thread::Builder::new()
+            .name("kova-icons".into())
+            .spawn(move || {
+                let cache = IconCache::new();
+                while let Ok(request) = icon_req_rx.recv() {
+                    let bitmap = cache.get_or_resolve(&request.key);
+                    let _ = res_tx.send(IconResolved {
+                        key: request.key,
+                        bitmap,
+                    });
+                }
+            })
+            .expect("icon worker thread");
+    }
 
     let app_controller = Arc::new(Mutex::new(AppController::new(initial.clone())));
     let dispatcher = CommandDispatcher::new(
@@ -65,14 +200,23 @@ async fn main() {
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
+    let icons_model = Rc::new(VecModel::from(Vec::new()));
     app.global::<AppState>()
         .set_files(ModelRc::from(Rc::clone(&files_model)));
     app.global::<AppState>()
         .set_tabs(ModelRc::from(Rc::clone(&tabs_model)));
+    app.global::<AppState>()
+        .set_icons(ModelRc::from(Rc::clone(&icons_model)));
     let ui_models = Rc::new(UiModels {
-        files: files_model,
+        files: files_model.clone(),
         tabs: tabs_model,
     });
+
+    let icon_store = Rc::new(RefCell::new(IconStore::new(Rc::clone(&icons_model))));
+    {
+        let mut store = icon_store.borrow_mut();
+        preseed_icon_store(&mut store, &icons_model);
+    }
 
     let ui = app.as_weak();
 
@@ -88,7 +232,7 @@ async fn main() {
         Rc::clone(&ui_models),
     );
 
-    // Populate sidebar targets.
+    // Populate sidebar targets and icons.
     set_known_folder_paths(&ui);
     set_drives(&ui);
 
@@ -100,7 +244,11 @@ async fn main() {
         .current_location()
         .cloned()
         .unwrap_or(initial);
-    dispatcher.request_enumeration(start_tab, start_loc);
+    dispatcher.request_enumeration(start_tab, start_loc.clone());
+    {
+        let mut ctrl = app_controller.lock().unwrap();
+        queue_icon_requests(&icon_store, &icon_req_tx, &mut ctrl);
+    }
 
     // Forward worker events into a std channel consumed by a Slint UI timer.
     tokio::spawn(async move {
@@ -109,12 +257,15 @@ async fn main() {
         }
     });
 
-    // UI-thread event pump: process core events forwarded by the worker.
+    // UI-thread event pump: process core events forwarded by the worker and
+    // icon results forwarded by the icon worker thread.
     let ui_for_pump = ui.clone();
     let controller_for_pump = Arc::clone(&app_controller);
     let reload_dispatcher_pump = dispatcher.clone();
     let last_address_pump = Arc::clone(&last_address);
     let models_for_pump = Rc::clone(&ui_models);
+    let store_for_pump = Rc::clone(&icon_store);
+    let icon_req_for_pump = icon_req_tx.clone();
     let pump_timer = slint::Timer::default();
     pump_timer.start(
         slint::TimerMode::Repeated,
@@ -125,6 +276,10 @@ async fn main() {
             let reload_ref = reload_dispatcher_pump.clone();
             let last_address_ref = Arc::clone(&last_address_pump);
             let models_ref = Rc::clone(&models_for_pump);
+            let store_ref = Rc::clone(&store_for_pump);
+            let icon_req_ref = icon_req_for_pump.clone();
+            let mut ui_dirty = false;
+
             while let Ok(event) = ui_evt_rx.try_recv() {
                 let Some(ui) = ui_ref.upgrade() else { return };
                 let mut ctrl = ctrl_ref.lock().unwrap();
@@ -134,17 +289,13 @@ async fn main() {
                             && ctrl.is_current_request(tab_id, snapshot.request_id) =>
                     {
                         ctrl.apply_snapshot(tab_id, snapshot);
-                        tracing::info!(
-                            "controller: snapshot accepted tab={:?} files={} tabs={}",
-                            tab_id,
-                            ctrl.file_list_items().len(),
-                            ctrl.tab_labels().len()
-                        );
+                        queue_icon_requests(&store_ref, &icon_req_ref, &mut ctrl);
                         update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
                     }
                     KovaEvent::DirectoryError {
                         tab_id, location, ..
                     } if ctrl.active_tab_id() == tab_id => {
+                        ctrl.set_loading(false);
                         ctrl.set_status(format!("Error reading {}", location.display()));
                         update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
                     }
@@ -168,6 +319,39 @@ async fn main() {
                     _ => {}
                 }
             }
+
+            // Icon resolutions: intern the bitmap, then stamp the new icon id
+            // onto every snapshot entry that shares the key.
+            while let Ok(res) = icon_res_rx.try_recv() {
+                let mut store = store_ref.borrow_mut();
+                let was_pending = store.take_pending(&res.key);
+                if !was_pending {
+                    continue;
+                }
+                let id = store.intern(&res.key, res.bitmap.as_ref());
+                drop(store);
+                if let Some(id) = id {
+                    let handle = IconHandle(id);
+                    let mut ctrl = ctrl_ref.lock().unwrap();
+                    for snapshot in ctrl.snapshots_mut() {
+                        for entry in snapshot.entries.iter_mut() {
+                            if entry.icon_handle.is_none()
+                                && icon_key_for(&entry.path, entry.is_directory()) == res.key
+                            {
+                                entry.icon_handle = Some(handle);
+                            }
+                        }
+                    }
+                    ui_dirty = true;
+                }
+            }
+
+            if ui_dirty {
+                if let Some(ui) = ui_ref.upgrade() {
+                    let ctrl = ctrl_ref.lock().unwrap();
+                    update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
+                }
+            }
         },
     );
 
@@ -183,28 +367,121 @@ async fn main() {
     app.run().unwrap();
 }
 
-fn set_known_folder_paths(ui: &Weak<MainWindow>) {
-    fn path(folder: KnownFolder) -> SharedString {
-        resolve_known_folder(folder)
-            .map(|l| l.display())
-            .unwrap_or_default()
-            .into()
+/// Send icon requests for snapshot entries that do not have an icon yet.
+/// Cached ids are applied synchronously; misses are queued to the worker.
+/// Must be called while the controller is already locked.
+fn queue_icon_requests(
+    store: &Rc<RefCell<IconStore>>,
+    icon_req_tx: &std::sync::mpsc::Sender<IconRequest>,
+    ctrl: &mut AppController,
+) {
+    let keys: Vec<IconKey> = match ctrl.snapshot() {
+        Some(snap) => snap
+            .entries
+            .iter()
+            .filter(|e| e.icon_handle.is_none())
+            .map(|e| icon_key_for(&e.path, e.is_directory()))
+            .collect(),
+        None => Vec::new(),
+    };
+    if keys.is_empty() {
+        return;
     }
-    if let Some(ui) = ui.upgrade() {
-        let state = ui.global::<AppState>();
-        state.set_home_path(path(KnownFolder::Home));
-        state.set_desktop_path(path(KnownFolder::Desktop));
-        state.set_documents_path(path(KnownFolder::Documents));
-        state.set_downloads_path(path(KnownFolder::Downloads));
+
+    let mut store = store.borrow_mut();
+    let mut hits: Vec<(IconKey, u32)> = Vec::new();
+    for key in keys {
+        if let Some(id) = store.id_for(&key) {
+            hits.push((key, id));
+            continue;
+        }
+        if store.pending.contains(&key) {
+            continue;
+        }
+        store.mark_pending(key.clone());
+        let _ = icon_req_tx.send(IconRequest { key: key.clone() });
+    }
+
+    // Cache hits resolve synchronously: stamp the known id onto the rows.
+    if !hits.is_empty() {
+        for snapshot in ctrl.snapshots_mut() {
+            for entry in snapshot.entries.iter_mut() {
+                if entry.icon_handle.is_some() {
+                    continue;
+                }
+                let key = icon_key_for(&entry.path, entry.is_directory());
+                if let Some((_, id)) = hits.iter().find(|(k, _)| *k == key) {
+                    entry.icon_handle = Some(IconHandle(*id));
+                }
+            }
+        }
     }
 }
 
+fn set_known_folder_paths(ui: &Weak<MainWindow>) {
+    let cache = IconCache::new();
+    let Some(ui) = ui.upgrade() else { return };
+    fn fill(
+        ui: &MainWindow,
+        cache: &IconCache,
+        folder: KnownFolder,
+        set_path: impl FnOnce(&AppState, String),
+        set_icon: impl FnOnce(&AppState, slint::Image),
+    ) {
+        let Some(location) = resolve_known_folder(folder) else {
+            return;
+        };
+        set_path(&ui.global::<AppState>(), location.display());
+        if let Some(bitmap) = cache.get_or_resolve(&IconKey::Path(location.path.clone())) {
+            set_icon(&ui.global::<AppState>(), image_from_bitmap(&bitmap));
+        } else {
+            tracing::debug!("no special shell icon for {}", location.display());
+        }
+    }
+
+    fill(
+        &ui,
+        &cache,
+        KnownFolder::Home,
+        |s, p| s.set_home_path(p.into()),
+        |s, i| s.set_home_icon(i),
+    );
+    fill(
+        &ui,
+        &cache,
+        KnownFolder::Desktop,
+        |s, p| s.set_desktop_path(p.into()),
+        |s, i| s.set_desktop_icon(i),
+    );
+    fill(
+        &ui,
+        &cache,
+        KnownFolder::Documents,
+        |s, p| s.set_documents_path(p.into()),
+        |s, i| s.set_documents_icon(i),
+    );
+    fill(
+        &ui,
+        &cache,
+        KnownFolder::Downloads,
+        |s, p| s.set_downloads_path(p.into()),
+        |s, i| s.set_downloads_icon(i),
+    );
+}
 fn set_drives(ui: &Weak<MainWindow>) {
+    let cache = IconCache::new();
     let drives: Vec<DriveItem> = kova_platform_windows::volumes::list_local_drives()
         .into_iter()
-        .map(|d| DriveItem {
-            name: d.letter.into(),
-            path: d.path.display().to_string().into(),
+        .map(|d| {
+            let icon = cache
+                .get_or_resolve(&IconKey::Drive(d.path.clone()))
+                .map(|bitmap| image_from_bitmap(&bitmap))
+                .unwrap_or_default();
+            DriveItem {
+                name: d.letter.into(),
+                path: d.path.display().to_string().into(),
+                icon,
+            }
         })
         .collect();
     if let Some(ui) = ui.upgrade() {
@@ -443,6 +720,45 @@ fn wire_callbacks(
             d.dispatch_activate(idx as usize);
         });
 
+    // Context menu actions reuse the exact same dispatch paths as the
+    // toolbar/keyboard interactions.
+    let d = dispatcher.clone();
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_context_open(move |idx: i32| {
+            d.dispatch_activate(idx as usize);
+        });
+
+    let d = dispatcher.clone();
+    let ui_ctx_tab = ui.clone();
+    let last_ctx_tab = Arc::clone(&last_address);
+    let models_ctx_tab = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_context_open_in_new_tab(move |idx: i32| {
+            if let Err(e) = d.dispatch_open_in_new_tab(idx as usize) {
+                show_action_error(&ui_ctx_tab, &d, &last_ctx_tab, &models_ctx_tab, &e);
+            }
+        });
+
+    let d = dispatcher.clone();
+    let ui_copy = ui.clone();
+    let last_copy = Arc::clone(&last_address);
+    let models_copy = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_copy_path(move |idx: i32| match d.dispatch_copy_path(idx as usize) {
+            Ok(()) => {
+                d.set_status_message("Path copied to clipboard".into());
+                if let Some(u) = ui_copy.upgrade() {
+                    sync_ui(&u, &d, &last_copy, &models_copy);
+                }
+            }
+            Err(e) => {
+                show_action_error(&ui_copy, &d, &last_copy, &models_copy, &e);
+            }
+        });
+
     let pending = Arc::clone(&pending_dialog);
     let dialog_ui = ui.clone();
     ui.unwrap()
@@ -541,20 +857,18 @@ fn update_ui(
         }
     }
 
-    ui.global::<AppState>()
-        .set_status_text(controller.status_text().into());
-    ui.global::<AppState>()
-        .set_can_go_back(controller.can_go_back());
-    ui.global::<AppState>()
-        .set_can_go_forward(controller.can_go_forward());
-    ui.global::<AppState>()
-        .set_can_go_parent(controller.can_go_parent());
+    let state = ui.global::<AppState>();
+    state.set_status_text(controller.status_text().into());
+    state.set_item_count(controller.item_count() as i32);
+    state.set_selected_count(controller.selected_count() as i32);
+    state.set_loading(controller.is_loading());
+    state.set_can_go_back(controller.can_go_back());
+    state.set_can_go_forward(controller.can_go_forward());
+    state.set_can_go_parent(controller.can_go_parent());
 
     let sort = controller.sort_descriptor();
-    ui.global::<AppState>()
-        .set_sort_column(sort.column.as_index() as i32);
-    ui.global::<AppState>()
-        .set_sort_ascending(sort.direction == SortDirection::Ascending);
+    state.set_sort_column(sort.column.as_index() as i32);
+    state.set_sort_ascending(sort.direction == SortDirection::Ascending);
 
     let items: Vec<FileListItem> = controller
         .file_list_items()
@@ -565,6 +879,7 @@ fn update_ui(
             size_text: item.size_text.into(),
             modified_text: item.modified_text.into(),
             icon_id: item.icon_id,
+            is_dir: item.is_dir,
             selected: item.selected,
         })
         .collect();
@@ -592,6 +907,5 @@ fn update_ui(
             }
         }
     }
-    ui.global::<AppState>()
-        .set_active_tab(controller.active_tab_index() as i32);
+    state.set_active_tab(controller.active_tab_index() as i32);
 }

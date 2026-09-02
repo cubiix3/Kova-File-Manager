@@ -251,14 +251,16 @@ fn get_shell_icon(
 /// which handles both alpha-channel icons and legacy mask-only icons.
 fn render_hicon(hicon: HICON) -> Option<IconBitmap> {
     let side = ICON_SIZE as i32;
-    let mut bmi = BITMAPINFO::default();
-    bmi.bmiHeader = BITMAPINFOHEADER {
-        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: side,
-        biHeight: -side, // top-down
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB.0,
+    let bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: side,
+            biHeight: -side, // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
