@@ -10,7 +10,7 @@
 ## Workspace Layout
 
 ```text
-<repo-root>\
+kova/
 ├── Cargo.toml
 ├── crates/
 │   ├── kova-core          → platform-independent domain logic

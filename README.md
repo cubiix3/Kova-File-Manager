@@ -1,72 +1,136 @@
 # Kova
 
-Kova is an experimental, open-source, native-first file manager for Windows.
+Kova is a fast, native-first file manager for Windows 10/11 — built with Rust,
+Slint, and the official Windows APIs (`windows-rs`). No webviews, no Electron,
+no runtime emulation: a real Win32/Shell integration with a GPU-rendered
+native UI.
 
-> **Status:** M0 foundation — complete with deferred UX items.
+> **Status:** M3 — product-quality UI polish on top of a fully wired
+> interaction, shell-integration and file-operations core (M0–M2).
 
-## Goals
+## Features
 
-- Fast, native-first file manager for Windows.
-- Clean separation between UI, core domain logic, and platform-specific operations.
-- Data integrity over flashy features.
-- Built from scratch; not a fork of existing file managers.
+**Navigation & tabs**
 
-## What Works in M0
+- Pill-style tabs with close buttons and independent per-tab state
+  (history, selection, sorting).
+- Back / Forward / Parent / Refresh, address bar with `Ctrl+L`
+  focus + select-all, canonical path handling with visible errors.
+- Mouse back/forward (XBUTTON1/XBUTTON2) handled through the normal
+  Slint input pipeline — no hooks, no window subclassing.
+- Stale-result protection: per-tab generation/request IDs discard
+  outdated directory snapshots.
 
-- Basic directory enumeration (off the UI thread).
-- Navigation: back, forward, parent, direct path entry, refresh.
-- Tabs: create, switch, close with independent state.
-- Sorting by name, type, size, modified date with header indicators.
-- Selection model (single, multi via Ctrl, range via Shift, select all, clear).
-- New folder and rename through a simple in-app dialog.
-- Windows known folder resolution for the initial location and sidebar.
-- Dynamic local drive discovery in the sidebar.
-- File open via the Windows default handler (`ShellExecuteExW`).
-- Stale-result protection using per-tab generation/request IDs.
-- Keyboard shortcuts wired in Slint: F5 (refresh), F2 (rename selected),
-  Ctrl+A (select all), Enter (open selected), Alt+Left/Right/Up (back/forward/parent),
-  Ctrl+L (focus address bar). Focus must be in the file list for the global
-  shortcuts to trigger.
+**Sidebar & drives**
 
-## What Does Not Work Yet / Deferred
+- Quick Access (Home, Desktop, Documents, Downloads) via
+  `SHGetKnownFolderPath`, with real shell icons.
+- Dynamic drive discovery (`GetLogicalDriveStringsW` / `GetDriveTypeW`)
+  with usage bars and "X GB free of Y GB" details (danger color above 90 %
+  usage).
 
-- Global search (MFT/USN/everything-style search).
-- Preview pane, split view, Git integration.
-- Cloud paths, network-specific handling beyond basic UNC paths.
-- Bulk copy/move/delete; only safe sandbox tests for these are prepared.
-- Real Windows shell icons / thumbnails; generic icons are used with a well-defined interface for future replacement.
-- Custom window chrome, auto updater, telemetry, plugins.
-- Rich keyboard focus management: shortcuts depend on the file-list focus scope.
+**File list**
 
-## Build Prerequisites
+- Virtualized details view (name / type / size / modified) with header
+  sorting and indicators, single / multi (`Ctrl`) / range (`Shift`)
+  selection, hover and pressed states, clean empty and loading states.
+- Shell icons resolved asynchronously by a dedicated worker thread with
+  caching and generic fallbacks.
+
+**Native Windows integration**
+
+- Real Explorer shell context menu (`IContextMenu` with
+  `IContextMenu2`/`IContextMenu3` message forwarding) for files and
+  folders, including installed shell extensions (7-Zip, Git, "Open with",
+  Properties). Multi-selection behaves like Explorer.
+- A small Kova context menu on empty space (New Folder, Paste, Refresh).
+- Copy / Cut / Paste / Delete through `IFileOperation` on a dedicated COM
+  thread: Recycle-Bin deletes, native progress and conflict dialogs, the
+  UI thread is never blocked.
+- Explorer-compatible file clipboard (`CF_HDROP` + Preferred DropEffect) —
+  works in both directions with Explorer.
+
+**Keyboard**
+
+- `F5` refresh, `F2` rename, `Del` delete, `Ctrl+C`/`Ctrl+X`/`Ctrl+V`
+  clipboard, `Ctrl+A` select all, `Enter` open, `Alt+←/→/↑`
+  back/forward/parent, `Ctrl+L` address bar.
+
+## Architecture
+
+| Crate | Role |
+| --- | --- |
+| `crates/kova-core` | Platform-independent domain logic — no `unsafe`, no Win32, no UI |
+| `crates/kova-ops` | Filesystem operation execution (Tokio worker, test sandboxes) |
+| `crates/kova-platform-windows` | Win32/Shell/COM integration (icons, menus, clipboard, ops) |
+| `apps/kova-desktop` | Slint desktop application (UI, controllers, bridges) |
+
+The UI thread never blocks on filesystem work: enumeration and shell
+operations run on worker threads and results are pumped back to the UI
+thread through an event queue. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
+
+## Building
+
+Requirements:
 
 - Windows 10/11 x64
-- Rust stable (1.85+) with MSVC toolchain
-- Visual Studio 2022 Build Tools or full Visual Studio with C++ workload
+- Rust stable with the MSVC toolchain (pinned in `rust-toolchain.toml`)
+- Visual Studio 2022 Build Tools with the C++ workload
 
-## Build Commands
+`scripts/cargo-msvc.ps1` locates Visual Studio, imports the MSVC
+environment and runs the requested cargo command:
 
-Use the provided helper so the MSVC environment is set automatically:
+```powershell
+.\scripts\cargo-msvc.ps1 cargo build --workspace --release
+.\scripts\cargo-msvc.ps1 cargo run --bin kova-desktop
+```
+
+Quality gates (enforced by CI):
 
 ```powershell
 .\scripts\cargo-msvc.ps1 cargo fmt --all -- --check
-.\scripts\cargo-msvc.ps1 cargo check --workspace
-.\scripts\cargo-msvc.ps1 cargo clippy --workspace --all-targets --all-features -- -D warnings
+.\scripts\cargo-msvc.ps1 cargo check --workspace --all-targets
 .\scripts\cargo-msvc.ps1 cargo test --workspace
-.\scripts\cargo-msvc.ps1 cargo build --workspace --release
+.\scripts\cargo-msvc.ps1 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-## Run
+## Roadmap
 
-```powershell
-.\scripts\cargo-msvc.ps1 cargo run --bin kova-desktop
-```
+Implemented: M0 (runtime foundation), M1 (shell icons, context menus, mouse
+navigation), M2 (native shell menus, copy/cut/paste/delete), M3 (visual
+polish: sidebar, tabs, toolbar, rows, drives, empty states).
+
+Not started yet: global search, preview pane, drag & drop, undo, resizable
+columns, "This PC" overview, cloud/network-specific handling. See
+[`docs/PRODUCT.md`](docs/PRODUCT.md).
+
+## Documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — workspace layout, crate
+  responsibilities, concurrency model
+- [`docs/PRODUCT.md`](docs/PRODUCT.md) — product goals and scope
+- [`docs/SECURITY_AND_DATA_SAFETY.md`](docs/SECURITY_AND_DATA_SAFETY.md) —
+  data-safety principles for file operations
+- [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md) —
+  enumeration performance baseline
+- [`docs/M0_REPORT.md`](docs/M0_REPORT.md) …
+  [`docs/M2_REPORT.md`](docs/M2_REPORT.md) — milestone reports with
+  runtime-verification evidence
 
 ## License
 
 Licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT)
 at your option.
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in Kova shall be dual licensed as above, without any additional
-terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in Kova shall be dual licensed as above, without any
+additional terms or conditions.
+
+## Acknowledgments
+
+- [files-community/Files](https://github.com/files-community/Files) (MIT) —
+  studied as a UX/interaction reference (pointer states, tab switching,
+  selection model, error surfacing). Kova is an independent implementation;
+  no code was copied. See
+  [`docs/research/FILES_REFERENCE.md`](docs/research/FILES_REFERENCE.md).

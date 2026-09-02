@@ -133,8 +133,8 @@ Sende-Eingaben und Dateisystem/App-Log als Ground Truth.
 | Tab schließen (×) | PASS | Adresse zurück auf Ausgangsordner, Log `tabs=1` |
 | Maus Back/Forward (XBUTTON1/2) | **USER VERIFICATION** | siehe unten |
 
-Hinweis zu Screenshots für den Nutzer: `.rivet_temp/m1_final_view.png`
-(Hauptansicht) und `.rivet_temp/m1_dialog.png` (New-Folder-Dialog; Dialogbox
+Hinweis zu Screenshots für den Nutzer: lokale Screenshot-Aufnahmen
+(Hauptansicht und New-Folder-Dialog; Dialogbox
 ist zentriert, OK-Button bei Client-X 536..615 — per Pixelanalyse verifiziert).
 
 ### D.1 XBUTTON1/2 — USER VERIFICATION

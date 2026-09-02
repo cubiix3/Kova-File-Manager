@@ -143,7 +143,7 @@ Verifiziert mit echter GUI-Automation (UIA-Baum + reale Mouse/SendKeys-Events, S
 - NOT VERIFIED (automatisiert): Shift-Range-Selektion und Ctrl-A im Live-UI (nur Controller-Tests), Scroll-Verhalten bei 10k Entries im Live-UI, Visuelles Feinsampling der Spaltenbreiten bei Resize.
 - Render-Hinweis: In dieser Agenten-Umgebung erzeugt der femtovg-GPU-Renderer eine transparente Client-Area (GL-Kontext schlägt still fehl). Mit `SLINT_BACKEND=winit-software` rendert das UI korrekt (pixel-verifiziert: Tab-Selection `#094771`, Sidebar `#252526`, File-List `#1e1e1e`). Im interaktiven User-Session-Screenshot (vor der Rescue) war das GPU-Rendering funktionsfähig; die reale Nutzer-Verifikation bleibt offen für: endgültige Optik, Sort-Visuell, Resize-Verhalten.
 
-Screenshot: `<repo-root>\.rivet_temp\FINAL_KOVA_SCREENSHOT.png` (Software-Renderer).
+Screenshot: local PrintWindow capture during the verification session (software renderer; not committed to the repository).
 
 ## K. Remaining Issues
 

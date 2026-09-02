@@ -112,7 +112,7 @@ Truth.
 | Explorer-CF_HDROP → Ctrl+V **kopiert** paste_me.txt | PASS (Disk + Log `entries=3`) |
 | Entf → paste_me.txt **Papierkorb** | PASS (Disk + Log `entries=2`) |
 | Rechtsklick → **natives Shell-Menü** (#32768-Popup) | PASS |
-| Screenshots | `.rivet_temp/m2_view.png`, `.rivet_temp/m2_shell_menu.png` (PrintWindow, echter dunkler Inhalt verifiziert) |
+| Screenshots | lokale PrintWindow-Aufnahmen (echter dunkler Inhalt verifiziert; nicht committed) |
 
 Hinweise:
 

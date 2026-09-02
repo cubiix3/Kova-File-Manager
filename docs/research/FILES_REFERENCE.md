@@ -4,8 +4,8 @@ Source repository studied:
 
 ```text
 https://github.com/files-community/Files
-Cloned at: <local-files-clone>\Files
-License: MIT (see <local-files-clone>\Files\LICENSE-MIT)
+Cloned at: <local clone of the upstream repository>
+License: MIT (see LICENSE-MIT in the upstream repository)
 ```
 
 This document captures concrete source paths and ideas from Files that are relevant to the current Kova runtime/UI rescue. Kova remains an independent Rust/Slint project; no large code blocks are copied.
