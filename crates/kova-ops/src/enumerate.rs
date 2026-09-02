@@ -108,7 +108,12 @@ mod tests {
 
     #[tokio::test]
     async fn enumerate_project_root_contains_cargo_toml() {
-        let loc = Location::new(PathBuf::from("<repo-root>"));
+        // Resolve the repository root relative to this crate so the test
+        // never depends on a machine-specific absolute path.
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let loc = Location::new(root);
         let snap = enumerate_directory(loc, 1).await.unwrap();
         let names: Vec<&str> = snap.entries.iter().map(|e| e.name.as_str()).collect();
         assert!(names.contains(&"Cargo.toml"));
