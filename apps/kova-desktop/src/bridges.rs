@@ -3,6 +3,9 @@ use kova_core::domain::{FileKind, Location, LocationInput, SortColumn, TabId};
 use kova_ops::worker::{GenerationCounter, WorkerCommand};
 use kova_platform_windows::known_folders::initial_location;
 use kova_platform_windows::path_resolver::{canonicalize_location, resolve_input};
+use kova_platform_windows::shell_ops::ShellOpCommand;
+use std::path::PathBuf;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
@@ -13,6 +16,9 @@ pub struct CommandDispatcher {
     controller: Arc<Mutex<AppController>>,
     tx: mpsc::Sender<WorkerCommand>,
     generations: Arc<Mutex<GenerationCounter>>,
+    /// Explorer-grade file operations (copy/move/delete) that must run off the
+    /// UI thread on the dedicated shell-ops thread.
+    ops_tx: Sender<ShellOpCommand>,
 }
 
 impl CommandDispatcher {
@@ -20,11 +26,13 @@ impl CommandDispatcher {
         controller: Arc<Mutex<AppController>>,
         tx: mpsc::Sender<WorkerCommand>,
         generations: GenerationCounter,
+        ops_tx: Sender<ShellOpCommand>,
     ) -> Self {
         Self {
             controller,
             tx,
             generations: Arc::new(Mutex::new(generations)),
+            ops_tx,
         }
     }
 
@@ -40,6 +48,10 @@ impl CommandDispatcher {
 
     fn send(&self, cmd: WorkerCommand) {
         let _ = self.tx.try_send(cmd);
+    }
+
+    fn send_ops(&self, cmd: ShellOpCommand) {
+        let _ = self.ops_tx.send(cmd);
     }
 
     fn next_request_id(&self, tab_id: TabId) -> u64 {
@@ -291,17 +303,104 @@ impl CommandDispatcher {
         });
     }
 
-    /// Copy the full Windows path of the entry at `index` to the clipboard.
-    pub fn dispatch_copy_path(&self, index: usize) -> Result<(), String> {
-        let path = {
+    /// Put the current selection on the clipboard, Explorer-compatible.
+    /// `cut` marks the selection for move (Ctrl+X), otherwise copy (Ctrl+C).
+    pub fn dispatch_clipboard_selection(&self, cut: bool) -> Result<(), String> {
+        let paths = {
             let ctrl = self.controller.lock().unwrap();
-            resolve_index(&ctrl, index)
-                .map(|e| e.path.clone())
-                .ok_or("no entry at index")?
+            ctrl.selected_paths()
         };
-        kova_platform_windows::clipboard::set_clipboard_text(&path.display().to_string())
+        if paths.is_empty() {
+            return Err("nothing selected".into());
+        }
+        kova_platform_windows::clipboard::set_clipboard_files(&paths, cut)
             .map_err(|e| e.to_string())?;
+        self.set_status_message(if cut {
+            format!("Cut {} item(s)", paths.len())
+        } else {
+            format!("Copied {} item(s)", paths.len())
+        });
         Ok(())
+    }
+
+    /// Paste clipboard files into the current directory through
+    /// IFileOperation on the shell-ops thread. A cut selection moves.
+    pub fn dispatch_paste(&self) -> Result<(), String> {
+        let files = kova_platform_windows::clipboard::get_clipboard_files()
+            .map_err(|e| e.to_string())?
+            .ok_or("the clipboard does not contain any files")?;
+        let dest = {
+            let ctrl = self.controller.lock().unwrap();
+            ctrl.current_location()
+                .cloned()
+                .ok_or("no current location")?
+                .path
+        };
+        let count = files.paths.len();
+        let command = if files.cut {
+            ShellOpCommand::Move {
+                sources: files.paths,
+                dest,
+            }
+        } else {
+            ShellOpCommand::Copy {
+                sources: files.paths,
+                dest,
+            }
+        };
+        self.send_ops(command);
+        self.set_status_message(format!("Pasting {} item(s)...", count));
+        Ok(())
+    }
+
+    /// Send the selection to the Recycle Bin via IFileOperation.
+    pub fn dispatch_delete_selection(&self) -> Result<(), String> {
+        let paths = {
+            let ctrl = self.controller.lock().unwrap();
+            ctrl.selected_paths()
+        };
+        if paths.is_empty() {
+            return Err("nothing selected".into());
+        }
+        let count = paths.len();
+        self.send_ops(ShellOpCommand::Delete { sources: paths });
+        self.set_status_message(format!("Deleting {} item(s)...", count));
+        Ok(())
+    }
+
+    /// Open the native Windows Explorer shell context menu for the rows the
+    /// user right-clicked. If the clicked row is part of the current
+    /// selection, the menu targets the whole selection (Explorer behavior).
+    /// The call blocks while the menu is open, so the controller lock must be
+    /// released before the menu shows. Returns Ok(true) when a command was
+    /// invoked and the view should refresh.
+    pub fn dispatch_shell_menu(&self, index: usize) -> Result<bool, String> {
+        let paths: Vec<PathBuf> = {
+            let ctrl = self.controller.lock().unwrap();
+            let clicked = ctrl.path_at(index).ok_or("no entry at index")?;
+            let selected = ctrl.selected_paths();
+            if selected.contains(&clicked) {
+                selected
+            } else {
+                vec![clicked]
+            }
+        };
+
+        let invoked = kova_platform_windows::shell_menu::show_shell_context_menu(&paths);
+        if invoked {
+            // The shell command may have modified the filesystem: refresh.
+            let (tab_id, location) = {
+                let ctrl = self.controller.lock().unwrap();
+                let tab_id = ctrl.active_tab_id();
+                let loc = ctrl
+                    .current_location()
+                    .cloned()
+                    .ok_or("no current location")?;
+                (tab_id, loc)
+            };
+            self.request_enumeration(tab_id, location);
+        }
+        Ok(invoked)
     }
 
     pub fn dispatch_sort(&self, column_index: usize) {

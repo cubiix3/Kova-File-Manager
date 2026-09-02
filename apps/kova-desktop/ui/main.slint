@@ -3,21 +3,21 @@ import { LineEdit, ListView } from "std-widgets.slint";
 // Theme tokens — central place for colors and metrics.
 export global Theme {
     out property <color> window-bg: #1b1b1f;
-    out property <color> surface: #232327;
-    out property <color> surface-alt: #2a2a30;
-    out property <color> surface-hover: #35353d;
-    out property <color> surface-pressed: #3d5a80;
-    out property <color> surface-disabled: #2e2e34;
-    out property <color> selection: #0a4d80;
+    out property <color> surface: #1f1f23;
+    out property <color> surface-alt: #26262b;
+    out property <color> surface-hover: #2c2c33;
+    out property <color> surface-pressed: #33333b;
+    out property <color> selection: #0e466e;
+    out property <color> selection-strong: #12507f;
     out property <color> border: #3a3a42;
-    out property <color> border-subtle: #2f2f37;
+    out property <color> border-subtle: #2a2a31;
     out property <color> text-primary: #f2f2f4;
-    out property <color> text-secondary: #cfcfd6;
-    out property <color> text-muted: #9a9aa4;
+    out property <color> text-secondary: #c9c9d1;
+    out property <color> text-muted: #98989f;
     out property <color> text-disabled: #63636e;
-    out property <color> accent: #1f6feb;
+    out property <color> accent: #2f81f7;
     out property <color> danger: #e5534b;
-    out property <color> statusbar-bg: #202024;
+    out property <color> statusbar-bg: #1e1e22;
 }
 
 export struct FileListItem {
@@ -34,6 +34,10 @@ export struct DriveItem {
     name: string,
     path: string,
     icon: image,
+    // Fraction of the drive in use, 0..1 (0 when unknown).
+    usage: float,
+    // e.g. "120 GB free of 476 GB"; empty when unknown.
+    detail: string,
 }
 
 export global AppState {
@@ -86,20 +90,28 @@ export global AppState {
     callback request_dialog_confirm(string);
     callback request_dialog_cancel();
     callback request_sort(int);
-    callback request_context_open(int);
     callback request_context_open_in_new_tab(int);
-    callback request_copy_path(int);
+    // Explorer clipboard integration.
+    callback request_copy();
+    callback request_cut();
+    callback request_paste();
+    callback request_delete();
+    // Native Windows shell context menu for a row.
+    callback request_shell_menu(int);
 }
 
 // Layout metrics (single source of truth for the window skeleton).
 export global Metrics {
-    out property <length> tabs-height: 34px;
-    out property <length> toolbar-height: 42px;
-    out property <length> statusbar-height: 26px;
-    out property <length> sidebar-width: 200px;
+    out property <length> tabs-height: 36px;
+    out property <length> toolbar-height: 44px;
+    out property <length> statusbar-height: 24px;
+    out property <length> sidebar-width: 220px;
     out property <length> header-height: 30px;
-    out property <length> row-height: 28px;
-    out property <length> icon-size: 16px;
+    out property <length> row-height: 26px;
+    out property <length> icon-size: 17px;
+    out property <length> col-type: 130px;
+    out property <length> col-size: 96px;
+    out property <length> col-modified: 148px;
 }
 
 // TouchArea that additionally reacts to the mouse back/forward buttons
@@ -119,63 +131,123 @@ component NavTouchArea inherits TouchArea {
     }
 }
 
-component ToolButton inherits Rectangle {
-    in property <string> text;
+// --- Vector toolbar glyphs (viewbox 16x16, self-centering) -----------------
+
+component IconBack inherits Path {
+    width: 16px;
+    height: 16px;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    fill: transparent;
+    stroke: Theme.text-secondary;
+    stroke-width: 1.7px;
+    commands: "M 10.2 2.8 L 5 8 L 10.2 13.2";
+}
+
+component IconForward inherits Path {
+    width: 16px;
+    height: 16px;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    fill: transparent;
+    stroke: Theme.text-secondary;
+    stroke-width: 1.7px;
+    commands: "M 5.8 2.8 L 11 8 L 5.8 13.2";
+}
+
+component IconUp inherits Path {
+    width: 16px;
+    height: 16px;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    fill: transparent;
+    stroke: Theme.text-secondary;
+    stroke-width: 1.7px;
+    commands: "M 2.8 10.2 L 8 5 L 13.2 10.2";
+}
+
+component IconRefresh inherits Path {
+    width: 16px;
+    height: 16px;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    fill: transparent;
+    stroke: Theme.text-secondary;
+    stroke-width: 1.6px;
+    commands: "M 13.2 8 C 13.2 10.87 10.87 13.2 8 13.2 C 5.13 13.2 2.8 10.87 2.8 8 C 2.8 5.13 5.13 2.8 8 2.8";
+}
+
+component IconRefreshArrow inherits Path {
+    width: 16px;
+    height: 16px;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    fill: Theme.text-secondary;
+    commands: "M 10.7 2.8 L 8.1 0.7 L 8.1 4.9 Z";
+}
+
+component IconFolderNew inherits Path {
+    width: 16px;
+    height: 16px;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    fill: Theme.text-secondary;
+    commands: "M 1.5 4.4 C 1.5 3.5 2.2 2.8 3.1 2.8 L 6 2.8 L 7.2 4.3 L 12.9 4.3 C 13.8 4.3 14.5 5 14.5 5.9 L 14.5 11.6 C 14.5 12.5 13.8 13.2 12.9 13.2 L 3.1 13.2 C 2.2 13.2 1.5 12.5 1.5 11.6 Z";
+}
+
+// --- Controls --------------------------------------------------------------
+
+component NavIconButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked();
 
     height: 28px;
-    width: 32px;
+    min-width: 30px;
     border-radius: 5px;
-    background: !enabled ? transparent : (btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : Theme.surface-alt));
-
-    Text {
-        text: root.text;
-        color: enabled ? Theme.text-primary : Theme.text-disabled;
-        font-size: 15px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
+    background: !enabled
+        ? transparent
+        : (btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : transparent));
 
     btn-ta := NavTouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
     }
+
+    @children
 }
 
-component TextButton inherits Rectangle {
-    in property <string> text;
+component NewFolderButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked();
 
     height: 28px;
-    width: 104px;
     border-radius: 5px;
-    background: !enabled ? Theme.surface-disabled : (btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : Theme.surface-alt));
+    background: btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : Theme.surface-alt);
 
     HorizontalLayout {
-        padding-left: 10px;
+        padding-left: 9px;
         padding-right: 10px;
         spacing: 6px;
         alignment: center;
+
+        IconFolderNew {}
         Text {
-            text: "+";
-            color: enabled ? Theme.text-secondary : Theme.text-disabled;
-            font-size: 13px;
-            vertical-alignment: center;
-        }
-        Text {
-            text: root.text;
-            color: enabled ? Theme.text-primary : Theme.text-disabled;
+            text: "New Folder";
+            color: Theme.text-primary;
             font-size: 12px;
             vertical-alignment: center;
         }
     }
 
     btn-ta := NavTouchArea {
-        enabled: root.enabled;
         clicked => { root.clicked(); }
     }
+}
+
+component ToolSeparator inherits Rectangle {
+    width: 1px;
+    height: 16px;
+    background: Theme.border-subtle;
 }
 
 component SidebarButton inherits Rectangle {
@@ -184,12 +256,12 @@ component SidebarButton inherits Rectangle {
     in property <string> target: "";
     in property <bool> selected: false;
 
-    height: 30px;
+    height: 28px;
     border-radius: 5px;
     background: selected ? Theme.selection : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.surface-hover : transparent));
 
     HorizontalLayout {
-        padding-left: 12px;
+        padding-left: 10px;
         padding-right: 8px;
         spacing: 8px;
 
@@ -202,7 +274,7 @@ component SidebarButton inherits Rectangle {
         Text {
             text: root.text;
             color: selected ? Theme.text-primary : Theme.text-secondary;
-            font-size: 13px;
+            font-size: 12.5px;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
@@ -212,6 +284,79 @@ component SidebarButton inherits Rectangle {
     side-ta := NavTouchArea {
         clicked => { if root.target != "" { AppState.request_navigate(root.target); } }
     }
+}
+
+component DriveRow inherits Rectangle {
+    in property <DriveItem> drive;
+
+    height: 40px;
+    border-radius: 5px;
+    background: drive-ta.pressed ? Theme.surface-pressed : (drive-ta.has-hover ? Theme.surface-hover : transparent);
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 9px;
+        alignment: center;
+
+        Image {
+            source: drive.icon;
+            width: 19px;
+            height: 19px;
+        }
+
+        VerticalLayout {
+            spacing: 4px;
+            padding-top: 5px;
+            padding-bottom: 5px;
+            horizontal-stretch: 1;
+
+            Text {
+                text: drive.name;
+                color: Theme.text-secondary;
+                font-size: 12.5px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Rectangle {
+                height: 3px;
+                border-radius: 1.5px;
+                background: Theme.border-subtle;
+
+                Rectangle {
+                    x: 0;
+                    y: 0;
+                    height: parent.height;
+                    width: parent.width * Math.clamp(drive.usage, 0, 1);
+                    border-radius: 1.5px;
+                    background: drive.usage > 0.9 ? Theme.danger : Theme.accent;
+                }
+            }
+        }
+
+        Text {
+            text: drive.detail;
+            color: Theme.text-muted;
+            font-size: 10.5px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            overflow: elide;
+            width: 96px;
+        }
+    }
+
+    drive-ta := NavTouchArea {
+        clicked => { if drive.path != "" { AppState.request_navigate(drive.path); } }
+    }
+}
+
+component SectionLabel inherits Text {
+    height: 20px;
+    color: Theme.text-muted;
+    font-size: 10.5px;
+    font-weight: 600;
+    vertical-alignment: center;
 }
 
 component HeaderCell inherits Rectangle {
@@ -227,8 +372,8 @@ component HeaderCell inherits Rectangle {
         spacing: 4px;
         Text {
             text: root.text;
-            color: Theme.text-secondary;
-            font-size: 12px;
+            color: Theme.text-muted;
+            font-size: 11.5px;
             font-weight: 600;
             vertical-alignment: center;
         }
@@ -260,7 +405,7 @@ component NameDialog inherits Rectangle {
         width: 380px;
         height: 150px;
         background: Theme.surface-alt;
-        border-radius: 8px;
+        border-radius: 10px;
         border-width: 1px;
         border-color: Theme.border;
 
@@ -299,7 +444,7 @@ component NameDialog inherits Rectangle {
                 Rectangle {
                     width: 80px;
                     height: 28px;
-                    background: cancel-ta.pressed ? Theme.surface-pressed : (cancel-ta.has-hover ? Theme.surface-hover : Theme.surface-disabled);
+                    background: cancel-ta.pressed ? Theme.surface-pressed : (cancel-ta.has-hover ? Theme.surface-hover : Theme.surface-hover);
                     border-radius: 5px;
                     Text { text: "Cancel"; color: Theme.text-secondary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     cancel-ta := TouchArea { clicked => { AppState.request_dialog_cancel(); } }
@@ -307,7 +452,7 @@ component NameDialog inherits Rectangle {
                 Rectangle {
                     width: 80px;
                     height: 28px;
-                    background: ok-ta.pressed ? Theme.surface-pressed : (ok-ta.has-hover ? Theme.surface-hover : Theme.accent);
+                    background: ok-ta.pressed ? Theme.selection-strong : (ok-ta.has-hover ? Theme.selection : Theme.accent);
                     border-radius: 5px;
                     Text { text: "OK"; color: Theme.text-primary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                     ok-ta := TouchArea { clicked => { AppState.request_dialog_confirm(AppState.dialog_value); } }
@@ -338,7 +483,7 @@ export component MainWindow inherits Window {
         x: 0;
         width: parent.width;
         height: Metrics.tabs-height;
-        background: Theme.surface;
+        background: Theme.window-bg;
 
         tabs-nav := NavTouchArea {
             x: 0;
@@ -353,19 +498,29 @@ export component MainWindow inherits Window {
             width: parent.width;
             height: parent.height;
             padding: 4px;
-            padding-left: 8px;
-            spacing: 4px;
+            padding-left: 6px;
+            spacing: 3px;
+            alignment: start;
 
             for item[idx] in AppState.tabs: Rectangle {
-                width: 160px;
-                height: 26px;
-                border-radius: 5px;
-                background: idx == AppState.active_tab ? Theme.surface-alt : (tab-ta.pressed ? Theme.surface-pressed : (tab-ta.has-hover ? Theme.surface-hover : Theme.window-bg));
-                border-width: 1px;
-                border-color: idx == AppState.active_tab ? Theme.accent : Theme.border-subtle;
+                width: 176px;
+                height: 28px;
+                border-radius: 6px;
+                background: idx == AppState.active_tab ? Theme.surface-alt : (tab-ta.pressed ? Theme.surface-pressed : (tab-ta.has-hover ? Theme.surface-hover : transparent));
 
                 tab-ta := NavTouchArea {
                     clicked => { AppState.request_switch_tab(idx); }
+                }
+
+                // Active tab gets a thin accent underline.
+                Rectangle {
+                    x: 10px;
+                    y: parent.height - 3px;
+                    width: parent.width - 20px;
+                    height: 2px;
+                    border-radius: 1px;
+                    background: Theme.accent;
+                    visible: idx == AppState.active_tab;
                 }
 
                 HorizontalLayout {
@@ -385,11 +540,12 @@ export component MainWindow inherits Window {
                     Rectangle {
                         width: 18px;
                         height: 18px;
-                        background: close-ta.has-hover ? Theme.surface-hover : transparent;
                         border-radius: 3px;
+                        background: close-ta.has-hover ? Theme.surface-hover : transparent;
+                        visible: close-ta.has-hover || idx == AppState.active_tab;
                         Text {
                             text: "×";
-                            color: close-ta.has-hover ? Theme.text-primary : (idx == AppState.active_tab ? Theme.text-secondary : Theme.text-muted);
+                            color: close-ta.has-hover ? Theme.text-primary : Theme.text-muted;
                             font-size: 12px;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -403,9 +559,9 @@ export component MainWindow inherits Window {
 
             Rectangle {
                 width: 28px;
-                height: 26px;
+                height: 28px;
+                border-radius: 6px;
                 background: new-tab-ta.pressed ? Theme.surface-pressed : (new-tab-ta.has-hover ? Theme.surface-hover : transparent);
-                border-radius: 5px;
                 Text { text: "+"; color: Theme.text-secondary; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
                 new-tab-ta := NavTouchArea { clicked => { AppState.request_new_tab(); } }
             }
@@ -417,7 +573,7 @@ export component MainWindow inherits Window {
         x: 0;
         width: parent.width;
         height: Metrics.toolbar-height;
-        background: Theme.surface;
+        background: Theme.window-bg;
 
         toolbar-nav := NavTouchArea {
             x: 0;
@@ -431,22 +587,24 @@ export component MainWindow inherits Window {
             y: 0;
             width: parent.width;
             height: parent.height;
-            padding: 7px;
+            padding: 8px;
             padding-left: 8px;
-            spacing: 6px;
+            spacing: 4px;
 
-            ToolButton { text: "←"; enabled: AppState.can_go_back; clicked => { AppState.request_back(); } }
-            ToolButton { text: "→"; enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } }
-            ToolButton { text: "↑"; enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } }
-            ToolButton { text: "↻"; enabled: true; clicked => { AppState.request_refresh(); } }
+            NavIconButton { enabled: AppState.can_go_back; clicked => { AppState.request_back(); } IconBack { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
+            NavIconButton { enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } IconForward { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
+            NavIconButton { enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } IconUp { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
+            ToolSeparator {}
+            NavIconButton { clicked => { AppState.request_refresh(); } IconRefresh { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } IconRefreshArrow { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
+            ToolSeparator {}
 
             Rectangle {
                 height: 28px;
                 horizontal-stretch: 1;
-                background: address-input.has-focus ? Theme.surface : Theme.window-bg;
-                border-radius: 5px;
+                background: Theme.surface;
+                border-radius: 6px;
                 border-width: 1px;
-                border-color: address-input.has-focus ? Theme.accent : Theme.border;
+                border-color: address-input.has-focus ? Theme.accent : Theme.border-subtle;
 
                 address-input := LineEdit {
                     x: 8px;
@@ -457,7 +615,8 @@ export component MainWindow inherits Window {
                 }
             }
 
-            TextButton { text: "New Folder"; clicked => { AppState.request_new_folder(); } }
+            ToolSeparator {}
+            NewFolderButton { clicked => { AppState.request_new_folder(); } }
         }
     }
 
@@ -474,7 +633,7 @@ export component MainWindow inherits Window {
             y: 0;
             width: Metrics.sidebar-width;
             height: parent.height;
-            background: Theme.surface;
+            background: Theme.window-bg;
 
             sidebar-nav := NavTouchArea {
                 x: 0;
@@ -491,21 +650,16 @@ export component MainWindow inherits Window {
                 padding: 8px;
                 spacing: 2px;
 
-                Text { text: "Favorites"; color: Theme.text-muted; font-size: 11px; font-weight: 600; height: 18px; vertical-alignment: center; }
+                SectionLabel { text: "Quick Access"; }
                 SidebarButton { text: "Home"; icon: AppState.home_icon; target: AppState.home_path; selected: AppState.address_path == AppState.home_path; }
                 SidebarButton { text: "Desktop"; icon: AppState.desktop_icon; target: AppState.desktop_path; selected: AppState.address_path == AppState.desktop_path; }
                 SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; selected: AppState.address_path == AppState.documents_path; }
                 SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; selected: AppState.address_path == AppState.downloads_path; }
 
-                Rectangle { height: 12px; }
+                Rectangle { height: 10px; }
 
-                Text { text: "Drives"; color: Theme.text-muted; font-size: 11px; font-weight: 600; height: 18px; vertical-alignment: center; }
-                for drive[idx] in AppState.drives: SidebarButton {
-                    text: drive.name;
-                    icon: drive.icon;
-                    target: drive.path;
-                    selected: AppState.address_path == drive.path;
-                }
+                SectionLabel { text: "Drives"; }
+                for drive in AppState.drives: DriveRow { drive: drive; }
             }
         }
 
@@ -536,17 +690,17 @@ export component MainWindow inherits Window {
                 y: 0;
                 width: parent.width;
                 height: Metrics.header-height;
-                background: Theme.surface;
+                background: Theme.window-bg;
 
                 header := HorizontalLayout {
                     x: 0;
                     y: 0;
                     width: parent.width;
                     height: parent.height;
-                    HeaderCell { text: "Name"; column: 0; horizontal-stretch: 1; min-width: 260px; text-indent: 22px; }
-                    HeaderCell { text: "Type"; column: 1; width: 120px; }
-                    HeaderCell { text: "Size"; column: 2; width: 90px; }
-                    HeaderCell { text: "Modified"; column: 3; width: 140px; }
+                    HeaderCell { text: "Name"; column: 0; horizontal-stretch: 1; min-width: 260px; text-indent: 31px; }
+                    HeaderCell { text: "Type"; column: 1; width: Metrics.col-type; text-indent: 0px; }
+                    HeaderCell { text: "Size"; column: 2; width: Metrics.col-size; text-indent: 0px; }
+                    HeaderCell { text: "Modified"; column: 3; width: Metrics.col-modified; text-indent: 0px; }
                 }
 
                 Rectangle {
@@ -559,7 +713,7 @@ export component MainWindow inherits Window {
 
             // Context menu for the empty list area. Right clicks over rows
             // never reach this menu because the row TouchAreas grab the
-            // press first; those rows show their own menus.
+            // press first; those rows open the native shell menu instead.
             empty-area-menu := ContextMenuArea {
                 x: 0;
                 y: Metrics.header-height;
@@ -570,6 +724,10 @@ export component MainWindow inherits Window {
                     MenuItem {
                         title: "New Folder";
                         activated => { AppState.request_new_folder(); }
+                    }
+                    MenuItem {
+                        title: "Paste";
+                        activated => { AppState.request_paste(); }
                     }
                     MenuSeparator { }
                     MenuItem {
@@ -597,6 +755,21 @@ export component MainWindow inherits Window {
                         } else if event.text == Key.Return {
                             AppState.request_activate(-1);
                             accept
+                        } else if event.text == Key.Delete {
+                            AppState.request_delete();
+                            accept
+                        } else if event.text == "c" && event.modifiers.control {
+                            AppState.request_copy();
+                            accept
+                        } else if event.text == "x" && event.modifiers.control {
+                            AppState.request_cut();
+                            accept
+                        } else if event.text == "v" && event.modifiers.control {
+                            AppState.request_paste();
+                            accept
+                        } else if event.text == "t" && event.modifiers.control {
+                            AppState.request_context_open_in_new_tab(-1);
+                            accept
                         } else if event.text == Key.Escape {
                             AppState.request_clear_selection();
                             accept
@@ -610,7 +783,11 @@ export component MainWindow inherits Window {
                             AppState.request_parent();
                             accept
                         } else if event.text == "l" && event.modifiers.control {
-                            AppState.request_navigate(AppState.address_path);
+                            // Standard "focus address bar" shortcut (browser /
+                            // Explorer behavior): focus + select all, so typing
+                            // replaces the current path.
+                            address-input.focus();
+                            address-input.select-all();
                             accept
                         } else {
                             reject
@@ -623,100 +800,66 @@ export component MainWindow inherits Window {
 
                         for item[idx] in AppState.files: Rectangle {
                             height: Metrics.row-height;
-                            background: item.selected ? Theme.selection : (row-ta.pressed ? Theme.surface-pressed : (row-ta.has-hover ? Theme.surface-alt : transparent));
+                            background: item.selected ? Theme.selection : (row-ta.pressed ? Theme.surface-pressed : (row-ta.has-hover ? Theme.surface-hover : transparent));
 
-                            row-ctx-menu := ContextMenuArea {
+                            HorizontalLayout {
+                                x: 0;
+                                y: 0;
                                 width: parent.width;
                                 height: parent.height;
+                                padding-left: 8px;
+                                spacing: 6px;
 
-                                Menu {
-                                    MenuItem {
-                                        title: "Open";
-                                        activated => { AppState.request_context_open(idx); }
-                                    }
-                                    if item.is-dir: MenuItem {
-                                        title: "Open in New Tab";
-                                        activated => { AppState.request_context_open_in_new_tab(idx); }
-                                    }
-                                    MenuSeparator { }
-                                    MenuItem {
-                                        title: "Rename";
-                                        activated => { AppState.request_rename(idx); }
-                                    }
-                                    MenuSeparator { }
-                                    MenuItem {
-                                        title: "Copy Path";
-                                        activated => { AppState.request_copy_path(idx); }
-                                    }
-                                    MenuSeparator { }
-                                    MenuItem {
-                                        title: "New Folder";
-                                        activated => { AppState.request_new_folder(); }
-                                    }
-                                    MenuSeparator { }
-                                    MenuItem {
-                                        title: "Refresh";
-                                        activated => { AppState.request_refresh(); }
-                                    }
+                                Image {
+                                    source: AppState.icons[item.icon-id];
+                                    width: Metrics.icon-size;
+                                    height: Metrics.icon-size;
+                                    image-rendering: smooth;
                                 }
 
-                                HorizontalLayout {
-                                    x: 0;
-                                    y: 0;
-                                    width: parent.width;
-                                    height: parent.height;
-                                    padding-left: 8px;
-                                    spacing: 6px;
-
-                                    Image {
-                                        source: AppState.icons[item.icon-id];
-                                        width: Metrics.icon-size;
-                                        height: Metrics.icon-size;
-                                        image-rendering: smooth;
-                                    }
-
-                                    Text {
-                                        text: item.name;
-                                        color: item.selected ? Theme.text-primary : Theme.text-secondary;
-                                        font-size: 13px;
-                                        min-width: 240px;
-                                        horizontal-stretch: 1;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                    Text { text: item.type_name; color: item.selected ? Theme.text-primary : Theme.text-muted; font-size: 12px; width: 120px; vertical-alignment: center; overflow: elide; }
-                                    Text { text: item.size_text; color: item.selected ? Theme.text-primary : Theme.text-muted; font-size: 12px; width: 90px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                    Text { text: item.modified_text; color: item.selected ? Theme.text-primary : Theme.text-muted; font-size: 12px; width: 140px; vertical-alignment: center; overflow: elide; }
+                                Text {
+                                    text: item.name;
+                                    color: item.selected ? Theme.text-primary : Theme.text-secondary;
+                                    font-size: 12.5px;
+                                    min-width: 240px;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                    overflow: elide;
                                 }
+                                Text { text: item.type_name; color: item.selected ? Theme.text-secondary : Theme.text-muted; font-size: 12px; width: Metrics.col-type; vertical-alignment: center; overflow: elide; }
+                                Text { text: item.size_text; color: item.selected ? Theme.text-secondary : Theme.text-muted; font-size: 12px; width: Metrics.col-size; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                Text { text: item.modified_text; color: item.selected ? Theme.text-secondary : Theme.text-muted; font-size: 12px; width: Metrics.col-modified; vertical-alignment: center; overflow: elide; }
+                            }
 
-                                row-ta := TouchArea {
-                                    pointer-event(event) => {
-                                        if event.kind == PointerEventKind.down && !AppState.dialog_visible {
-                                            // Keep keyboard focus on the list scope so
-                                            // F2/F5/Enter/Ctrl+A keep working after clicks.
-                                            list-scope.focus();
-                                            if event.button == PointerEventButton.back {
-                                                AppState.request_back();
-                                            } else if event.button == PointerEventButton.forward {
-                                                AppState.request_forward();
-                                            } else if event.button == PointerEventButton.right {
-                                                // Right click selects unselected items;
-                                                // multi-selections are preserved.
-                                                if !item.selected {
-                                                    AppState.request_select(idx);
-                                                }
-                                                row-ctx-menu.show({x: row-ta.mouse-x, y: row-ta.mouse-y});
-                                            } else if event.modifiers.control {
-                                                AppState.request_toggle(idx);
-                                            } else if event.modifiers.shift {
-                                                AppState.request_range(idx);
-                                            } else {
+                            row-ta := TouchArea {
+                                pointer-event(event) => {
+                                    if event.kind == PointerEventKind.down && !AppState.dialog_visible {
+                                        // Keep keyboard focus on the list scope so
+                                        // F2/F5/Enter/Ctrl+A keep working after clicks.
+                                        list-scope.focus();
+                                        if event.button == PointerEventButton.back {
+                                            AppState.request_back();
+                                        } else if event.button == PointerEventButton.forward {
+                                            AppState.request_forward();
+                                        } else if event.button == PointerEventButton.right {
+                                            // Right click selects unselected items;
+                                            // multi-selections are preserved. The
+                                            // native shell menu opens for the
+                                            // (possibly multi-) selection.
+                                            if !item.selected {
                                                 AppState.request_select(idx);
                                             }
+                                            AppState.request_shell_menu(idx);
+                                        } else if event.modifiers.control {
+                                            AppState.request_toggle(idx);
+                                        } else if event.modifiers.shift {
+                                            AppState.request_range(idx);
+                                        } else {
+                                            AppState.request_select(idx);
                                         }
                                     }
-                                    double-clicked => { AppState.request_activate(idx); }
                                 }
+                                double-clicked => { AppState.request_activate(idx); }
                             }
                         }
                     }
@@ -772,7 +915,7 @@ export component MainWindow inherits Window {
             Text {
                 text: AppState.status_text;
                 color: Theme.text-secondary;
-                font-size: 12px;
+                font-size: 11.5px;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
                 overflow: elide;
@@ -780,23 +923,10 @@ export component MainWindow inherits Window {
 
             Text {
                 text: AppState.selected_count > 0
-                    ? AppState.item_count + " items | " + AppState.selected_count + " selected"
+                    ? AppState.item_count + " items · " + AppState.selected_count + " selected"
                     : AppState.item_count + " items";
                 color: Theme.text-muted;
-                font-size: 12px;
-                vertical-alignment: center;
-            }
-
-            Rectangle {
-                width: 1px;
-                height: 14px;
-                background: Theme.border-subtle;
-            }
-
-            Text {
-                text: AppState.loading ? "Loading…" : "Ready";
-                color: Theme.text-muted;
-                font-size: 12px;
+                font-size: 11.5px;
                 vertical-alignment: center;
             }
         }

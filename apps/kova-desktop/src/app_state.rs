@@ -155,17 +155,28 @@ impl AppController {
     pub fn navigate(&mut self, location: Location) {
         if let Some(tab) = self.tabs.active_mut() {
             tab.history.navigate(location);
+            // Entering a different directory invalidates index-based
+            // selection state (Explorer behavior).
+            tab.selection.clear();
         }
     }
 
     pub fn back(&mut self) -> Option<Location> {
         let tab = self.tabs.active_mut()?;
-        tab.history.back()
+        let location = tab.history.back();
+        if location.is_some() {
+            tab.selection.clear();
+        }
+        location
     }
 
     pub fn forward(&mut self) -> Option<Location> {
         let tab = self.tabs.active_mut()?;
-        tab.history.forward()
+        let location = tab.history.forward();
+        if location.is_some() {
+            tab.selection.clear();
+        }
+        location
     }
 
     pub fn parent(&self) -> Option<Location> {
@@ -193,6 +204,29 @@ impl AppController {
             None => return false,
         };
         self.tabs.switch_to(id)
+    }
+
+    /// Full paths of all selected rows in the active tab, in selection order.
+    pub fn selected_paths(&self) -> Vec<std::path::PathBuf> {
+        let Some(tab) = self.tabs.active() else {
+            return Vec::new();
+        };
+        let Some(snapshot) = self.snapshots.get(&tab.id) else {
+            return Vec::new();
+        };
+        tab.selection
+            .selected()
+            .iter()
+            .filter_map(|&idx| snapshot.entries.get(idx))
+            .map(|e| e.path.clone())
+            .collect()
+    }
+
+    /// Path of the entry at `index` in the active tab's snapshot.
+    pub fn path_at(&self, index: usize) -> Option<std::path::PathBuf> {
+        self.snapshot()
+            .and_then(|s| s.entries.get(index))
+            .map(|e| e.path.clone())
     }
 
     pub fn selection_mut(&mut self) -> Option<&mut SelectionState> {
@@ -407,6 +441,39 @@ mod tests {
         let _ = second;
         assert_eq!(ctrl.item_count(), 1);
         assert_eq!(ctrl.selected_count(), 1);
+    }
+
+    #[test]
+    fn selected_paths_follow_selection_order() {
+        let initial = Location::new(std::path::PathBuf::from("C:\\dummy"));
+        let mut ctrl = AppController::new(initial);
+        let tab_id = ctrl.active_tab_id();
+
+        ctrl.record_request(tab_id, 1);
+        ctrl.apply_snapshot(
+            tab_id,
+            DirectorySnapshot {
+                location: Location::new(std::path::PathBuf::from("C:\\dummy")),
+                request_id: 1,
+                entries: vec![
+                    dummy_snapshot(1, "one").entries.remove(0),
+                    dummy_snapshot(1, "two").entries.remove(0),
+                    dummy_snapshot(1, "three").entries.remove(0),
+                ],
+            },
+        );
+
+        if let Some(sel) = ctrl.selection_mut() {
+            sel.select_single(2);
+            sel.toggle(0);
+        }
+        let paths = ctrl.selected_paths();
+        assert_eq!(paths.len(), 2);
+        // The snapshot is re-sorted by name ("one", "three", "two"), so index
+        // 2 is "two" and index 0 is "one".
+        assert!(paths[0].ends_with("two"));
+        assert!(paths[1].ends_with("one"));
+        assert!(ctrl.path_at(1).unwrap().ends_with("three"));
     }
 
     #[test]

@@ -7,6 +7,8 @@ use kova_core::domain::{IconHandle, KovaEvent, LocationInput, SortDirection};
 use kova_ops::worker::{WorkerCommand, spawn_worker};
 use kova_platform_windows::known_folders::{KnownFolder, resolve_known_folder};
 use kova_platform_windows::shell_icons::{IconBitmap, IconCache, IconKey, icon_key_for};
+use kova_platform_windows::shell_menu;
+use kova_platform_windows::shell_ops::{ShellOpCommand, ShellOpOutcome, spawn_shell_ops_thread};
 use slint::{
     ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel, Weak,
 };
@@ -159,6 +161,11 @@ async fn main() {
     let initial = kova_platform_windows::known_folders::initial_location();
     tracing::info!("Kova starting at {}", initial.display());
 
+    // The UI thread hosts shell COM objects (native context menus, drag
+    // formats); make sure an apartment-threaded COM is present before any
+    // window is created.
+    shell_menu::ensure_com_sta();
+
     let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCommand>(64);
     let (evt_tx, mut evt_rx) = mpsc::channel::<KovaEvent>(64);
     // Worker events are forwarded into a plain channel and drained by a Slint
@@ -189,11 +196,18 @@ async fn main() {
             .expect("icon worker thread");
     }
 
+    // Dedicated shell operations thread (IFileOperation): copy/move/delete
+    // run off the UI thread with native progress and conflict dialogs.
+    let (ops_tx, ops_rx) = std::sync::mpsc::channel::<ShellOpCommand>();
+    let (ops_out_tx, ops_out_rx) = std::sync::mpsc::channel::<ShellOpOutcome>();
+    let _ops_thread = spawn_shell_ops_thread(ops_rx, ops_out_tx);
+
     let app_controller = Arc::new(Mutex::new(AppController::new(initial.clone())));
     let dispatcher = CommandDispatcher::new(
         Arc::clone(&app_controller),
         cmd_tx.clone(),
         Default::default(),
+        ops_tx,
     );
 
     let app = MainWindow::new().unwrap();
@@ -257,8 +271,8 @@ async fn main() {
         }
     });
 
-    // UI-thread event pump: process core events forwarded by the worker and
-    // icon results forwarded by the icon worker thread.
+    // UI-thread event pump: process core events forwarded by the worker,
+    // shell-operation outcomes and icon results from the icon worker thread.
     let ui_for_pump = ui.clone();
     let controller_for_pump = Arc::clone(&app_controller);
     let reload_dispatcher_pump = dispatcher.clone();
@@ -320,6 +334,39 @@ async fn main() {
                 }
             }
 
+            // Shell file-operation outcomes: refresh the directory because
+            // copy/move/delete may have changed it, and surface the result.
+            while let Ok(outcome) = ops_out_rx.try_recv() {
+                let Some(ui) = ui_ref.upgrade() else { return };
+                let mut ctrl = ctrl_ref.lock().unwrap();
+                match outcome {
+                    ShellOpOutcome::Completed { summary } => {
+                        ctrl.set_status(format!("{summary} finished"));
+                        if let Some(loc) = ctrl.current_location().cloned() {
+                            let tab_id = ctrl.active_tab_id();
+                            drop(ctrl);
+                            reload_ref.request_enumeration(tab_id, loc);
+                            return;
+                        }
+                    }
+                    ShellOpOutcome::Failed {
+                        summary,
+                        message,
+                        code,
+                    } => {
+                        if op_was_cancelled(code) {
+                            ctrl.set_status(format!("{summary} cancelled"));
+                            update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
+                        } else {
+                            tracing::error!("shell op failed ({code:#010x}): {message}");
+                            ctrl.set_status(format!("{summary} failed"));
+                            update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
+                            show_error_dialog(&ui, &message);
+                        }
+                    }
+                }
+            }
+
             // Icon resolutions: intern the bitmap, then stamp the new icon id
             // onto every snapshot entry that shares the key.
             while let Ok(res) = icon_res_rx.try_recv() {
@@ -365,6 +412,31 @@ async fn main() {
     }
 
     app.run().unwrap();
+}
+
+/// HRESULT codes the shell reports when the user aborted a file operation in
+/// the native progress/conflict dialog. These are not failures worth a modal
+/// error dialog.
+fn op_was_cancelled(code: i32) -> bool {
+    matches!(
+        code as u32,
+        0x8007_04C7 // HRESULT_FROM_WIN32(ERROR_CANCELLED)
+            | 0x8007_03E3 // HRESULT_FROM_WIN32(ERROR_OPERATION_ABORTED)
+            | 0xC004_0004 // COPYENGINE_E_USER_CANCELLED
+    )
+}
+
+/// Human readable byte count for drive details.
+fn format_bytes(bytes: u64) -> String {
+    const GB: u64 = 1024 * 1024 * 1024;
+    const MB: u64 = 1024 * 1024;
+    if bytes >= GB {
+        format!("{} GB", (bytes + GB / 2) / GB)
+    } else if bytes >= MB {
+        format!("{} MB", (bytes + MB / 2) / MB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 /// Send icon requests for snapshot entries that do not have an icon yet.
@@ -477,10 +549,24 @@ fn set_drives(ui: &Weak<MainWindow>) {
                 .get_or_resolve(&IconKey::Drive(d.path.clone()))
                 .map(|bitmap| image_from_bitmap(&bitmap))
                 .unwrap_or_default();
+            let (usage, detail) = if d.total_bytes > 0 {
+                let used = d.total_bytes.saturating_sub(d.free_bytes);
+                let usage = used as f32 / d.total_bytes as f32;
+                let detail = format!(
+                    "{} free of {}",
+                    format_bytes(d.free_bytes),
+                    format_bytes(d.total_bytes)
+                );
+                (usage.clamp(0.0, 1.0), detail)
+            } else {
+                (0.0, String::new())
+            };
             DriveItem {
                 name: d.letter.into(),
                 path: d.path.display().to_string().into(),
                 icon,
+                usage,
+                detail: detail.into(),
             }
         })
         .collect();
@@ -720,42 +806,70 @@ fn wire_callbacks(
             d.dispatch_activate(idx as usize);
         });
 
-    // Context menu actions reuse the exact same dispatch paths as the
-    // toolbar/keyboard interactions.
+    // Keyboard shortcut: open the primary selection's folder in a new tab.
     let d = dispatcher.clone();
-    ui.unwrap()
-        .global::<AppState>()
-        .on_request_context_open(move |idx: i32| {
-            d.dispatch_activate(idx as usize);
-        });
-
-    let d = dispatcher.clone();
-    let ui_ctx_tab = ui.clone();
-    let last_ctx_tab = Arc::clone(&last_address);
-    let models_ctx_tab = Rc::clone(&models);
+    let ui_new_tab_open = ui.clone();
+    let last_nto = Arc::clone(&last_address);
+    let models_nto = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_context_open_in_new_tab(move |idx: i32| {
             if let Err(e) = d.dispatch_open_in_new_tab(idx as usize) {
-                show_action_error(&ui_ctx_tab, &d, &last_ctx_tab, &models_ctx_tab, &e);
+                show_action_error(&ui_new_tab_open, &d, &last_nto, &models_nto, &e);
             }
         });
 
+    // Ctrl+C / Ctrl+X: Explorer-compatible clipboard selection.
     let d = dispatcher.clone();
     let ui_copy = ui.clone();
     let last_copy = Arc::clone(&last_address);
     let models_copy = Rc::clone(&models);
+    ui.unwrap().global::<AppState>().on_request_copy(move || {
+        if let Err(e) = d.dispatch_clipboard_selection(false) {
+            show_action_error(&ui_copy, &d, &last_copy, &models_copy, &e);
+        }
+    });
+
+    let d = dispatcher.clone();
+    let ui_cut = ui.clone();
+    let last_cut = Arc::clone(&last_address);
+    let models_cut = Rc::clone(&models);
+    ui.unwrap().global::<AppState>().on_request_cut(move || {
+        if let Err(e) = d.dispatch_clipboard_selection(true) {
+            show_action_error(&ui_cut, &d, &last_cut, &models_cut, &e);
+        }
+    });
+
+    let d = dispatcher.clone();
+    let ui_paste = ui.clone();
+    let last_paste = Arc::clone(&last_address);
+    let models_paste = Rc::clone(&models);
+    ui.unwrap().global::<AppState>().on_request_paste(move || {
+        if let Err(e) = d.dispatch_paste() {
+            show_action_error(&ui_paste, &d, &last_paste, &models_paste, &e);
+        }
+    });
+
+    let d = dispatcher.clone();
+    let ui_delete = ui.clone();
+    let last_delete = Arc::clone(&last_address);
+    let models_delete = Rc::clone(&models);
+    ui.unwrap().global::<AppState>().on_request_delete(move || {
+        if let Err(e) = d.dispatch_delete_selection() {
+            show_action_error(&ui_delete, &d, &last_delete, &models_delete, &e);
+        }
+    });
+
+    // Right click on a row: native Explorer shell context menu.
+    let d = dispatcher.clone();
+    let ui_menu = ui.clone();
+    let last_menu = Arc::clone(&last_address);
+    let models_menu = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
-        .on_request_copy_path(move |idx: i32| match d.dispatch_copy_path(idx as usize) {
-            Ok(()) => {
-                d.set_status_message("Path copied to clipboard".into());
-                if let Some(u) = ui_copy.upgrade() {
-                    sync_ui(&u, &d, &last_copy, &models_copy);
-                }
-            }
-            Err(e) => {
-                show_action_error(&ui_copy, &d, &last_copy, &models_copy, &e);
+        .on_request_shell_menu(move |idx: i32| {
+            if let Err(e) = d.dispatch_shell_menu(idx as usize) {
+                show_action_error(&ui_menu, &d, &last_menu, &models_menu, &e);
             }
         });
 
