@@ -1,4 +1,4 @@
-# Kova Architecture — M0
+# Kova Architecture
 
 ## Goals
 
@@ -46,9 +46,10 @@ Contains no `unsafe`, no Slint, no Win32 calls. Unit-testable in isolation.
 - Known folder resolution via `SHGetKnownFolderPath`
 - Path canonicalization and error classification
 - Logical drive enumeration (`GetLogicalDriveStringsW` / `GetDriveTypeW`)
-- Default application launching via `ShellExecuteExW`
+- Shell icons, native context menus, Explorer-compatible clipboard and IFileOperation
+- Balanced thread-local COM apartments and native non-replacing rename
 
-All `unsafe` blocks have a `SAFETY:` comment.
+New `unsafe` blocks require a `SAFETY:` comment. The legacy ShellExecuteExW launcher remains in kova-ops.
 
 ### kova-ops
 
@@ -79,11 +80,11 @@ CommandDispatcher (main thread, fast)
     │
     │ WorkerCommand
     ▼
-Tokio worker task (filesystem I/O)
+Tokio command receiver and cancellable per-tab enumeration tasks
     │
     │ KovaEvent
     ▼
-Event consumer (Tokio task, calls Slint on main thread via Weak upgrade)
+Channel forwarding to a Slint timer (all UI/model updates on the UI thread)
     │
     ▼
 UI state update
@@ -112,10 +113,10 @@ See `docs/SECURITY_AND_DATA_SAFETY.md`.
 environment, and runs the requested cargo command. This removes the need to
 start a dedicated VS developer shell.
 
-## Not in M0
+## Deferred
 
 - MFT / USN global search
-- Shell icons / thumbnails
-- Copy / Move / permanent Delete
+- Thumbnails
+- Explicit permanent-delete UI
 - Preview pane, split view, Git integration, cloud paths
 - Plugins, auto updater, telemetry
