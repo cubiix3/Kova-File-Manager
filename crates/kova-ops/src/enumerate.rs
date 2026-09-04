@@ -1,8 +1,6 @@
-use kova_core::domain::{
-    DirectorySnapshot, FileEntry, FileKind, FileMetadata, IconHandle, Location,
-};
+use kova_core::domain::{DirectorySnapshot, FileEntry, FileKind, FileMetadata, Location};
 use kova_core::error::Result;
-use kova_platform_windows::path_resolver::{map_io_error, require_directory};
+use kova_platform_windows::path_resolver::map_io_error;
 use std::os::windows::fs::MetadataExt;
 use tokio::fs;
 
@@ -12,7 +10,6 @@ use tokio::fs;
 /// snapshot carries a `request_id` so callers can discard stale results.
 pub async fn enumerate_directory(location: Location, request_id: u64) -> Result<DirectorySnapshot> {
     let path = location.path.clone();
-    require_directory(&path)?;
 
     let mut entries = Vec::new();
     let mut read_dir = fs::read_dir(&path)
@@ -52,11 +49,9 @@ pub async fn enumerate_directory(location: Location, request_id: u64) -> Result<
             .ok()
             .and_then(|t| chrono::DateTime::<chrono::Local>::from(t).into());
 
-        // Placeholder generic icon until shell icons are wired.
-        let icon_handle = Some(match kind {
-            FileKind::Directory => IconHandle(0),
-            _ => IconHandle(1),
-        });
+        // None schedules asynchronous shell resolution; the UI supplies a
+        // generic fallback while it is pending.
+        let icon_handle = None;
 
         entries.push(FileEntry {
             name,
@@ -84,8 +79,11 @@ fn classify_kind(metadata: &std::fs::Metadata, _path: &std::path::Path) -> FileK
     let attrs = metadata.file_attributes();
     // FILE_ATTRIBUTE_REPARSE_POINT
     if attrs & 0x400 != 0 {
-        // If it points to a directory, treat as junction; otherwise symlink.
-        if metadata.is_dir() {
+        // symlink_metadata/DirEntry metadata describes the reparse point:
+        // is_dir() can be false even for a directory junction. The Windows
+        // DIRECTORY attribute retains its navigation semantics without I/O
+        // to the target (which may be unavailable).
+        if attrs & 0x10 != 0 {
             return FileKind::Junction;
         } else {
             return FileKind::Symlink;

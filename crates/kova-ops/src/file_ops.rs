@@ -8,6 +8,7 @@ use tokio::fs;
 ///
 /// This is a real filesystem operation and must only run in a sandbox in tests.
 pub async fn new_folder(parent: &Location, name: &str) -> Result<PathBuf> {
+    validate_name(name)?;
     let target = child_path(parent, name);
     fs::create_dir(&target)
         .await
@@ -17,6 +18,7 @@ pub async fn new_folder(parent: &Location, name: &str) -> Result<PathBuf> {
 
 /// Rename an entry to `new_name` inside the same parent directory.
 pub async fn rename(path: &Path, new_name: &str) -> Result<PathBuf> {
+    validate_name(new_name)?;
     let Some(parent) = path.parent() else {
         return Err(OperationError::invalid_path(
             path.to_string_lossy().into_owned(),
@@ -24,10 +26,42 @@ pub async fn rename(path: &Path, new_name: &str) -> Result<PathBuf> {
         ));
     };
     let new_path = parent.join(new_name);
-    fs::rename(path, &new_path)
-        .await
-        .map_err(|e| map_io_error(path, e))?;
+    let source = path.to_path_buf();
+    let target = new_path.clone();
+    tokio::task::spawn_blocking(move || {
+        kova_platform_windows::path_resolver::rename_no_replace(&source, &target)
+    })
+    .await
+    .map_err(|e| OperationError::Shell(e.to_string()))??;
     Ok(new_path)
+}
+
+/// A dialog accepts one Windows filename, never a path or alternate stream.
+pub fn validate_name(name: &str) -> Result<()> {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let reserved = matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|suffix| {
+            matches!(
+                suffix,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    });
+    if name.is_empty()
+        || name.ends_with(['.', ' '])
+        || reserved
+        || name.chars().any(|c| c < ' ' || "<>:\"/\\|?*".contains(c))
+    {
+        return Err(OperationError::invalid_path(name, None));
+    }
+    Ok(())
 }
 
 /// Open a file using the Windows default handler.
@@ -38,9 +72,7 @@ pub async fn rename(path: &Path, new_name: &str) -> Result<PathBuf> {
 pub fn open_with_default_handler(path: &Path) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::System::Com::{
-        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
-    };
+
     use windows::Win32::UI::Shell::{
         SEE_MASK_DEFAULT, SEE_MASK_INVOKEIDLIST, SHELLEXECUTEINFOW, ShellExecuteExW,
     };
@@ -57,7 +89,7 @@ pub fn open_with_default_handler(path: &Path) -> Result<()> {
     // ShellExecuteExW can talk to shell extensions. The operation and file
     // wide strings are valid for the duration of the call.
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        kova_platform_windows::shell_menu::ensure_com_sta();
 
         let mut info = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -97,6 +129,45 @@ mod tests {
     use super::*;
     use crate::sandbox::TestSandbox;
     use std::fs;
+
+    #[test]
+    fn dialog_names_cannot_escape_parent_or_create_streams() {
+        for name in [
+            "",
+            ".",
+            "..",
+            "../outside",
+            "C:\\outside",
+            "a/b",
+            "a:b",
+            "CON.txt",
+            "LPT1",
+            "bad.",
+            "bad ",
+            "a\0b",
+        ] {
+            assert!(validate_name(name).is_err(), "accepted {name:?}");
+        }
+        for name in ["Report.txt", "New Folder", "résumé.md", ".gitignore"] {
+            assert!(validate_name(name).is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn rename_conflict_preserves_both_file_contents() {
+        let root = std::env::temp_dir().join(format!("kova-conflict-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("source.txt"), b"source").unwrap();
+        fs::write(root.join("existing.txt"), b"existing").unwrap();
+        assert!(
+            rename(&root.join("source.txt"), "existing.txt")
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"source");
+        assert_eq!(fs::read(root.join("existing.txt")).unwrap(), b"existing");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn new_folder_and_rename_in_sandbox() {

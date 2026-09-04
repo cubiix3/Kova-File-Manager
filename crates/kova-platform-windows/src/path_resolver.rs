@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 /// Resolve user input into a usable `Location`. Accepts absolute and relative
 /// paths. Relative paths are resolved against `base`.
 pub fn resolve_input(input: &LocationInput, base: &Location) -> Result<Location, OperationError> {
-    let path = PathBuf::from(&input.raw);
+    let path = PathBuf::from(input.raw.trim().trim_matches('"'));
     let resolved = if path.is_absolute() {
         path
     } else {
@@ -34,9 +34,27 @@ pub fn canonicalize_location(path: &Path) -> Result<Location, OperationError> {
 }
 
 fn normalize_separators(path: PathBuf) -> PathBuf {
-    let s = path.as_os_str().to_string_lossy();
-    let cleaned = s.replace('/', "\\");
-    PathBuf::from(cleaned)
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::path::Component;
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .map(|c| if c == b'/' as u16 { b'\\' as u16 } else { c })
+        .collect();
+    let path = PathBuf::from(std::ffi::OsString::from_wide(&wide));
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if normalized.file_name().is_some() {
+                    normalized.pop();
+                }
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
 }
 
 /// Validate that `target` is a directory and exists.
@@ -91,4 +109,55 @@ pub fn map_io_error(path: &Path, err: std::io::Error) -> OperationError {
 /// Create a child path under `parent` for a new item named `name`.
 pub fn child_path(parent: &Location, name: &str) -> PathBuf {
     parent.path.join(name)
+}
+
+/// Rename one entry without replacing an existing destination. Unlike
+/// std::fs::rename on Windows this cannot silently overwrite another file.
+pub fn rename_no_replace(source: &Path, destination: &Path) -> Result<(), OperationError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::MoveFileW;
+    use windows::core::PCWSTR;
+    let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination_wide: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    // SAFETY: both paths are NUL-terminated and their backing buffers live
+    // throughout the call. MoveFileW fails when the destination exists.
+    unsafe {
+        MoveFileW(
+            PCWSTR(source_wide.as_ptr()),
+            PCWSTR(destination_wide.as_ptr()),
+        )
+    }
+    .map_err(|e| OperationError::Shell(format!("Rename failed: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_and_quoted_paths_are_normalized_without_io() {
+        let base = Location::new(PathBuf::from(r"G:\audit\folder"));
+        assert_eq!(
+            resolve_input(&LocationInput::new("../other"), &base)
+                .unwrap()
+                .path,
+            PathBuf::from(r"G:\audit\other")
+        );
+        assert_eq!(
+            resolve_input(&LocationInput::new(r#""G:\audit\other""#), &base)
+                .unwrap()
+                .path,
+            PathBuf::from(r"G:\audit\other")
+        );
+        for path in [r"\\server\share\folder", r"\\?\G:\long\folder"] {
+            assert_eq!(
+                canonicalize_location(Path::new(path)).unwrap().path,
+                PathBuf::from(path)
+            );
+        }
+    }
 }

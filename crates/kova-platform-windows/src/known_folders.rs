@@ -1,13 +1,13 @@
 use kova_core::domain::Location;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
-use windows::Win32::Foundation::S_OK;
-use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree};
+
+use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
     FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Profile, KNOWN_FOLDER_FLAG,
     SHGetKnownFolderPath,
 };
-use windows::core::{GUID, HRESULT};
+use windows::core::GUID;
 
 /// A known folder the platform can resolve at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,14 +37,7 @@ pub fn resolve_known_folder(folder: KnownFolder) -> Option<Location> {
     // CoTaskMemFree. We CoInitialize first on this thread; if already
     // initialized it returns S_FALSE which is fine.
     unsafe {
-        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        if hr.is_err() && hr != S_OK && hr != HRESULT(1) {
-            // RPC_E_CHANGED_MODE (0x80010106) means already initialized in a
-            // different mode; we can still try the API, so don't bail here.
-            if hr.0 as u32 != 0x80010106 {
-                tracing::debug!("CoInitializeEx failed: {:?}", hr);
-            }
-        }
+        crate::com::ensure_sta();
 
         let path_ptr = match SHGetKnownFolderPath(&folder.guid(), KNOWN_FOLDER_FLAG(0), None) {
             Ok(p) => p,

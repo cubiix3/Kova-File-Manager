@@ -3,7 +3,7 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use windows::Win32::Foundation::MAX_PATH;
 use windows::Win32::Storage::FileSystem::{
-    GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW,
+    GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW,
 };
 use windows::core::PCWSTR;
 
@@ -14,6 +14,7 @@ const DRIVE_RAMDISK: u32 = 6;
 /// A logical drive entry shown in the sidebar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriveInfo {
+    pub name: String,
     pub letter: String,
     pub path: PathBuf,
     /// Total size in bytes; 0 when unknown (e.g. removable without media).
@@ -27,8 +28,9 @@ pub struct DriveInfo {
 /// for M0 to keep the UI simple.
 pub fn list_local_drives() -> Vec<DriveInfo> {
     let mut buffer = vec![0u16; (MAX_PATH * 26) as usize];
+    // SAFETY: the API receives the full writable slice and its length.
     let count = unsafe { GetLogicalDriveStringsW(Some(&mut buffer)) };
-    if count == 0 {
+    if count == 0 || count as usize > buffer.len() {
         return Vec::new();
     }
 
@@ -42,6 +44,7 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
                 let letter = os_string.to_string_lossy().into_owned();
                 let (total_bytes, free_bytes) = drive_capacity(&path);
                 Some(DriveInfo {
+                    name: drive_name(&path),
                     letter,
                     path,
                     total_bytes,
@@ -54,6 +57,34 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
         .collect();
 
     drives
+}
+
+fn drive_name(root: &std::path::Path) -> String {
+    let wide: Vec<u16> = root.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut label = [0u16; 261];
+    // SAFETY: the root is NUL-terminated and label is a writable buffer;
+    // unused output pointers are null. This runs on the sidebar worker.
+    let result = unsafe {
+        GetVolumeInformationW(
+            PCWSTR(wide.as_ptr()),
+            Some(&mut label),
+            None,
+            None,
+            None,
+            None,
+        )
+    };
+    let letter = root
+        .display()
+        .to_string()
+        .trim_end_matches('\\')
+        .to_string();
+    let len = label.iter().position(|&c| c == 0).unwrap_or(label.len());
+    if result.is_ok() && len > 0 {
+        format!("{} ({letter})", String::from_utf16_lossy(&label[..len]))
+    } else {
+        format!("Local drive ({letter})")
+    }
 }
 
 /// Capacity of a drive root in (total, free) bytes; (0, 0) when unavailable.

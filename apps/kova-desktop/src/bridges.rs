@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 #[derive(Clone)]
 pub struct CommandDispatcher {
     controller: Arc<Mutex<AppController>>,
-    tx: mpsc::Sender<WorkerCommand>,
+    tx: mpsc::UnboundedSender<WorkerCommand>,
     generations: Arc<Mutex<GenerationCounter>>,
     /// Explorer-grade file operations (copy/move/delete) that must run off the
     /// UI thread on the dedicated shell-ops thread.
@@ -24,7 +24,7 @@ pub struct CommandDispatcher {
 impl CommandDispatcher {
     pub fn new(
         controller: Arc<Mutex<AppController>>,
-        tx: mpsc::Sender<WorkerCommand>,
+        tx: mpsc::UnboundedSender<WorkerCommand>,
         generations: GenerationCounter,
         ops_tx: Sender<ShellOpCommand>,
     ) -> Self {
@@ -47,7 +47,9 @@ impl CommandDispatcher {
     }
 
     fn send(&self, cmd: WorkerCommand) {
-        let _ = self.tx.try_send(cmd);
+        if self.tx.send(cmd).is_err() {
+            self.set_status_message("Filesystem worker unavailable".into());
+        }
     }
 
     fn send_ops(&self, cmd: ShellOpCommand) {
@@ -72,6 +74,13 @@ impl CommandDispatcher {
         });
     }
 
+    pub fn refresh_tabs(&self) {
+        let locations = self.controller.lock().unwrap().tab_locations();
+        for (id, location) in locations {
+            self.request_enumeration(id, location);
+        }
+    }
+
     pub fn dispatch_navigate(&self, input: LocationInput) -> Result<(), String> {
         let ctrl = self.controller.lock().unwrap();
         let base = ctrl
@@ -81,9 +90,6 @@ impl CommandDispatcher {
         drop(ctrl);
 
         let location = resolve_input(&input, &base).map_err(|e| e.to_string())?;
-        if !location.path.exists() {
-            return Err(format!("path does not exist: {}", location.display()));
-        }
         {
             let mut ctrl = self.controller.lock().unwrap();
             ctrl.navigate(location.clone());
@@ -154,7 +160,7 @@ impl CommandDispatcher {
         let location = {
             let ctrl = self.controller.lock().unwrap();
             let entry = resolve_index(&ctrl, index).ok_or("no entry at index")?;
-            if entry.kind != FileKind::Directory {
+            if !entry.is_directory() {
                 return Err("only folders can be opened in a new tab".into());
             }
             canonicalize_location(&entry.path).map_err(|e| e.to_string())?
@@ -177,7 +183,9 @@ impl CommandDispatcher {
                 .cloned()
                 .unwrap_or_else(initial_location)
         };
-        self.request_enumeration(new_active, location);
+        if self.controller.lock().unwrap().needs_enumeration() {
+            self.request_enumeration(new_active, location);
+        }
         Ok(())
     }
 
@@ -186,7 +194,7 @@ impl CommandDispatcher {
             let mut ctrl = self.controller.lock().unwrap();
             ctrl.switch_tab(index)
         };
-        if switched {
+        if switched && self.controller.lock().unwrap().needs_enumeration() {
             let (tab_id, location) = {
                 let ctrl = self.controller.lock().unwrap();
                 let id = ctrl.active_tab_id();
@@ -250,7 +258,7 @@ impl CommandDispatcher {
             (tab_id, entry.path.clone(), entry.kind)
         };
 
-        if kind == FileKind::Directory {
+        if matches!(kind, FileKind::Directory | FileKind::Junction) {
             let location = match canonicalize_location(&path) {
                 Ok(l) => l,
                 Err(e) => {
@@ -282,21 +290,11 @@ impl CommandDispatcher {
         });
     }
 
-    pub fn dispatch_rename_to(&self, index: usize, new_name: &str) {
+    pub fn dispatch_rename_path(&self, path: PathBuf, new_name: &str) {
         if new_name.is_empty() {
             tracing::warn!("rename: empty name");
             return;
         }
-        let path = {
-            let ctrl = self.controller.lock().unwrap();
-            match resolve_index(&ctrl, index).map(|e| e.path.clone()) {
-                Some(p) => p,
-                None => {
-                    tracing::warn!("rename: no entry at index {}", index);
-                    return;
-                }
-            }
-        };
         self.send(WorkerCommand::Rename {
             path,
             new_name: new_name.to_string(),
@@ -424,12 +422,17 @@ impl CommandDispatcher {
             .map(|e| e.name.clone())
             .unwrap_or_default()
     }
+
+    pub fn item_path(&self, index: usize) -> Option<PathBuf> {
+        let ctrl = self.controller.lock().unwrap();
+        resolve_index(&ctrl, index).map(|entry| entry.path.clone())
+    }
 }
 
 fn resolve_index(ctrl: &AppController, index: usize) -> Option<&kova_core::domain::FileEntry> {
     let snapshot = ctrl.snapshot()?;
     let idx = if index == usize::MAX {
-        ctrl.primary_selection().unwrap_or(0)
+        ctrl.primary_selection()?
     } else {
         index
     };

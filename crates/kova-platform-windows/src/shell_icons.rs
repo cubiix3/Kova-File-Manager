@@ -142,17 +142,7 @@ pub fn resolve_icon(key: &IconKey) -> Option<IconBitmap> {
 /// apartment on the calling thread. Initialize once per thread; a changed
 /// mode (RPC_E_CHANGED_MODE) is fine because COM is then already set up.
 fn init_com_for_shell() {
-    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
-    use windows::core::HRESULT;
-    // SAFETY: CoInitializeEx has no pointer arguments; the result only tells
-    // us whether this call performed the initialization.
-    unsafe {
-        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        let ok = hr.is_ok() || hr == HRESULT(1) || hr.0 as u32 == 0x8001_0106;
-        if !ok {
-            tracing::debug!("CoInitializeEx failed for icon thread: {hr:?}");
-        }
-    }
+    crate::com::ensure_sta();
 }
 
 /// Which filesystem-ish name to hand to SHGetFileInfoW for a key.

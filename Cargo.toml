@@ -50,7 +50,7 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "fs", "macros
 tokio-util = "0.7"
 
 # UI
-slint = { version = "1.13", features = ["std"] }
+slint = { version = "1.13", features = ["std", "renderer-skia"] }
 
 # Error handling
 thiserror = "2"

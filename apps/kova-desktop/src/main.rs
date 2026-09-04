@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod app_state;
 mod bridges;
 
@@ -24,7 +26,7 @@ slint::include_modules!();
 #[derive(Debug, Clone)]
 enum PendingDialog {
     NewFolder,
-    Rename { index: usize },
+    Rename { path: std::path::PathBuf },
 }
 
 /// One resolved icon batch coming back from the icon worker thread.
@@ -66,9 +68,16 @@ impl IconStore {
     /// when the key was resolved before.
     fn intern(&mut self, key: &IconKey, bitmap: Option<&IconBitmap>) -> Option<u32> {
         if let Some(id) = self.ids.get(key) {
+            if let Some(bitmap) = bitmap {
+                self.model
+                    .set_row_data(*id as usize, image_from_bitmap(bitmap));
+            }
             return Some(*id);
         }
-        let bitmap = bitmap?;
+        let Some(bitmap) = bitmap else {
+            self.ids.insert(key.clone(), 1);
+            return Some(1);
+        };
         // The id doubles as the index into the Slint icon model, so
         // derive it from the model itself: pre-seeded slots occupy
         // 0..N and every intern appends exactly one row.
@@ -102,11 +111,12 @@ fn image_from_bitmap(bitmap: &IconBitmap) -> slint::Image {
     slint::Image::from_rgba8_premultiplied(buffer)
 }
 
-/// Resolve the generic icon ids (0..=4) synchronously at startup so rows and
-/// sidebar entries always have something meaningful to show before async
-/// resolution completes.
-fn preseed_icon_store(store: &mut IconStore, icons_model: &Rc<VecModel<slint::Image>>) {
-    let cache = IconCache::new();
+/// Reserve stable generic icon ids (0..=4) and resolve them on the icon worker.
+fn preseed_icon_store(
+    store: &mut IconStore,
+    icons_model: &Rc<VecModel<slint::Image>>,
+    requests: &std::sync::mpsc::Sender<IconRequest>,
+) {
     let generics: [(IconKey, u32); 5] = [
         (IconKey::Folder, 0),
         (IconKey::File, 1),
@@ -115,21 +125,13 @@ fn preseed_icon_store(store: &mut IconStore, icons_model: &Rc<VecModel<slint::Im
         (IconKey::UnknownType, 4),
     ];
     for (key, id) in generics {
-        let bitmap = cache.get_or_resolve(&key);
-        let image = bitmap.as_ref().map(image_from_bitmap);
         let slot = id as usize;
-        match image {
-            Some(image) => {
-                while icons_model.row_count() <= slot {
-                    icons_model.push(slint::Image::default());
-                }
-                icons_model.set_row_data(slot, image);
-            }
-            None => {
-                tracing::warn!("generic icon {key:?} could not be resolved");
-            }
+        while icons_model.row_count() <= slot {
+            icons_model.push(slint::Image::default());
         }
-        store.register_preseeded(key, id);
+        store.register_preseeded(key.clone(), id);
+        store.mark_pending(key.clone());
+        let _ = requests.send(IconRequest { key });
     }
 }
 
@@ -166,7 +168,7 @@ async fn main() {
     // window is created.
     shell_menu::ensure_com_sta();
 
-    let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCommand>(64);
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<WorkerCommand>();
     let (evt_tx, mut evt_rx) = mpsc::channel::<KovaEvent>(64);
     // Worker events are forwarded into a plain channel and drained by a Slint
     // timer, because Slint properties must only be touched from the UI thread.
@@ -229,7 +231,7 @@ async fn main() {
     let icon_store = Rc::new(RefCell::new(IconStore::new(Rc::clone(&icons_model))));
     {
         let mut store = icon_store.borrow_mut();
-        preseed_icon_store(&mut store, &icons_model);
+        preseed_icon_store(&mut store, &icons_model, &icon_req_tx);
     }
 
     let ui = app.as_weak();
@@ -247,8 +249,10 @@ async fn main() {
     );
 
     // Populate sidebar targets and icons.
-    set_known_folder_paths(&ui);
-    set_drives(&ui);
+    let (sidebar_tx, sidebar_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sidebar_tx.send(load_sidebar());
+    });
 
     // Initial load.
     let start_tab = app_controller.lock().unwrap().active_tab_id();
@@ -293,33 +297,36 @@ async fn main() {
             let store_ref = Rc::clone(&store_for_pump);
             let icon_req_ref = icon_req_for_pump.clone();
             let mut ui_dirty = false;
+            if let Ok(data) = sidebar_rx.try_recv() {
+                if let Some(ui) = ui_ref.upgrade() {
+                    apply_sidebar(&ui, data);
+                }
+            }
 
             while let Ok(event) = ui_evt_rx.try_recv() {
                 let Some(ui) = ui_ref.upgrade() else { return };
                 let mut ctrl = ctrl_ref.lock().unwrap();
                 match event {
                     KovaEvent::DirectoryLoaded { tab_id, snapshot }
-                        if ctrl.active_tab_id() == tab_id
-                            && ctrl.is_current_request(tab_id, snapshot.request_id) =>
+                        if ctrl.is_current_request(tab_id, snapshot.request_id) =>
                     {
                         ctrl.apply_snapshot(tab_id, snapshot);
                         queue_icon_requests(&store_ref, &icon_req_ref, &mut ctrl);
                         update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
                     }
                     KovaEvent::DirectoryError {
-                        tab_id, location, ..
-                    } if ctrl.active_tab_id() == tab_id => {
-                        ctrl.set_loading(false);
-                        ctrl.set_status(format!("Error reading {}", location.display()));
+                        tab_id,
+                        request_id,
+                        error_message,
+                        ..
+                    } if ctrl.is_current_request(tab_id, request_id) => {
+                        ctrl.apply_error(tab_id, request_id, error_message);
                         update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
                     }
                     KovaEvent::FolderCreated { .. } | KovaEvent::ItemRenamed { .. } => {
-                        let tab_id = ctrl.active_tab_id();
-                        if let Some(loc) = ctrl.current_location().cloned() {
-                            drop(ctrl);
-                            reload_ref.request_enumeration(tab_id, loc);
-                            return;
-                        }
+                        drop(ctrl);
+                        reload_ref.refresh_tabs();
+                        return;
                     }
                     KovaEvent::OperationError {
                         context,
@@ -336,18 +343,15 @@ async fn main() {
 
             // Shell file-operation outcomes: refresh the directory because
             // copy/move/delete may have changed it, and surface the result.
-            while let Ok(outcome) = ops_out_rx.try_recv() {
+            if let Ok(outcome) = ops_out_rx.try_recv() {
                 let Some(ui) = ui_ref.upgrade() else { return };
                 let mut ctrl = ctrl_ref.lock().unwrap();
                 match outcome {
                     ShellOpOutcome::Completed { summary } => {
                         ctrl.set_status(format!("{summary} finished"));
-                        if let Some(loc) = ctrl.current_location().cloned() {
-                            let tab_id = ctrl.active_tab_id();
-                            drop(ctrl);
-                            reload_ref.request_enumeration(tab_id, loc);
-                            return;
-                        }
+                        drop(ctrl);
+                        reload_ref.refresh_tabs();
+                        return;
                     }
                     ShellOpOutcome::Failed {
                         summary,
@@ -363,13 +367,19 @@ async fn main() {
                             update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
                             show_error_dialog(&ui, &message);
                         }
+                        // A failed or cancelled batch can already have changed
+                        // some files. Reconcile every open tab with disk.
+                        drop(ctrl);
+                        reload_ref.refresh_tabs();
+                        return;
                     }
                 }
             }
 
             // Icon resolutions: intern the bitmap, then stamp the new icon id
             // onto every snapshot entry that shares the key.
-            while let Ok(res) = icon_res_rx.try_recv() {
+            let mut resolved_icons = HashMap::new();
+            for res in icon_res_rx.try_iter().take(64) {
                 let mut store = store_ref.borrow_mut();
                 let was_pending = store.take_pending(&res.key);
                 if !was_pending {
@@ -378,24 +388,36 @@ async fn main() {
                 let id = store.intern(&res.key, res.bitmap.as_ref());
                 drop(store);
                 if let Some(id) = id {
-                    let handle = IconHandle(id);
-                    let mut ctrl = ctrl_ref.lock().unwrap();
-                    for snapshot in ctrl.snapshots_mut() {
-                        for entry in snapshot.entries.iter_mut() {
-                            if entry.icon_handle.is_none()
-                                && icon_key_for(&entry.path, entry.is_directory()) == res.key
-                            {
-                                entry.icon_handle = Some(handle);
-                            }
-                        }
-                    }
+                    resolved_icons.insert(res.key, IconHandle(id));
                     ui_dirty = true;
                 }
             }
+            if !resolved_icons.is_empty() {
+                let mut ctrl = ctrl_ref.lock().unwrap();
+                for snapshot in ctrl.snapshots_mut() {
+                    for entry in &mut snapshot.entries {
+                        if entry.icon_handle.is_none() {
+                            entry.icon_handle = resolved_icons
+                                .get(&icon_key_for(&entry.path, entry.is_directory()))
+                                .copied();
+                        }
+                    }
+                }
+            }
 
+            if let Some(ui) = ui_ref.upgrade() {
+                let ctrl = ctrl_ref.lock().unwrap();
+                let state = ui.global::<AppState>();
+                ui_dirty |= state.get_active_tab() != ctrl.active_tab_index() as i32
+                    || state.get_loading() != ctrl.is_loading()
+                    || state.get_status_text().as_str() != ctrl.status_text()
+                    || *last_address_ref.lock().unwrap() != ctrl.address_path()
+                    || state.get_tabs().row_count() != ctrl.tab_labels().len();
+            }
             if ui_dirty {
                 if let Some(ui) = ui_ref.upgrade() {
-                    let ctrl = ctrl_ref.lock().unwrap();
+                    let mut ctrl = ctrl_ref.lock().unwrap();
+                    queue_icon_requests(&store_ref, &icon_req_ref, &mut ctrl);
                     update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
                 }
             }
@@ -447,24 +469,24 @@ fn queue_icon_requests(
     icon_req_tx: &std::sync::mpsc::Sender<IconRequest>,
     ctrl: &mut AppController,
 ) {
-    let keys: Vec<IconKey> = match ctrl.snapshot() {
-        Some(snap) => snap
-            .entries
-            .iter()
-            .filter(|e| e.icon_handle.is_none())
-            .map(|e| icon_key_for(&e.path, e.is_directory()))
-            .collect(),
-        None => Vec::new(),
-    };
+    let keys: HashSet<IconKey> = ctrl
+        .snapshots_mut()
+        .flat_map(|snap| {
+            snap.entries
+                .iter()
+                .filter(|e| e.icon_handle.is_none())
+                .map(|e| icon_key_for(&e.path, e.is_directory()))
+        })
+        .collect();
     if keys.is_empty() {
         return;
     }
 
     let mut store = store.borrow_mut();
-    let mut hits: Vec<(IconKey, u32)> = Vec::new();
+    let mut hits: HashMap<IconKey, u32> = HashMap::new();
     for key in keys {
         if let Some(id) = store.id_for(&key) {
-            hits.push((key, id));
+            hits.insert(key, id);
             continue;
         }
         if store.pending.contains(&key) {
@@ -482,7 +504,7 @@ fn queue_icon_requests(
                     continue;
                 }
                 let key = icon_key_for(&entry.path, entry.is_directory());
-                if let Some((_, id)) = hits.iter().find(|(k, _)| *k == key) {
+                if let Some(id) = hits.get(&key) {
                     entry.icon_handle = Some(IconHandle(*id));
                 }
             }
@@ -490,92 +512,92 @@ fn queue_icon_requests(
     }
 }
 
-fn set_known_folder_paths(ui: &Weak<MainWindow>) {
+struct SidebarData {
+    folders: Vec<(KnownFolder, kova_core::domain::Location, Option<IconBitmap>)>,
+    drives: Vec<(
+        kova_platform_windows::volumes::DriveInfo,
+        Option<IconBitmap>,
+    )>,
+}
+
+fn load_sidebar() -> SidebarData {
     let cache = IconCache::new();
-    let Some(ui) = ui.upgrade() else { return };
-    fn fill(
-        ui: &MainWindow,
-        cache: &IconCache,
-        folder: KnownFolder,
-        set_path: impl FnOnce(&AppState, String),
-        set_icon: impl FnOnce(&AppState, slint::Image),
-    ) {
-        let Some(location) = resolve_known_folder(folder) else {
-            return;
-        };
-        set_path(&ui.global::<AppState>(), location.display());
-        if let Some(bitmap) = cache.get_or_resolve(&IconKey::Path(location.path.clone())) {
-            set_icon(&ui.global::<AppState>(), image_from_bitmap(&bitmap));
-        } else {
-            tracing::debug!("no special shell icon for {}", location.display());
+    let folders = [
+        KnownFolder::Home,
+        KnownFolder::Desktop,
+        KnownFolder::Documents,
+        KnownFolder::Downloads,
+    ]
+    .into_iter()
+    .filter_map(|folder| {
+        let location = resolve_known_folder(folder)?;
+        let bitmap = cache.get_or_resolve(&IconKey::Path(location.path.clone()));
+        Some((folder, location, bitmap))
+    })
+    .collect();
+    let drives = kova_platform_windows::volumes::list_local_drives()
+        .into_iter()
+        .map(|drive| {
+            let bitmap = cache.get_or_resolve(&IconKey::Drive(drive.path.clone()));
+            (drive, bitmap)
+        })
+        .collect();
+    SidebarData { folders, drives }
+}
+
+fn apply_sidebar(ui: &MainWindow, data: SidebarData) {
+    let state = ui.global::<AppState>();
+    for (folder, location, bitmap) in data.folders {
+        let path = location.display().into();
+        let icon = bitmap.as_ref().map(image_from_bitmap).unwrap_or_default();
+        match folder {
+            KnownFolder::Home => {
+                state.set_home_path(path);
+                state.set_home_icon(icon);
+            }
+            KnownFolder::Desktop => {
+                state.set_desktop_path(path);
+                state.set_desktop_icon(icon);
+            }
+            KnownFolder::Documents => {
+                state.set_documents_path(path);
+                state.set_documents_icon(icon);
+            }
+            KnownFolder::Downloads => {
+                state.set_downloads_path(path);
+                state.set_downloads_icon(icon);
+            }
         }
     }
-
-    fill(
-        &ui,
-        &cache,
-        KnownFolder::Home,
-        |s, p| s.set_home_path(p.into()),
-        |s, i| s.set_home_icon(i),
-    );
-    fill(
-        &ui,
-        &cache,
-        KnownFolder::Desktop,
-        |s, p| s.set_desktop_path(p.into()),
-        |s, i| s.set_desktop_icon(i),
-    );
-    fill(
-        &ui,
-        &cache,
-        KnownFolder::Documents,
-        |s, p| s.set_documents_path(p.into()),
-        |s, i| s.set_documents_icon(i),
-    );
-    fill(
-        &ui,
-        &cache,
-        KnownFolder::Downloads,
-        |s, p| s.set_downloads_path(p.into()),
-        |s, i| s.set_downloads_icon(i),
-    );
-}
-fn set_drives(ui: &Weak<MainWindow>) {
-    let cache = IconCache::new();
-    let drives: Vec<DriveItem> = kova_platform_windows::volumes::list_local_drives()
+    let drives: Vec<DriveItem> = data
+        .drives
         .into_iter()
-        .map(|d| {
-            let icon = cache
-                .get_or_resolve(&IconKey::Drive(d.path.clone()))
-                .map(|bitmap| image_from_bitmap(&bitmap))
-                .unwrap_or_default();
-            let (usage, detail) = if d.total_bytes > 0 {
-                let used = d.total_bytes.saturating_sub(d.free_bytes);
-                let usage = used as f32 / d.total_bytes as f32;
-                let detail = format!(
-                    "{} free of {}",
-                    format_bytes(d.free_bytes),
-                    format_bytes(d.total_bytes)
-                );
-                (usage.clamp(0.0, 1.0), detail)
+        .map(|(drive, bitmap)| {
+            let usage = if drive.total_bytes == 0 {
+                0.0
             } else {
-                (0.0, String::new())
+                drive.total_bytes.saturating_sub(drive.free_bytes) as f32 / drive.total_bytes as f32
+            };
+            let detail = if drive.total_bytes == 0 {
+                String::new()
+            } else {
+                format!(
+                    "{} free of {}",
+                    format_bytes(drive.free_bytes),
+                    format_bytes(drive.total_bytes)
+                )
             };
             DriveItem {
-                name: d.letter.into(),
-                path: d.path.display().to_string().into(),
-                icon,
+                name: drive.name.into(),
+                path: drive.path.display().to_string().into(),
+                icon: bitmap.as_ref().map(image_from_bitmap).unwrap_or_default(),
                 usage,
                 detail: detail.into(),
             }
         })
         .collect();
-    if let Some(ui) = ui.upgrade() {
-        let model = VecModel::from(drives);
-        ui.global::<AppState>().set_drives(ModelRc::new(model));
-    }
+    state.set_drives(ModelRc::new(VecModel::from(drives)));
 }
-
 fn show_dialog(
     ui: &MainWindow,
     title: &str,
@@ -600,7 +622,12 @@ fn close_dialog(ui: &MainWindow, pending: &Arc<Mutex<Option<PendingDialog>>>) {
 fn show_error_dialog(ui: &MainWindow, message: &str) {
     let state = ui.global::<AppState>();
     state.set_dialog_title("Error".into());
-    state.set_dialog_value(message.into());
+    state.set_dialog_value(
+        message
+            .strip_prefix("shell error: ")
+            .unwrap_or(message)
+            .into(),
+    );
     state.set_dialog_visible(true);
 }
 
@@ -614,6 +641,23 @@ fn sync_ui(
     let controller_arc = dispatcher.controller();
     let ctrl = controller_arc.lock().unwrap();
     update_ui(ui, &ctrl, last_address, models);
+}
+
+fn sync_selection(ui: &MainWindow, dispatcher: &CommandDispatcher, models: &UiModels) {
+    let controller = dispatcher.controller();
+    let ctrl = controller.lock().unwrap();
+    let selected = ctrl.selected_indices();
+    ui.global::<AppState>()
+        .set_selected_count(selected.len() as i32);
+    for i in 0..models.files.row_count() {
+        if let Some(mut row) = models.files.row_data(i) {
+            let is_selected = selected.contains(&i);
+            if row.selected != is_selected {
+                row.selected = is_selected;
+                models.files.set_row_data(i, row);
+            }
+        }
+    }
 }
 
 /// Show a user-visible error for a failed user action and re-sync the UI.
@@ -694,10 +738,16 @@ fn wire_callbacks(
         });
 
     let d = dispatcher.clone();
+    let ui_new = ui.clone();
+    let last_new = Arc::clone(&last_address);
+    let models_new = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_new_tab(move || {
             d.dispatch_new_tab();
+            if let Some(ui) = ui_new.upgrade() {
+                sync_ui(&ui, &d, &last_new, &models_new);
+            }
         });
 
     let d = dispatcher.clone();
@@ -710,79 +760,88 @@ fn wire_callbacks(
             if let Err(e) = d.dispatch_close_tab(idx as usize) {
                 show_action_error(&ui_close, &d, &last_close, &models_close, &e);
             }
+            if let Some(ui) = ui_close.upgrade() {
+                sync_ui(&ui, &d, &last_close, &models_close);
+            }
         });
 
     let d = dispatcher.clone();
+    let ui_switch = ui.clone();
+    let last_switch = Arc::clone(&last_address);
+    let models_switch = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_switch_tab(move |idx: i32| {
             d.dispatch_switch_tab(idx as usize);
+            if let Some(ui) = ui_switch.upgrade() {
+                sync_ui(&ui, &d, &last_switch, &models_switch);
+            }
         });
 
     // Selection and sorting are pure view-model operations: they change
     // controller state that must be pushed back into the UI model.
     let d = dispatcher.clone();
     let ui_sel = ui.clone();
-    let last_sel = Arc::clone(&last_address);
+
     let models_sel = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_select(move |idx: i32| {
             d.dispatch_select_single(idx as usize);
             if let Some(u) = ui_sel.upgrade() {
-                sync_ui(&u, &d, &last_sel, &models_sel);
+                sync_selection(&u, &d, &models_sel);
             }
         });
 
     let d = dispatcher.clone();
     let ui_toggle = ui.clone();
-    let last_toggle = Arc::clone(&last_address);
+
     let models_toggle = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_toggle(move |idx: i32| {
             d.dispatch_select_toggle(idx as usize);
             if let Some(u) = ui_toggle.upgrade() {
-                sync_ui(&u, &d, &last_toggle, &models_toggle);
+                sync_selection(&u, &d, &models_toggle);
             }
         });
 
     let d = dispatcher.clone();
     let ui_range = ui.clone();
-    let last_range = Arc::clone(&last_address);
+
     let models_range = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_range(move |idx: i32| {
             d.dispatch_select_range(idx as usize);
             if let Some(u) = ui_range.upgrade() {
-                sync_ui(&u, &d, &last_range, &models_range);
+                sync_selection(&u, &d, &models_range);
             }
         });
 
     let d = dispatcher.clone();
     let ui_all = ui.clone();
-    let last_all = Arc::clone(&last_address);
+
     let models_all = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_select_all(move || {
             d.dispatch_select_all();
             if let Some(u) = ui_all.upgrade() {
-                sync_ui(&u, &d, &last_all, &models_all);
+                sync_selection(&u, &d, &models_all);
             }
         });
 
     let d = dispatcher.clone();
     let ui_clear = ui.clone();
-    let last_clear = Arc::clone(&last_address);
+
     let models_clear = Rc::clone(&models);
     ui.unwrap()
         .global::<AppState>()
         .on_request_clear_selection(move || {
             d.dispatch_clear_selection();
             if let Some(u) = ui_clear.upgrade() {
-                sync_ui(&u, &d, &last_clear, &models_clear);
+                sync_selection(&u, &d, &models_clear);
             }
         });
 
@@ -896,14 +955,18 @@ fn wire_callbacks(
         .global::<AppState>()
         .on_request_rename(move |idx: i32| {
             let name = d.item_name(idx as usize);
+            if name.is_empty() {
+                return;
+            }
+            let Some(path) = d.item_path(idx as usize) else {
+                return;
+            };
             if let Some(ui) = dialog_ui.upgrade() {
                 show_dialog(
                     &ui,
                     "Rename",
                     &name,
-                    PendingDialog::Rename {
-                        index: idx as usize,
-                    },
+                    PendingDialog::Rename { path },
                     &pending,
                 );
             }
@@ -919,7 +982,13 @@ fn wire_callbacks(
     ui.unwrap()
         .global::<AppState>()
         .on_request_dialog_confirm(move |value: SharedString| {
-            let name = value.trim().to_string();
+            if let Some(ui) = dialog_ui.upgrade() {
+                if ui.global::<AppState>().get_dialog_title() == "Error" {
+                    close_dialog(&ui, &pending);
+                    return;
+                }
+            }
+            let name = value.to_string();
             if name.is_empty() {
                 status_dispatcher.set_status_message("Name must not be empty".into());
                 if let Some(u) = ui_status.upgrade() {
@@ -933,8 +1002,8 @@ fn wire_callbacks(
                     PendingDialog::NewFolder => {
                         d.dispatch_new_folder_named(&name);
                     }
-                    PendingDialog::Rename { index } => {
-                        d.dispatch_rename_to(index, &name);
+                    PendingDialog::Rename { path } => {
+                        d.dispatch_rename_path(path, &name);
                     }
                 }
             }
@@ -972,10 +1041,12 @@ fn update_ui(
     }
 
     let state = ui.global::<AppState>();
+    state.set_current_path(controller.address_path().into());
     state.set_status_text(controller.status_text().into());
     state.set_item_count(controller.item_count() as i32);
     state.set_selected_count(controller.selected_count() as i32);
     state.set_loading(controller.is_loading());
+    state.set_directory_error(controller.directory_error().into());
     state.set_can_go_back(controller.can_go_back());
     state.set_can_go_forward(controller.can_go_forward());
     state.set_can_go_parent(controller.can_go_parent());

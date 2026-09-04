@@ -26,7 +26,9 @@ impl SelectionState {
 
     pub fn primary(&self) -> Option<usize> {
         self.last_focus
+            .filter(|i| self.is_selected(*i))
             .or(self.anchor)
+            .filter(|i| self.is_selected(*i))
             .or(self.selected.last().copied())
     }
 
@@ -67,6 +69,7 @@ impl SelectionState {
     /// and the new index. Keeps the existing anchor.
     pub fn range_select(&mut self, index: usize) {
         let anchor = self.anchor.unwrap_or(index);
+        self.anchor = Some(anchor);
         let start = anchor.min(index);
         let end = anchor.max(index);
         self.selected.clear();
@@ -76,6 +79,10 @@ impl SelectionState {
 
     /// Select all indices in `[0, len)`.
     pub fn select_all(&mut self, len: usize) {
+        if len == 0 {
+            self.clear();
+            return;
+        }
         self.selected.clear();
         self.selected.extend(0..len);
         self.anchor = Some(0);
@@ -86,6 +93,13 @@ impl SelectionState {
         self.selected.clear();
         self.anchor = None;
         self.last_focus = None;
+    }
+
+    /// Preserve file identity, anchor and focus when a snapshot is reordered.
+    pub fn remap(&mut self, mut index: impl FnMut(usize) -> Option<usize>) {
+        self.selected = self.selected.iter().filter_map(|&i| index(i)).collect();
+        self.anchor = self.anchor.and_then(&mut index);
+        self.last_focus = self.last_focus.and_then(index);
     }
 
     /// Move the focus by one step, optionally extending the selection when

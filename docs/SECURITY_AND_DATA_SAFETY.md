@@ -1,69 +1,41 @@
-# Kova Security and Data Safety — M0
+# Security and data safety
 
-## Principle
+File identity and data integrity take priority over visual changes. Mutating tests
+use unique temporary directories or a designated ignored runtime sandbox.
 
-Kova is a file manager. Broken animations are bugs; broken file operations are
-unacceptable. No untested low-level code may destructively modify real user
-files.
+Copy, Move and Delete run on a dedicated COM thread through Windows
+IFileOperation, with native conflict/progress UI and undo/Recycle Bin support.
+Windows controls whether a destination supports recycling; Kova does not silently
+substitute a recursive permanent-delete implementation. Cancellation may mean
+partial completion, so all open directory views are reconciled afterwards.
 
-## Unsafe Policy
+New Folder and Rename accept one validated Windows filename. Paths, alternate
+streams, reserved device names, control characters and trailing dots/spaces are
+rejected. Rename uses MoveFileW on a worker thread, preventing silent replacement
+of an existing destination. Case-only and unusual-filesystem behavior still
+requires verification on the relevant target volumes.
 
-`unsafe` is allowed only in `kova-platform-windows` and only where required by
-the Windows API. Every `unsafe` block contains a `SAFETY:` comment explaining
-why the preconditions hold.
+Selection indices are remapped by full path after sorting/refresh. Rename dialogs
+capture the source path. Navigating removes mismatched snapshots before they can
+be acted upon. Success and failure must match the tab's latest request generation.
 
-Current `unsafe` usage:
+Native menus bind the selected items' parent and child PIDLs. Installed extensions
+remain native; their execution, UI and responsiveness are outside Kova's control.
+Failed resolution must not invoke a partial selection.
 
-1. `SHGetKnownFolderPath` in `known_folders.rs`
-   - CoInitializeEx is called first.
-   - The returned PWSTR is freed with `CoTaskMemFree`.
-   - A helper converts the wide string to an `OsString` before freeing.
+Windows-specific unsafe calls belong in the platform crate; the legacy
+ShellExecuteExW launcher currently lives in kova-ops. New unsafe blocks require a
+SAFETY explanation. COM initialization is balanced per thread, clipboard allocations
+remain owned until transfer, and clipboard reads use allocation bounds.
 
-2. `ShellExecuteExW` in `file_ops.rs`
-   - COM is initialized in apartment-threaded mode.
-   - Operation and file wide strings are valid for the call duration.
-   - Null HWND and parameters are explicit.
+The core uses PathBuf. Normalization does not query the filesystem or follow
+junctions. Long paths, UNC shares, permissions and disconnected devices remain
+subject to Windows/filesystem capabilities. See [verification limits](PRODUCT_AUDIT.md).
 
-3. `GetLogicalDriveStringsW` / `GetDriveTypeW` in `volumes.rs`
-   - Pre-allocated buffers sized for 26 drive letters.
-   - Wide strings are null-terminated before passing.
+Default tests do not mutate the live desktop clipboard. Interactive clipboard
+tests require a controlled session and are explicitly ignored. Runtime Explorer
+checks use sandbox files and restore captured clipboard formats afterwards; this
+is not a claim of clipboard-history restoration.
 
-## Destructive Operations
-
-For M0 only `New Folder` and `Rename` are exposed in the UI, and they operate on
-the current directory. The UI dialog rejects empty names. Integration tests use
-`TestSandbox` which enforces that mutating targets live under a unique temporary
-root.
-
-Copy / Move / Delete are **not** exposed in the product UI. They are prepared
-as core functions but will only be enabled once they use Windows
-`IFileOperation` or equivalent safe APIs and are fully tested in the sandbox.
-
-## Path Handling
-
-- Paths use `Path` / `PathBuf` internally.
-- User input is normalized (forward slashes to backslashes) but never blindly
-  resolved across junctions.
-- Long paths and UNC paths are preserved; no length assumptions are made.
-
-## Logging
-
-- `tracing` is used with an environment filter.
-- File contents are never logged.
-- Full paths may appear in debug-level diagnostics only.
-
-## Test Safety
-
-All mutating integration tests:
-
-1. Create a unique directory under `%TEMP%\kova-tests\`.
-2. Verify the target path is inside that root before mutating.
-3. Clean up after the test.
-
-## Known Limitations
-
-- The sandbox guard rejects paths outside the test root but does not yet defend
-  against symlink/junction escape during traversal. This is acceptable for M0
-  because mutating operations are limited to `New Folder` / `Rename` in a
-  single user-selected directory and the guard is documented. A proper
-  traversal-aware guard is planned for the milestone that adds Copy/Move/Delete.
+Logs may contain paths, but do not intentionally contain file contents. Builds,
+logs and machine-specific configuration are ignored by Git.

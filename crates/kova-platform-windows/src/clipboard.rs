@@ -7,7 +7,7 @@
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 
-use windows::Win32::Foundation::{HANDLE, HGLOBAL};
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     RegisterClipboardFormatW, SetClipboardData,
@@ -16,6 +16,9 @@ use windows::Win32::System::Memory::{
     GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
 };
 use windows::Win32::System::Ole::{CF_HDROP, CF_UNICODETEXT};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DestroyWindow, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE,
+};
 
 /// Drop effect values for the "Preferred DropEffect" clipboard format.
 pub const DROPEFFECT_COPY: u32 = 1;
@@ -23,6 +26,50 @@ pub const DROPEFFECT_MOVE: u32 = 2;
 
 /// Registered clipboard format name for cut/copy state of file transfers.
 const PREFERRED_DROPEFFECT: &str = "Preferred DropEffect";
+
+struct ClipboardOwner(HWND);
+impl ClipboardOwner {
+    fn new() -> Result<Self, ClipboardError> {
+        // SAFETY: STATIC is a system window class; this invisible message-only
+        // window is created and destroyed on the calling thread.
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                windows::core::w!("STATIC"),
+                None,
+                WINDOW_STYLE(0),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                None,
+                None,
+            )
+        }
+        .map(Self)
+        .map_err(ClipboardError::Win)
+    }
+}
+impl Drop for ClipboardOwner {
+    fn drop(&mut self) {
+        // SAFETY: this guard exclusively owns the window, on its creating thread.
+        unsafe {
+            let _ = DestroyWindow(self.0);
+        }
+    }
+}
+
+struct OwnedGlobal(HGLOBAL);
+impl Drop for OwnedGlobal {
+    fn drop(&mut self) {
+        // SAFETY: the guard owns an unlocked allocation until transfer to the clipboard.
+        unsafe {
+            let _ = GlobalFree(Some(self.0));
+        }
+    }
+}
 
 /// Errors that can occur while reading or writing clipboard data.
 #[derive(Debug, thiserror::Error)]
@@ -46,6 +93,7 @@ pub struct ClipboardFiles {
 /// The allocated global memory block is handed to the clipboard and must not
 /// be freed by the caller after a successful `SetClipboardData`.
 pub fn set_clipboard_text(text: &str) -> Result<(), ClipboardError> {
+    let owner = ClipboardOwner::new()?;
     let mut wide: Vec<u16> = text.encode_utf16().collect();
     wide.push(0);
     let byte_len = wide.len() * std::mem::size_of::<u16>();
@@ -54,7 +102,7 @@ pub fn set_clipboard_text(text: &str) -> Result<(), ClipboardError> {
     // memory block is written while locked and handed to the clipboard
     // afterwards; the system owns it from the successful SetClipboardData on.
     unsafe {
-        OpenClipboard(None)?;
+        OpenClipboard(Some(owner.0))?;
         let result = write_text_while_open(&wide, byte_len);
         // CloseClipboard must run regardless of the inner result.
         let _ = CloseClipboard();
@@ -68,6 +116,7 @@ unsafe fn write_text_while_open(wide: &[u16], byte_len: usize) -> Result<(), Cli
     unsafe {
         EmptyClipboard()?;
         let hmem = GlobalAlloc(GMEM_MOVEABLE, byte_len)?;
+        let allocation = OwnedGlobal(hmem);
         let ptr = GlobalLock(hmem);
         if ptr.is_null() {
             return Err(ClipboardError::LockFailed);
@@ -75,6 +124,7 @@ unsafe fn write_text_while_open(wide: &[u16], byte_len: usize) -> Result<(), Cli
         std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr.cast::<u16>(), wide.len());
         let _ = GlobalUnlock(hmem);
         SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(hmem.0)))?;
+        std::mem::forget(allocation);
         Ok(())
     }
 }
@@ -105,12 +155,9 @@ unsafe fn read_text_while_open() -> Result<Option<String>, ClipboardError> {
         if ptr.is_null() {
             return Err(ClipboardError::LockFailed);
         }
-        let mut len = 0usize;
-        while *ptr.cast::<u16>().add(len) != 0 {
-            len += 1;
-        }
-        let wide = std::slice::from_raw_parts(ptr.cast::<u16>(), len);
-        let text = String::from_utf16_lossy(wide);
+        let wide = std::slice::from_raw_parts(ptr.cast::<u16>(), GlobalSize(hmem) / 2);
+        let len = wide.iter().position(|&c| c == 0).unwrap_or(wide.len());
+        let text = String::from_utf16_lossy(&wide[..len]);
         let _ = GlobalUnlock(hmem);
         Ok(Some(text))
     }
@@ -172,12 +219,13 @@ pub fn set_clipboard_files(paths: &[PathBuf], cut: bool) -> Result<(), Clipboard
         DROPEFFECT_COPY
     };
     let effect_bytes = effect.to_ne_bytes();
+    let owner = ClipboardOwner::new()?;
 
     // SAFETY: clipboard calls run in order on one thread; both memory blocks
     // are fully written while locked and then handed to the clipboard, which
     // owns them from the successful SetClipboardData on.
     unsafe {
-        OpenClipboard(None)?;
+        OpenClipboard(Some(owner.0))?;
         let result = write_files_while_open(&hdrop_image, &effect_bytes);
         let _ = CloseClipboard();
         result
@@ -193,6 +241,7 @@ unsafe fn write_files_while_open(
         EmptyClipboard()?;
 
         let hdrop = GlobalAlloc(GMEM_MOVEABLE, hdrop_image.len())?;
+        let allocation = OwnedGlobal(hdrop);
         let ptr = GlobalLock(hdrop);
         if ptr.is_null() {
             return Err(ClipboardError::LockFailed);
@@ -200,12 +249,14 @@ unsafe fn write_files_while_open(
         std::ptr::copy_nonoverlapping(hdrop_image.as_ptr(), ptr.cast::<u8>(), hdrop_image.len());
         let _ = GlobalUnlock(hdrop);
         SetClipboardData(CF_HDROP.0 as u32, Some(HANDLE(hdrop.0)))?;
+        std::mem::forget(allocation);
 
         // The drop effect format is optional metadata; failure to set it must
         // not undo the file list, but a missing effect means "copy" for
         // Explorer which is the safer default.
         let effect_fmt = preferred_dropeffect_format();
         let effect = GlobalAlloc(GMEM_MOVEABLE, effect_bytes.len())?;
+        let allocation = OwnedGlobal(effect);
         let ptr = GlobalLock(effect);
         if ptr.is_null() {
             return Err(ClipboardError::LockFailed);
@@ -213,6 +264,7 @@ unsafe fn write_files_while_open(
         std::ptr::copy_nonoverlapping(effect_bytes.as_ptr(), ptr.cast::<u8>(), effect_bytes.len());
         let _ = GlobalUnlock(effect);
         SetClipboardData(effect_fmt, Some(HANDLE(effect.0)))?;
+        std::mem::forget(allocation);
         Ok(())
     }
 }
@@ -306,9 +358,13 @@ unsafe fn parse_hdrop(ptr: *const u8, total: usize) -> Vec<PathBuf> {
         if total < std::mem::size_of::<DROPFILES_HEADER>() {
             return Vec::new();
         }
-        let header = &*(ptr as *const DROPFILES_HEADER);
+        let header = std::ptr::read_unaligned(ptr as *const DROPFILES_HEADER);
         let offset = header.p_files as usize;
-        if header.f_wide == 0 || offset >= total {
+        if header.f_wide == 0
+            || offset < std::mem::size_of::<DROPFILES_HEADER>()
+            || offset >= total
+            || offset % 2 != 0
+        {
             return Vec::new();
         }
         let base = ptr.add(offset) as *const u16;
@@ -318,13 +374,15 @@ unsafe fn parse_hdrop(ptr: *const u8, total: usize) -> Vec<PathBuf> {
         let mut start = 0usize;
         let mut end = 0usize;
         while end < max_units {
-            let c = *base.add(end);
+            let c = std::ptr::read_unaligned(base.add(end));
             if c == 0 {
                 if end == start {
                     break; // second NUL of the list terminator
                 }
-                let wide = std::slice::from_raw_parts(base.add(start), end - start);
-                paths.push(PathBuf::from(std::ffi::OsString::from_wide(wide)));
+                let wide: Vec<u16> = (start..end)
+                    .map(|i| std::ptr::read_unaligned(base.add(i)))
+                    .collect();
+                paths.push(PathBuf::from(std::ffi::OsString::from_wide(&wide)));
                 start = end + 1;
             }
             end += 1;
@@ -359,11 +417,22 @@ mod tests {
         assert!(unsafe { parse_hdrop([0u8; 4].as_ptr(), 4) }.is_empty());
     }
 
+    #[test]
+    fn malformed_hdrop_offsets_are_rejected() {
+        let mut image = build_hdrop_buffer(&[PathBuf::from(r"C:\audit.txt")]);
+        for offset in [0u32, 1, 19, 21, u32::MAX] {
+            image[..4].copy_from_slice(&offset.to_ne_bytes());
+            // SAFETY: the image owns all bytes passed to the bounded parser.
+            assert!(unsafe { parse_hdrop(image.as_ptr(), image.len()) }.is_empty());
+        }
+    }
+
     /// Restores a previous clipboard text if there was one. The test only
     /// mutates the clipboard when it already held text, so nothing is lost on
     /// machines where the clipboard holds non-text content (in that case a
     /// plain write check runs instead).
     #[test]
+    #[ignore = "requires an isolated interactive clipboard; overwrites user clipboard formats"]
     fn clipboard_roundtrip_preserves_previous_text() {
         let _guard = CLIPBOARD_TEST_LOCK.lock().unwrap();
         let previous = get_clipboard_text().expect("clipboard api should work");
@@ -386,6 +455,7 @@ mod tests {
     /// Exercises the real file clipboard. Only mutates the clipboard when it
     /// held no files before, so a pending user copy/cut is never clobbered.
     #[test]
+    #[ignore = "requires an isolated interactive clipboard; overwrites user clipboard formats"]
     fn clipboard_files_roundtrip() {
         let _guard = CLIPBOARD_TEST_LOCK.lock().unwrap();
         let had_files = clipboard_has_files().expect("format check should work");

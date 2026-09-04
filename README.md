@@ -5,8 +5,8 @@ Slint, and the official Windows APIs (`windows-rs`). No webviews, no Electron,
 no runtime emulation: a real Win32/Shell integration with a GPU-rendered
 native UI.
 
-> **Status:** M3 — product-quality UI polish on top of a fully wired
-> interaction, shell-integration and file-operations core (M0–M2).
+> **Status:** Pre-1.0 — native desktop file manager with product-audit fixes and
+> refined UI. See [verification and remaining limits](docs/PRODUCT_AUDIT.md).
 
 ## Features
 
@@ -25,7 +25,7 @@ native UI.
 
 - Quick Access (Home, Desktop, Documents, Downloads) via
   `SHGetKnownFolderPath`, with real shell icons.
-- Dynamic drive discovery (`GetLogicalDriveStringsW` / `GetDriveTypeW`)
+- Drive discovery at startup (`GetLogicalDriveStringsW` / `GetDriveTypeW`)
   with usage bars and "X GB free of Y GB" details (danger color above 90 %
   usage).
 
@@ -65,7 +65,7 @@ native UI.
 | `crates/kova-platform-windows` | Win32/Shell/COM integration (icons, menus, clipboard, ops) |
 | `apps/kova-desktop` | Slint desktop application (UI, controllers, bridges) |
 
-The UI thread never blocks on filesystem work: enumeration and shell
+Directory enumeration, drive discovery, icon loading and shell
 operations run on worker threads and results are pumped back to the UI
 thread through an event queue. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
@@ -78,6 +78,10 @@ Requirements:
 - Rust stable with the MSVC toolchain (pinned in `rust-toolchain.toml`)
 - Visual Studio 2022 Build Tools with the C++ workload
 
+Slint's Skia renderer is enabled for Windows rendering. The first build may
+download Skia's prebuilt libraries. MSVC builds reserve an 8 MiB main-thread
+stack for Slint's generated UI, including debug builds.
+
 `scripts/cargo-msvc.ps1` locates Visual Studio, imports the MSVC
 environment and runs the requested cargo command:
 
@@ -89,10 +93,10 @@ environment and runs the requested cargo command:
 Quality gates (enforced by CI):
 
 ```powershell
-.\scripts\cargo-msvc.ps1 cargo fmt --all -- --check
-.\scripts\cargo-msvc.ps1 cargo check --workspace --all-targets
-.\scripts\cargo-msvc.ps1 cargo test --workspace
-.\scripts\cargo-msvc.ps1 cargo clippy --workspace --all-targets --all-features -- -D warnings
+.\scripts\cargo-msvc.ps1 -CargoArgs @('fmt', '--all', '--', '--check')
+.\scripts\cargo-msvc.ps1 -CargoArgs @('check', '--workspace', '--all-targets')
+.\scripts\cargo-msvc.ps1 -CargoArgs @('test', '--workspace')
+.\scripts\cargo-msvc.ps1 -CargoArgs @('clippy', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
 ```
 
 ## Roadmap
@@ -107,6 +111,7 @@ columns, "This PC" overview, cloud/network-specific handling. See
 
 ## Documentation
 
+- [`docs/PRODUCT_AUDIT.md`](docs/PRODUCT_AUDIT.md) — current audit and verification
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — workspace layout, crate
   responsibilities, concurrency model
 - [`docs/PRODUCT.md`](docs/PRODUCT.md) — product goals and scope
