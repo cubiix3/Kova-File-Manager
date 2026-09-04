@@ -2,7 +2,7 @@ use kova_core::domain::{
     DirectorySnapshot, FileEntry, Location, SelectionState, SortColumn, SortDescriptor,
     SortDirection, TabCollection, TabId,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(test)]
 use kova_core::domain::{FileKind, FileMetadata};
@@ -27,7 +27,8 @@ pub struct AppController {
     snapshots: HashMap<TabId, DirectorySnapshot>,
     request_ids: HashMap<TabId, u64>,
     status_text: String,
-    loading: bool,
+    pending: HashSet<TabId>,
+    errors: HashMap<TabId, String>,
 }
 
 impl AppController {
@@ -37,7 +38,8 @@ impl AppController {
             snapshots: HashMap::new(),
             request_ids: HashMap::new(),
             status_text: "Ready".into(),
-            loading: false,
+            pending: HashSet::new(),
+            errors: HashMap::new(),
         }
     }
 
@@ -56,6 +58,14 @@ impl AppController {
 
     pub fn current_location(&self) -> Option<&Location> {
         self.tabs.active().and_then(|t| t.history.current())
+    }
+
+    pub fn tab_locations(&self) -> Vec<(TabId, Location)> {
+        self.tabs
+            .tabs()
+            .iter()
+            .filter_map(|t| t.current_location().cloned().map(|l| (t.id, l)))
+            .collect()
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -83,6 +93,12 @@ impl AppController {
     }
 
     pub fn status_text(&self) -> String {
+        if self.is_loading() {
+            return "Loading…".into();
+        }
+        if !self.directory_error().is_empty() {
+            return "Folder unavailable".into();
+        }
         self.status_text.clone()
     }
 
@@ -92,15 +108,43 @@ impl AppController {
 
     /// True while an enumeration for the active tab is in flight.
     pub fn is_loading(&self) -> bool {
-        self.loading
+        self.pending.contains(&self.active_tab_id())
     }
 
-    pub fn set_loading(&mut self, loading: bool) {
-        self.loading = loading;
+    pub fn directory_error(&self) -> String {
+        self.errors
+            .get(&self.active_tab_id())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn apply_error(&mut self, tab_id: TabId, request_id: u64, message: String) {
+        if !self.is_current_request(tab_id, request_id) {
+            return;
+        }
+        self.pending.remove(&tab_id);
+        self.snapshots.remove(&tab_id);
+        if let Some(tab) = self.tabs.get_mut(tab_id) {
+            tab.selection.clear();
+        }
+        self.errors.insert(tab_id, message);
     }
 
     pub fn tab_labels(&self) -> Vec<String> {
-        self.tabs.tabs().iter().map(|t| t.label.clone()).collect()
+        self.tabs
+            .tabs()
+            .iter()
+            .map(|t| {
+                t.current_location()
+                    .map(|l| {
+                        l.path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| l.display())
+                    })
+                    .unwrap_or_else(|| t.label.clone())
+            })
+            .collect()
     }
 
     /// Number of entries in the active tab's snapshot.
@@ -113,6 +157,19 @@ impl AppController {
         self.tabs.active().map(|t| t.selection.count()).unwrap_or(0)
     }
 
+    pub fn selected_indices(&self) -> HashSet<usize> {
+        self.tabs
+            .active()
+            .map(|t| t.selection.selected().iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn needs_enumeration(&self) -> bool {
+        !self.pending.contains(&self.active_tab_id())
+            && self.snapshot().is_none()
+            && self.directory_error().is_empty()
+    }
+
     pub fn apply_snapshot(&mut self, tab_id: TabId, snapshot: DirectorySnapshot) {
         if !self.is_current_request(tab_id, snapshot.request_id) {
             return;
@@ -123,8 +180,20 @@ impl AppController {
             None => return,
         };
 
-        let mut entries = snapshot.entries.clone();
+        let old_paths: Vec<_> = self
+            .snapshots
+            .get(&tab_id)
+            .map(|s| s.entries.iter().map(|e| e.path.clone()).collect())
+            .unwrap_or_default();
+        let mut entries = snapshot.entries;
         kova_core::domain::sort_entries(&mut entries, tab.sort);
+        let new_indices: HashMap<_, _> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.path.clone(), i))
+            .collect();
+        tab.selection
+            .remap(|i| old_paths.get(i).and_then(|p| new_indices.get(p).copied()));
 
         let snap = DirectorySnapshot {
             location: snapshot.location,
@@ -132,9 +201,10 @@ impl AppController {
             entries,
         };
         self.snapshots.insert(tab_id, snap);
-        self.status_text = "Ready".into();
+        self.pending.remove(&tab_id);
+        self.errors.remove(&tab_id);
         if tab_id == self.active_tab_id() {
-            self.loading = false;
+            self.status_text = "Ready".into();
         }
     }
 
@@ -147,8 +217,12 @@ impl AppController {
 
     pub fn record_request(&mut self, tab_id: TabId, request_id: u64) {
         self.request_ids.insert(tab_id, request_id);
-        if tab_id == self.active_tab_id() {
-            self.loading = true;
+        self.pending.insert(tab_id);
+        self.errors.remove(&tab_id);
+        if self.snapshots.get(&tab_id).is_some_and(|s| {
+            self.tabs.get(tab_id).and_then(|t| t.current_location()) != Some(&s.location)
+        }) {
+            self.snapshots.remove(&tab_id);
         }
     }
 
@@ -195,7 +269,12 @@ impl AppController {
 
     pub fn close_tab(&mut self, index: usize) -> Option<TabId> {
         let id = self.tabs.tabs().get(index)?.id;
-        self.tabs.close(id)
+        let active = self.tabs.close(id)?;
+        self.snapshots.remove(&id);
+        self.request_ids.remove(&id);
+        self.pending.remove(&id);
+        self.errors.remove(&id);
+        Some(active)
     }
 
     pub fn switch_tab(&mut self, index: usize) -> bool {
@@ -256,8 +335,8 @@ impl AppController {
         let Some(snapshot) = self.snapshots.get(&self.tabs.active_id()) else {
             return Vec::new();
         };
-        let selection = match self.tabs.active() {
-            Some(t) => &t.selection,
+        let selection: HashSet<usize> = match self.tabs.active() {
+            Some(t) => t.selection.selected().iter().copied().collect(),
             None => return Vec::new(),
         };
 
@@ -272,7 +351,7 @@ impl AppController {
                 modified_text: modified_text(e),
                 icon_id: effective_icon_id(e),
                 is_dir: e.is_directory(),
-                selected: selection.is_selected(idx),
+                selected: selection.contains(&idx),
             })
             .collect()
     }
@@ -290,7 +369,16 @@ impl AppController {
         // Re-sort the currently cached snapshot.
         let id = tab.id;
         if let Some(snap) = self.snapshots.get_mut(&id) {
+            let old_paths: Vec<_> = snap.entries.iter().map(|e| e.path.clone()).collect();
             kova_core::domain::sort_entries(&mut snap.entries, tab.sort);
+            let indices: HashMap<_, _> = snap
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (e.path.clone(), i))
+                .collect();
+            tab.selection
+                .remap(|i| old_paths.get(i).and_then(|p| indices.get(p).copied()));
         }
     }
 }
@@ -369,6 +457,65 @@ fn dummy_snapshot(request_id: u64, name: &str) -> DirectorySnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sort_and_refresh_preserve_selected_file_identity() {
+        let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+        let tab = ctrl.active_tab_id();
+        let mut snap = dummy_snapshot(1, "b");
+        snap.entries.extend(dummy_snapshot(1, "a").entries);
+        ctrl.record_request(tab, 1);
+        ctrl.apply_snapshot(tab, snap.clone());
+        ctrl.selection_mut().unwrap().select_single(0);
+        let selected = ctrl.selected_paths();
+        ctrl.set_sort(SortColumn::Name);
+        assert_eq!(ctrl.selected_paths(), selected);
+        snap.request_id = 2;
+        snap.entries.extend(dummy_snapshot(2, "c").entries);
+        ctrl.record_request(tab, 2);
+        ctrl.apply_snapshot(tab, snap);
+        assert_eq!(ctrl.selected_paths(), selected);
+    }
+
+    #[test]
+    fn stale_errors_and_closed_tab_results_cannot_replace_current_state() {
+        let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+        let first = ctrl.active_tab_id();
+        ctrl.record_request(first, 2);
+        ctrl.apply_snapshot(first, dummy_snapshot(2, "current"));
+        ctrl.apply_error(first, 1, "stale failure".into());
+        assert!(ctrl.directory_error().is_empty());
+        assert_eq!(ctrl.item_count(), 1);
+        let second = ctrl.new_tab(Location::new("C:\\other".into()));
+        ctrl.record_request(second, 1);
+        ctrl.close_tab(1);
+        assert!(!ctrl.is_current_request(second, 1));
+        ctrl.apply_snapshot(second, dummy_snapshot(1, "closed"));
+        assert_eq!(ctrl.snapshots.len(), 1);
+    }
+
+    #[test]
+    fn background_results_and_loading_belong_to_their_tab() {
+        let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+        let first = ctrl.active_tab_id();
+        ctrl.record_request(first, 1);
+        let second = ctrl.new_tab(Location::new("C:\\other".into()));
+        ctrl.record_request(second, 1);
+        ctrl.apply_snapshot(first, dummy_snapshot(1, "first"));
+        assert!(ctrl.is_loading());
+        ctrl.switch_tab(0);
+        assert!(!ctrl.is_loading());
+        assert_eq!(ctrl.item_count(), 1);
+        ctrl.navigate(Location::new("C:\\next".into()));
+        ctrl.record_request(first, 2);
+        assert_eq!(ctrl.item_count(), 0);
+        assert_eq!(ctrl.tab_labels()[0], "next");
+        ctrl.apply_error(first, 2, "Access denied".into());
+        assert_eq!(ctrl.directory_error(), "Access denied");
+        assert!(!ctrl.is_loading());
+        ctrl.back();
+        assert_eq!(ctrl.tab_labels()[0], "dummy");
+    }
 
     #[test]
     fn stale_snapshot_is_rejected_after_newer_request() {

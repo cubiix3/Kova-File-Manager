@@ -66,9 +66,11 @@ pub enum WorkerCommand {
 ///
 /// The worker runs on a dedicated Tokio task and is the only place that
 /// performs filesystem I/O for the UI.
-pub fn spawn_worker(mut rx: mpsc::Receiver<WorkerCommand>, tx: mpsc::Sender<KovaEvent>) {
+pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Sender<KovaEvent>) {
     tokio::spawn(async move {
+        let mut enumerations: HashMap<TabId, tokio::task::JoinHandle<()>> = HashMap::new();
         while let Some(cmd) = rx.recv().await {
+            enumerations.retain(|_, task| !task.is_finished());
             use WorkerCommand::*;
             match cmd {
                 Enumerate {
@@ -76,36 +78,49 @@ pub fn spawn_worker(mut rx: mpsc::Receiver<WorkerCommand>, tx: mpsc::Sender<Kova
                     location,
                     request_id,
                 } => {
-                    tracing::info!(
-                        "worker: enumerate tab={:?} loc={} request={}",
-                        tab_id,
-                        location.display(),
-                        request_id
-                    );
-                    match crate::enumerate::enumerate_directory(location.clone(), request_id).await
-                    {
-                        Ok(snapshot) => {
-                            tracing::info!(
-                                "worker: loaded tab={:?} request={} entries={}",
-                                tab_id,
-                                request_id,
-                                snapshot.entries.len()
-                            );
-                            let _ = tx
-                                .send(KovaEvent::DirectoryLoaded { tab_id, snapshot })
-                                .await;
-                        }
-                        Err(error) => {
-                            let _ = tx
-                                .send(KovaEvent::DirectoryError {
-                                    tab_id,
-                                    location,
-                                    request_id,
-                                    error_message: error.to_string(),
-                                })
-                                .await;
-                        }
+                    if let Some(previous) = enumerations.remove(&tab_id) {
+                        previous.abort();
                     }
+                    let tx = tx.clone();
+                    enumerations.insert(
+                        tab_id,
+                        tokio::spawn(async move {
+                            tracing::info!(
+                                "worker: enumerate tab={:?} loc={} request={}",
+                                tab_id,
+                                location.display(),
+                                request_id
+                            );
+                            match crate::enumerate::enumerate_directory(
+                                location.clone(),
+                                request_id,
+                            )
+                            .await
+                            {
+                                Ok(snapshot) => {
+                                    tracing::info!(
+                                        "worker: loaded tab={:?} request={} entries={}",
+                                        tab_id,
+                                        request_id,
+                                        snapshot.entries.len()
+                                    );
+                                    let _ = tx
+                                        .send(KovaEvent::DirectoryLoaded { tab_id, snapshot })
+                                        .await;
+                                }
+                                Err(error) => {
+                                    let _ = tx
+                                        .send(KovaEvent::DirectoryError {
+                                            tab_id,
+                                            location,
+                                            request_id,
+                                            error_message: error.to_string(),
+                                        })
+                                        .await;
+                                }
+                            }
+                        }),
+                    );
                 }
                 NewFolder { parent, name } => {
                     match crate::file_ops::new_folder(&parent, &name).await {
