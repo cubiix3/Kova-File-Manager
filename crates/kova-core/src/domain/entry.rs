@@ -37,7 +37,7 @@ pub struct FileEntry {
 
 impl FileEntry {
     pub fn is_directory(&self) -> bool {
-        self.kind == FileKind::Directory
+        matches!(self.kind, FileKind::Directory | FileKind::Junction)
     }
 
     pub fn is_file(&self) -> bool {

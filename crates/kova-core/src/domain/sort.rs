@@ -62,6 +62,11 @@ impl SortDescriptor {
 /// is stable and predictable.
 pub fn sort_entries(entries: &mut [FileEntry], descriptor: SortDescriptor) {
     let compare = |a: &FileEntry, b: &FileEntry| {
+        // Folders stay together at the top in either sort direction.
+        let grouping = b.is_directory().cmp(&a.is_directory());
+        if grouping != std::cmp::Ordering::Equal {
+            return grouping;
+        }
         let ord = match descriptor.column {
             SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             SortColumn::Type => {

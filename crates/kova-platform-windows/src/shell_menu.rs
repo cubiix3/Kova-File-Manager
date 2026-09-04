@@ -14,14 +14,12 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::System::Com::{
-    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
-};
+
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     CMF_NORMAL, CMIC_MASK_PTINVOKE, CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, IContextMenu,
-    IContextMenu2, IContextMenu3, ILFree, SHGetDesktopFolder, SHParseDisplayName,
+    IContextMenu2, IContextMenu3, ILFree, IShellFolder, SHBindToParent, SHParseDisplayName,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, GetCursorPos,
@@ -57,10 +55,7 @@ struct MenuForward {
 /// returns S_FALSE; RPC_E_CHANGED_MODE is also tolerated because in that case
 /// COM is already usable for shell objects.
 pub fn ensure_com_sta() {
-    // SAFETY: single call, result ignored by design (see above).
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    }
+    crate::com::ensure_sta();
 }
 
 /// Window procedure of the hidden menu host. It forwards the owner-draw
@@ -77,6 +72,15 @@ unsafe extern "system" fn menu_host_wndproc(
             WM_DRAWITEM | WM_MEASUREITEM | WM_INITMENUPOPUP => {
                 let forwarded = MENU_FORWARD.with(|f| {
                     let forward = f.borrow();
+                    if let Some(cm) = &forward.cm3 {
+                        let mut result = LRESULT(0);
+                        if cm
+                            .HandleMenuMsg2(msg, wparam, lparam, Some(&mut result))
+                            .is_ok()
+                        {
+                            return true;
+                        }
+                    }
                     forward
                         .cm2
                         .as_ref()
@@ -169,13 +173,12 @@ pub fn show_shell_context_menu(paths: &[PathBuf]) -> bool {
         return false;
     };
 
-    // SAFETY: plain shell call, no outstanding invariants.
-    let Ok(desktop) = (unsafe { SHGetDesktopFolder() }) else {
+    // File-list selections share a parent. Never target a partial selection.
+    if paths.iter().any(|p| p.parent() != paths[0].parent()) {
         return false;
-    };
+    }
 
-    // Parse each path into a full pidl (relative to the desktop root, which
-    // is exactly what desktop.GetUIObjectOf expects).
+    // Keep absolute PIDLs alive while borrowing child IDs from them below.
     let pidls: Vec<*mut ITEMIDLIST> = paths
         .iter()
         .filter_map(|path| {
@@ -194,14 +197,25 @@ pub fn show_shell_context_menu(paths: &[PathBuf]) -> bool {
             }
         })
         .collect();
-    if pidls.is_empty() {
+    if pidls.len() != paths.len() {
+        free_pidls(&pidls);
         return false;
     }
 
     // SAFETY: pidls are valid and freed on every exit path below.
     let context_menu: Result<IContextMenu, _> = unsafe {
-        let refs: Vec<*const ITEMIDLIST> = pidls.iter().map(|p| *p as *const _).collect();
-        desktop.GetUIObjectOf::<IContextMenu>(host, &refs, None)
+        let bind = || -> windows::core::Result<IContextMenu> {
+            let mut first_child = std::ptr::null_mut();
+            let parent: IShellFolder = SHBindToParent(pidls[0], Some(&mut first_child))?;
+            let mut children = vec![first_child as *const ITEMIDLIST];
+            for pidl in pidls.iter().skip(1) {
+                let mut child = std::ptr::null_mut();
+                let _folder: IShellFolder = SHBindToParent(*pidl, Some(&mut child))?;
+                children.push(child as *const ITEMIDLIST);
+            }
+            parent.GetUIObjectOf::<IContextMenu>(GetForegroundWindow(), &children, None)
+        };
+        bind()
     };
     let context_menu = match context_menu {
         Ok(cm) => cm,
@@ -223,7 +237,7 @@ pub fn show_shell_context_menu(paths: &[PathBuf]) -> bool {
     let hresult =
         unsafe { context_menu.QueryContextMenu(menu, 0, CMD_FIRST, CMD_LAST, CMF_NORMAL) };
     let added = (hresult.0 as u32) & 0xFFFF;
-    if added == 0 {
+    if hresult.is_err() || added == 0 {
         // No commands offered (e.g. special namespace items): show nothing.
         unsafe {
             let _ = DestroyMenu(menu);
@@ -316,7 +330,11 @@ unsafe fn run_menu_and_invoke(
         let info = CMINVOKECOMMANDINFOEX {
             cbSize: std::mem::size_of::<CMINVOKECOMMANDINFOEX>() as u32,
             fMask: CMIC_MASK_PTINVOKE,
-            hwnd: host,
+            hwnd: if saved_fg.is_invalid() {
+                host
+            } else {
+                saved_fg
+            },
             lpVerb: PCSTR(verb as usize as *const u8),
             lpVerbW: windows::core::PCWSTR(verb as usize as *const u16),
             nShow: SW_SHOWNORMAL.0,

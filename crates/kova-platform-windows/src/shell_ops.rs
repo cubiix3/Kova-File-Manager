@@ -10,9 +10,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 
-use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx,
-};
+use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     FOF_ALLOWUNDO, FOF_NOCONFIRMMKDIR, FileOperation, IFileOperation, ILFree, IShellItem,
@@ -110,10 +108,7 @@ pub fn spawn_shell_ops_thread(
 }
 
 fn init_com_sta() {
-    // SAFETY: one-time initialization on this dedicated thread.
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    }
+    crate::com::ensure_sta();
 }
 
 /// Run one operation through IFileOperation. Never panics on shell errors;
@@ -156,7 +151,17 @@ fn execute(command: &ShellOpCommand) -> ShellOpOutcome {
                 }
             }
 
-            operation.PerformOperations().map_err(OpFailure::com)?;
+            let performed = operation.PerformOperations();
+            let aborted = operation
+                .GetAnyOperationsAborted()
+                .map_err(OpFailure::com)?;
+            performed.map_err(OpFailure::com)?;
+            if aborted.as_bool() {
+                return Err(OpFailure {
+                    message: "Operation cancelled; some items may have completed".into(),
+                    code: 0x8007_04C7u32 as i32,
+                });
+            }
             Ok(())
         }
     };
@@ -197,14 +202,18 @@ unsafe fn shell_item_array(paths: &[PathBuf]) -> Result<IShellItemArray, String>
             let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
             wide.push(0);
             let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-            SHParseDisplayName(
+            if let Err(error) = SHParseDisplayName(
                 windows::core::PCWSTR(wide.as_ptr()),
                 None,
                 &mut pidl,
                 0,
                 None,
-            )
-            .map_err(|e| format!("resolve {}: {e}", path.display()))?;
+            ) {
+                for allocated in &pidls {
+                    ILFree(Some(*allocated as *const _));
+                }
+                return Err(format!("resolve {}: {error}", path.display()));
+            }
             pidls.push(pidl);
         }
         let refs: Vec<*const ITEMIDLIST> = pidls.iter().map(|p| *p as *const _).collect();
