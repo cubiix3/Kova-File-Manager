@@ -12,7 +12,12 @@ column separators. See [design and window-resize verification](docs/APPROVED_DES
 > been exercised on Windows 11. See [runtime verification and preview limits](docs/VIEW_AND_PREVIEW.md)
 > and [folder integration scope](docs/INTERACTION_INTEGRATION.md).
 
-![Kova Home with drive capacities, usage bars and the Places and Storage sidebar](docs/images/storage-overview.png)
+![Kova details view with the current graphite design, German commands and aligned file columns](docs/images/details-view.png)
+
+*The current Windows release browsing a demo folder. Drag column separators to
+adjust the table; select a file to inspect it beside the list.*
+
+![Kova Home with drive capacities, usage bars and the Places and Storage sidebar](docs/images/home-overview.png)
 
 *Home is the start page. Double-click a drive to browse it, then use Back to
 return to the overview.*
@@ -29,14 +34,15 @@ Small thumbnails also appear beside file names: common image formats and PDF
 first pages are decoded directly, while other types use available Windows
 thumbnail providers. Files without a thumbnail keep their associated type icon.
 
-![Kova details view with a PDF page rendered in the preview pane](docs/images/pdf-preview.png)
+![Kova details view with a PDF page rendered in the preview pane](docs/images/file-preview.png)
 
-*Screenshots show the real Windows release application. The PDF is a test fixture.*
+*Captured from the installed Windows release on 5 September 2026. Demo files and
+the PDF are fixtures; these are actual application captures.*
 
 <details>
 <summary>Animated preview in action (release app recording)</summary>
 
-![GIF playback inside Kova's preview pane](docs/images/animated-preview.gif)
+![GIF playback inside Kova's current preview pane](docs/images/preview-playback.gif)
 
 </details>
 

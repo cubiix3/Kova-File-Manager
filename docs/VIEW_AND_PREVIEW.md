@@ -120,7 +120,7 @@ Real release mouse/keyboard verification on Windows 11:
   animation to text displayed the text correctly; a broken GIF showed an error,
   and a still PNG showed its image without playback controls. Closing/reopening
   the pane, Home/Back, F5 and 780 × 600 resize were exercised with the animation.
-  [Release playback recording](images/animated-preview.gif).
+  [Release playback recording](images/preview-playback.gif).
 - Actual Hidden/System attribute fixtures appeared when their View switches were
   enabled (5 to 6 to 7 visible items); hiding extensions changed labels only.
 - Preview remained usable at 1140 × 780 and 780 × 600 without overlapping controls.
@@ -166,9 +166,9 @@ huge/malformed image and PDF fixtures, EXIF-rotated photos, optional installed
 image codecs, video/Office thumbnail providers and screen-reader behavior.
 These are not reported as runtime passes.
 
-![Home in the installed release](images/storage-overview.png)
+![Home in the installed release](images/home-overview.png)
 
-![PDF preview in the release](images/pdf-preview.png)
+![PDF preview in the release](images/file-preview.png)
 
 Microsoft references: [PDF rendering](https://learn.microsoft.com/en-us/uwp/api/windows.data.pdf.pdfdocument.loadfromstreamasync),
 [bitmap transforms](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.imaging.bitmaptransform),
