@@ -9,5 +9,6 @@ pub mod preview;
 pub mod shell_icons;
 pub mod shell_menu;
 pub mod shell_ops;
+mod shell_thumbnail;
 pub mod volumes;
 pub mod window_theme;

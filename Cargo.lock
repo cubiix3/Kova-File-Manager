@@ -2541,6 +2541,7 @@ name = "kova-platform-windows"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "image",
  "kova-core",
  "thiserror 2.0.20",
  "tracing",

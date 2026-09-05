@@ -19,6 +19,9 @@ return to the overview.*
 
 Select a file and press **Space**, or enable **View > Preview pane**, to inspect
 images, text and PDF pages beside the file list. Preview work runs off the UI thread.
+Small thumbnails also appear beside file names: common image formats and PDF
+first pages are decoded directly, while other types use available Windows
+thumbnail providers. Files without a thumbnail keep their associated type icon.
 
 ![Kova details view with a PDF page rendered in the preview pane](docs/images/pdf-preview.png)
 
@@ -62,6 +65,8 @@ images, text and PDF pages beside the file list. Preview work runs off the UI th
   automatic scrolling at the list edges.
 - Shell icons resolved asynchronously by a dedicated worker thread with
   caching and generic fallbacks.
+- File thumbnails loaded for visible rows on local fixed disks, with a bounded
+  cache and stale-result protection. Transparent images retain their transparency.
 - View menu for hidden/system files, file extensions, row density and alternating
   row colors. Visibility changes preserve selection by path and use cached entries.
 - Optional bounded background folder-size calculations on local fixed disks,

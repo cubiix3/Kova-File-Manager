@@ -6,6 +6,7 @@ mod default_manager;
 mod folder_sizes;
 mod preferences;
 mod preview;
+mod thumbnails;
 mod window_chrome;
 
 use app_state::AppController;
@@ -155,6 +156,7 @@ fn system_drive_root() -> std::path::PathBuf {
 struct UiModels {
     files: Rc<VecModel<FileListItem>>,
     tabs: Rc<VecModel<SharedString>>,
+    thumbnails: RefCell<thumbnails::Cache>,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -252,7 +254,9 @@ async fn main() {
     let ui_models = Rc::new(UiModels {
         files: files_model.clone(),
         tabs: tabs_model,
+        thumbnails: RefCell::new(thumbnails::Cache::default()),
     });
+    let _thumbnail_timer = thumbnails::connect(&app, app_controller.clone(), ui_models.clone());
 
     let icon_store = Rc::new(RefCell::new(IconStore::new(Rc::clone(&icons_model))));
     {
@@ -1280,14 +1284,20 @@ fn update_ui(
     let items: Vec<FileListItem> = controller
         .file_list_items()
         .into_iter()
-        .map(|item| FileListItem {
-            name: item.name.into(),
-            type_name: item.type_name.into(),
-            size_text: item.size_text.into(),
-            modified_text: item.modified_text.into(),
-            icon_id: item.icon_id,
-            is_dir: item.is_dir,
-            selected: item.selected,
+        .enumerate()
+        .map(|(index, item)| {
+            let thumbnail = thumbnails::image_for_row(&state, controller, models, index);
+            FileListItem {
+                has_thumbnail: thumbnail.is_some(),
+                thumbnail: thumbnail.unwrap_or_default(),
+                name: item.name.into(),
+                type_name: item.type_name.into(),
+                size_text: item.size_text.into(),
+                modified_text: item.modified_text.into(),
+                icon_id: item.icon_id,
+                is_dir: item.is_dir,
+                selected: item.selected,
+            }
         })
         .collect();
     if models.files.row_count() != items.len() {

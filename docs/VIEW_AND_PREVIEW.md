@@ -14,6 +14,27 @@ Preferences are stored on normal app exit in `%LOCALAPPDATA%\Kova\view-options.t
 
 ## Preview pane
 
+### File-list thumbnails
+
+Small previews appear beside file names without opening the preview pane.
+PNG, JPEG, GIF, BMP, TIFF and ICO use Windows image decoding when supported;
+WebP has a bundled Rust decoder and needs no Windows codec installation.
+PDFs use their first page. Other file types, including formats supplied by installed
+codecs/extensions, are requested through `IShellItemImageFactory` with
+`SIIGBF_THUMBNAILONLY`. Missing or failed providers leave the normal type icon.
+Support for a video or document format depends on the installed Windows provider;
+this is not a claim that every file has a visual preview.
+
+Automatic thumbnails run on a separate worker, on local fixed disks only, skipping
+observed reparse/offline/recall attributes. Only visible rows plus a small margin
+are requested (maximum 128). The queue and result channel are bounded; the cache
+holds at most 256 outcomes, including failures, with images capped at 64 pixels.
+Rows update in place. Leaving a directory or refreshing changes the generation,
+so outdated results cannot replace the current view. A provider already decoding
+is allowed to finish; navigation does not wait for it.
+
+### Inspector
+
 Select one file and choose **View > Preview pane**, or press **Space** in the file
 list. The pane supports common raster images, plain text/source files, and PDF
 pages with previous/next controls. Unsupported, unreadable and binary files show
@@ -23,7 +44,9 @@ One worker performs filesystem reads and Windows Runtime decoding. Its pending
 queue is bounded to one request; obsolete results are rejected by generation,
 selected path and page. Images are rendered at up to 1024 pixels on the long edge,
 respecting EXIF orientation. Inputs above 128 MiB or images above 80 million pixels
-are not previewed. Text reads at most 64 KiB and supports UTF-8 and BOM-marked
+are not previewed. WebP additionally limits the decoded pixel buffer to 64 MiB before
+allocation and uses the same 64/1024-pixel thumbnail/inspector output sizes.
+Text reads at most 64 KiB and supports UTF-8 and BOM-marked
 UTF-16; invalid UTF-8 uses replacement characters. PDFs use Windows.Data.Pdf,
 without a WebView, and display one page at a time. Password-protected PDFs show
 the decoder error; password entry is not included.
@@ -67,6 +90,13 @@ mouse: click the Size header again to re-sort with later results.
 Real release mouse/keyboard verification on Windows 11:
 
 - PNG image and UTF-8 text with umlaut/Japanese characters rendered.
+- File-list miniatures rendered for PNG, JPEG, GIF, BMP, TIFF, ICO, transparent
+  logo PNG and PDF. A DIB fixture exercised the Windows Shell thumbnail provider.
+  WebP initially lacked a Windows decoder; the bundled decoder then rendered it
+  both in the list and inspector. A corrupt PNG retained its normal file icon.
+- Scrolling a 150-image fixture displayed the correct per-file miniatures beyond
+  the original viewport. Replacing an image at the same path and pressing F5
+  replaced its thumbnail; returning between folders retained the correct images.
 - Two-page PDF rendered; clicking Next changed the displayed page and page count.
 - Binary text fixture produced the expected message.
 - Actual Hidden/System attribute fixtures appeared when their View switches were
@@ -97,15 +127,19 @@ Real release mouse/keyboard verification on Windows 11:
 Automated tests cover visibility/selection remapping, retained operation paths
 when hiding extensions, text encodings and binary detection, alongside the
 existing navigation/selection/operations suite.
-The five local quality gates passed with 53 tests passing and 3 intentionally ignored.
+The WebP regression test encodes a transparent image and checks its thumbnail's
+dimensions, pixel-buffer length and preserved RGBA values without a Windows codec.
+The five local quality gates passed with 54 tests passing and 3 intentionally ignored.
 
 NOT VERIFIED: Windows 10 runtime, reachable UNC shares, password-protected PDFs,
 huge/malformed image and PDF fixtures, EXIF-rotated photos, optional installed
-image codecs and screen-reader behavior. These are not reported as runtime passes.
+image codecs, video/Office thumbnail providers and screen-reader behavior.
+These are not reported as runtime passes.
 
 ![Home in the installed release](images/storage-overview.png)
 
 ![PDF preview in the release](images/pdf-preview.png)
 
-Microsoft references: [PDF rendering](https://learn.microsoft.com/en-us/uwp/api/windows.data.pdf.pdfdocument.loadfromstreamasync)
-and [bitmap transforms](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.imaging.bitmaptransform).
+Microsoft references: [PDF rendering](https://learn.microsoft.com/en-us/uwp/api/windows.data.pdf.pdfdocument.loadfromstreamasync),
+[bitmap transforms](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.imaging.bitmaptransform),
+and [Shell thumbnail ownership and threading](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellitemimagefactory-getimage).

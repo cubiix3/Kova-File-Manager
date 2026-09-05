@@ -13,5 +13,6 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 windows = { workspace = true }
 windows-version = { workspace = true }
+image = { version = "0.25.9", default-features = false, features = ["webp"] }
 
 [dev-dependencies]

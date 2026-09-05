@@ -35,6 +35,8 @@ export struct FileListItem {
     size_text: string,
     modified_text: string,
     icon-id: int,
+    thumbnail: image,
+    has-thumbnail: bool,
     is-dir: bool,
     selected: bool,
 }
@@ -87,6 +89,8 @@ export global AppState {
     in-out property <[string]> tabs: [];
     in-out property <[DriveItem]> drives: [];
     in-out property <[image]> icons: [];
+    in-out property <int> first-visible-row: 0;
+    in-out property <int> visible-row-count: 40;
     in-out property <int> active_tab: 0;
     in-out property <bool> can_go_back: false;
     in-out property <bool> can_go_forward: false;
@@ -1107,6 +1111,13 @@ export component MainWindow inherits Window {
                     }
 
                     file-viewport := ListView {
+                        property <length> thumbnail-row-height: Metrics.row-height;
+                        changed thumbnail-row-height => {
+                            AppState.first-visible-row = Math.max(0, Math.floor(-self.viewport-y / Metrics.row-height));
+                            AppState.visible-row-count = Math.ceil(self.height / Metrics.row-height) + 2;
+                        }
+                        changed viewport-y => { AppState.first-visible-row = Math.max(0, Math.floor(-self.viewport-y / Metrics.row-height)); }
+                        changed height => { AppState.visible-row-count = Math.ceil(self.height / Metrics.row-height) + 2; }
                         width: parent.width;
                         height: parent.height;
 
@@ -1141,7 +1152,8 @@ export component MainWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     Image {
-                                        source: AppState.icons[item.icon-id];
+                                        source: item.has-thumbnail ? item.thumbnail : AppState.icons[item.icon-id];
+                                        image-fit: contain;
                                         width: Metrics.icon-size;
                                         height: Metrics.icon-size;
                                         image-rendering: smooth;
