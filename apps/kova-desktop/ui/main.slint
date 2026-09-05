@@ -565,6 +565,7 @@ component NameDialog inherits Rectangle {
 }
 export component MainWindow inherits Window {
     title: "Kova";
+    icon: @image-url("../assets/kova.png");
     no-frame: true;
     resize-border-width: 5px;
     callback window-action(int);
@@ -610,8 +611,12 @@ export component MainWindow inherits Window {
             double-clicked => { root.window-action(2); }
         }
 
+        Image {
+            x: 14px; y: 8px; width: 24px; height: 24px;
+            source: @image-url("../assets/kova.svg");
+        }
         Text {
-            x: 20px; y: 0; width: 140px; height: parent.height;
+            x: 46px; y: 0; width: 140px; height: parent.height;
             text: "KOVA"; font-size: 12px; font-weight: 700;
             color: Theme.accent; vertical-alignment: center;
         }

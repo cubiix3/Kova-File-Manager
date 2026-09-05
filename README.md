@@ -1,5 +1,7 @@
 # Kova
 
+<img src="apps/kova-desktop/assets/kova.svg" width="80" height="80" alt="Kova logo">
+
 Kova is a fast, native-first file manager for Windows 10/11 — built with Rust,
 Slint, and the official Windows APIs (`windows-rs`). No webviews, no Electron,
 no runtime emulation: a real Win32/Shell integration with a GPU-rendered

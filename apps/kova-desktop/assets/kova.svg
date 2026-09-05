@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Kova</title>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#182630"/>
+  <path d="M62 58H98V119L157 58H202L134 127L207 198H158L98 139V198H62Z" fill="#86d5f4"/>
+  <path d="M134 127L207 198H158L98 139Z" fill="#499dcc"/>
+</svg>

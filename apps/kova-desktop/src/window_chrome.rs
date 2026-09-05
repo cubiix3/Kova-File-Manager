@@ -3,6 +3,8 @@
 use crate::MainWindow;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
+use slint::winit_030::winit::platform::windows::{IconExtWindows, WindowExtWindows};
+use slint::winit_030::winit::window::Icon;
 use slint::winit_030::{EventResult, WinitWindowAccessor};
 
 pub fn connect(app: &MainWindow) {
@@ -38,6 +40,12 @@ pub fn connect(app: &MainWindow) {
                         if let RawWindowHandle::Win32(handle) = handle.as_raw() {
                             kova_platform_windows::window_theme::style_window(handle.hwnd.get());
                             styled.set(true);
+                            // Winit's normal window icon sets ICON_SMALL only on
+                            // Windows. Set the separate taskbar/Alt+Tab icon too.
+                            match Icon::from_resource(1, None) {
+                                Ok(icon) => native.set_taskbar_icon(Some(icon)),
+                                Err(error) => tracing::warn!(%error, "load taskbar icon failed"),
+                            }
                         }
                     }
                 }

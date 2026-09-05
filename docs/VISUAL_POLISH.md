@@ -42,3 +42,13 @@ Thumbnail/grid views, split panes and cloud features are not part of this change
 [Dark native Shell menu](images/visual-polish-shell-menu.png)
 
 Implementation references: [Microsoft DWM corner guidance](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-rounded-corners) and [Microsoft PowerToys native dark-mode integration](https://github.com/microsoft/PowerToys/blob/main/src/modules/ZoomIt/ZoomIt/Utility.cpp). Menu colors remain Windows-rendered; third-party owner-drawn items may choose their own appearance. UXTheme ordinals are private APIs and fall back when unavailable.
+
+## App identity
+
+Original two-tone K mark, SVG source, PNG and seven-size ICO are in
+[app assets](../apps/kova-desktop/assets/README.md). The executable contains icon
+and product-name resources; the caption and window use the same mark. Winit's
+separate Windows taskbar icon is set explicitly. Runtime WM_GETICON and executable
+icon extraction both returned the Kova mark, visually checked at 32px. The real
+release window was reopened and captured after icon integration; all five quality
+gates passed again (45 tests passed, 3 ignored).
