@@ -352,10 +352,11 @@ unsafe fn read_drop_effect_while_open() -> bool {
 }
 
 /// Parse a double-NUL-terminated wide path list from a DROPFILES image.
-/// SAFETY: `ptr` must point to `total` readable bytes.
+/// Returns an empty list for a null pointer.
+/// SAFETY: A non-null `ptr` must point to `total` readable bytes.
 unsafe fn parse_hdrop(ptr: *const u8, total: usize) -> Vec<PathBuf> {
     unsafe {
-        if total < std::mem::size_of::<DROPFILES_HEADER>() {
+        if ptr.is_null() || total < std::mem::size_of::<DROPFILES_HEADER>() {
             return Vec::new();
         }
         let header = std::ptr::read_unaligned(ptr as *const DROPFILES_HEADER);
@@ -409,6 +410,15 @@ mod tests {
         let image = build_hdrop_buffer(&paths);
         let parsed = unsafe { parse_hdrop(image.as_ptr(), image.len()) };
         assert_eq!(parsed, paths);
+    }
+
+    #[test]
+    fn hdrop_buffer_rejects_null_for_any_length() {
+        let header_size = std::mem::size_of::<DROPFILES_HEADER>();
+        for total in [0, header_size - 1, header_size, header_size + 2, usize::MAX] {
+            // SAFETY: the parser explicitly accepts null without reading memory.
+            assert!(unsafe { parse_hdrop(std::ptr::null(), total) }.is_empty());
+        }
     }
 
     #[test]
