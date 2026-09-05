@@ -44,7 +44,7 @@ replace Win+E, Windows file pickers or every explicit Explorer invocation.
 
 ## What you can do
 
-| | |
+| Feature | Included |
 | --- | --- |
 | **Browse** | Tabs with independent history, breadcrumbs, familiar shortcuts and mouse Back/Forward |
 | **Manage files** | Copy, cut, paste and Recycle Bin deletion through native Windows operations; inline New Folder and Rename |
