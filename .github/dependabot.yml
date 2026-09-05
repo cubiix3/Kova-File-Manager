@@ -1,0 +1,49 @@
+version: 2
+updates:
+  # The root Cargo workspace covers all member manifests and Cargo.lock.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Keep the runtime and UI compiler together, including major upgrades.
+      slint:
+        patterns:
+          - "slint"
+          - "slint-build"
+      # Windows bindings need focused review: 0.x minor updates can break APIs.
+      windows-bindings:
+        patterns:
+          - "windows"
+          - "windows-*"
+      other-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions uses the repository root, not /.github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

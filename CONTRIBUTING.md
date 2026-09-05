@@ -39,6 +39,15 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 ## Commits & pull requests
 
+Dependabot checks the Cargo workspace and GitHub Actions weekly on Monday at
+09:00 Europe/Berlin. Slint runtime/build updates are grouped together; Windows
+bindings have a separate group because even 0.x minor versions can change APIs.
+Other minor/patch updates are grouped by ecosystem; remaining major updates get
+individual PRs. Dependency PRs require review and passing CI, not automatic merging.
+Security updates are enabled separately in the repository settings and are not
+restricted to this weekly version-update schedule. Hardcoded tool download URLs
+in scripts, such as cargo-about, still need manual maintenance.
+
 - Keep commits logical and small; use conventional prefixes
   (`feat`, `fix`, `docs`, `chore`, `refactor`).
 - Describe user-visible behavior changes in the pull request; for bug
