@@ -1,6 +1,6 @@
 # Kova demo
 
-[Watch or download the 28-second MP4](media/kova-demo.mp4)
+[Download the 28-second MP4](media/kova-demo.mp4?raw=true)
 
 The README contains an animated GIF version of the same recording, with a link
 to the H.264 MP4. Both show the real release-mode Windows application, operated

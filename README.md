@@ -12,9 +12,9 @@
   <a href="https://github.com/cubiix3/Kova-File-Manager/issues">Report an issue</a>
 </p>
 
-[![Watch Kova: drive overview, tabs, image and animated GIF previews, and native Windows menus](docs/media/kova-demo.gif)](docs/media/kova-demo.mp4)
+[![Watch Kova: drive overview, tabs, image and animated GIF previews, and native Windows menus](docs/media/kova-demo.gif)](docs/media/kova-demo.mp4?raw=true)
 
-**Kova in 28 seconds** · [Watch / download the MP4](docs/media/kova-demo.mp4) · [Static screenshot](docs/images/details-view.png)
+**Kova in 28 seconds** · [Download the MP4](docs/media/kova-demo.mp4?raw=true) · [Static screenshot](docs/images/details-view.png)
 
 Recorded from the English development build on Windows 11. Native Shell menus
 follow the Windows language. [Recording details](docs/DEMO.md).
