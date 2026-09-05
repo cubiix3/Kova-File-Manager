@@ -1,8 +1,8 @@
-use crate::{AppState, MainWindow};
+use crate::{AppState, MainWindow, bridges::CommandDispatcher, show_error_dialog};
 use slint::ComponentHandle;
 use std::os::windows::process::CommandExt;
 
-pub fn connect(app: &MainWindow) {
+pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) {
     let weak = app.as_weak();
     app.global::<AppState>()
         .on_request_default_manager(move |enable| {
@@ -12,23 +12,29 @@ pub fn connect(app: &MainWindow) {
             }
             ui.global::<AppState>().set_integration_busy(true);
             let weak = ui.as_weak();
+            let completion_dispatcher = dispatcher.clone();
             let result = std::thread::Builder::new()
                 .name("kova-associations".into())
                 .spawn(move || {
                     let result = configure(enable);
                     let _ = weak.upgrade_in_event_loop(move |ui| {
                         ui.global::<AppState>().set_integration_busy(false);
-                        ui.global::<AppState>().set_status_text(
-                            result
-                                .unwrap_or_else(|e| format!("Folder integration: {e}"))
-                                .into(),
-                        );
+                        let message = match result {
+                            Ok(message) => message,
+                            Err(error) => {
+                                show_error_dialog(&ui, &error);
+                                format!("Folder integration: {error}")
+                            }
+                        };
+                        completion_dispatcher.set_status_message(message.clone());
+                        ui.global::<AppState>().set_status_text(message.into());
                     });
                 });
             if let Err(error) = result {
                 ui.global::<AppState>().set_integration_busy(false);
-                ui.global::<AppState>()
-                    .set_status_text(format!("Folder integration: {error}").into());
+                let message = format!("Folder integration: {error}");
+                dispatcher.set_status_message(message.clone());
+                show_error_dialog(&ui, &message);
             }
         });
 }

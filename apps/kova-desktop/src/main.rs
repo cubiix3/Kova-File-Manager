@@ -3,6 +3,9 @@
 mod app_state;
 mod bridges;
 mod default_manager;
+mod folder_sizes;
+mod preferences;
+mod preview;
 mod window_chrome;
 
 use app_state::AppController;
@@ -174,7 +177,7 @@ async fn main() {
             kova_platform_windows::path_resolver::canonicalize_location(std::path::Path::new(&path))
                 .ok()
         })
-        .unwrap_or_else(kova_platform_windows::known_folders::initial_location);
+        .unwrap_or_else(kova_core::domain::Location::home);
     tracing::info!("Kova starting at {}", initial.display());
 
     // The UI thread hosts shell COM objects (native context menus, drag
@@ -232,8 +235,10 @@ async fn main() {
         .select()
         .expect("initialize desktop window backend");
     let app = MainWindow::new().unwrap();
+    preferences::restore(&app, &mut app_controller.lock().unwrap());
     window_chrome::connect(&app);
-    default_manager::connect(&app);
+    default_manager::connect(&app, dispatcher.clone());
+    let _preview_timer = preview::connect(&app);
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -259,6 +264,12 @@ async fn main() {
 
     let pending_dialog = Arc::new(Mutex::new(None::<PendingDialog>));
     let last_address: LastAddress = Arc::new(Mutex::new(String::new()));
+    let _folder_size_timer = folder_sizes::connect(
+        &app,
+        Arc::clone(&app_controller),
+        Arc::clone(&last_address),
+        Rc::clone(&ui_models),
+    );
 
     // Wire UI callbacks.
     wire_callbacks(
@@ -267,6 +278,8 @@ async fn main() {
         Arc::clone(&pending_dialog),
         Arc::clone(&last_address),
         Rc::clone(&ui_models),
+        Rc::clone(&icon_store),
+        icon_req_tx.clone(),
     );
 
     // Populate sidebar targets and icons.
@@ -455,6 +468,7 @@ async fn main() {
     }
 
     app.run().unwrap();
+    preferences::save(&app);
 }
 
 /// HRESULT codes the shell reports when the user aborted a file operation in
@@ -473,10 +487,14 @@ fn op_was_cancelled(code: i32) -> bool {
 fn format_bytes(bytes: u64) -> String {
     const GB: u64 = 1024 * 1024 * 1024;
     const MB: u64 = 1024 * 1024;
-    if bytes >= GB {
-        format!("{} GB", (bytes + GB / 2) / GB)
+    if bytes >= 1024 * GB {
+        format!("{:.1} TB", bytes as f64 / (1024 * GB) as f64)
+    } else if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
     } else if bytes >= MB {
-        format!("{} MB", (bytes + MB / 2) / MB)
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
         format!("{bytes} B")
     }
@@ -568,6 +586,7 @@ fn load_sidebar() -> SidebarData {
 
 fn apply_sidebar(ui: &MainWindow, data: SidebarData) {
     let state = ui.global::<AppState>();
+    state.set_drives_loading(false);
     for (folder, location, bitmap) in data.folders {
         let path = location.display().into();
         let icon = bitmap.as_ref().map(image_from_bitmap).unwrap_or_default();
@@ -614,11 +633,47 @@ fn apply_sidebar(ui: &MainWindow, data: SidebarData) {
                 icon: bitmap.as_ref().map(image_from_bitmap).unwrap_or_default(),
                 usage,
                 detail: detail.into(),
+                file_system: drive.file_system.into(),
+                total_text: if drive.total_bytes == 0 {
+                    "Unavailable".into()
+                } else {
+                    format_bytes(drive.total_bytes).into()
+                },
+                free_text: if drive.total_bytes == 0 {
+                    "—".into()
+                } else {
+                    format_bytes(drive.free_bytes).into()
+                },
+                used_text: if drive.total_bytes == 0 {
+                    "—".into()
+                } else {
+                    format!("{:.1}%", usage * 100.0).into()
+                },
+                capacity_known: drive.total_bytes > 0,
             }
         })
         .collect();
     state.set_drives(ModelRc::new(VecModel::from(drives)));
 }
+fn refresh_drive_info(ui: &MainWindow) {
+    if ui.global::<AppState>().get_drives_loading() {
+        return;
+    }
+    ui.global::<AppState>().set_drives_loading(true);
+    let weak = ui.as_weak();
+    if std::thread::Builder::new()
+        .name("kova-drive-refresh".into())
+        .spawn(move || {
+            let data = load_sidebar();
+            let _ = weak.upgrade_in_event_loop(move |ui| apply_sidebar(&ui, data));
+        })
+        .is_err()
+    {
+        ui.global::<AppState>().set_drives_loading(false);
+        show_error_dialog(ui, "Could not start drive refresh");
+    }
+}
+
 fn show_dialog(
     ui: &MainWindow,
     title: &str,
@@ -668,6 +723,7 @@ fn sync_selection(ui: &MainWindow, dispatcher: &CommandDispatcher, models: &UiMo
     let controller = dispatcher.controller();
     let ctrl = controller.lock().unwrap();
     let selected = ctrl.selected_indices();
+    sync_preview_path(ui, &ctrl);
     ui.global::<AppState>()
         .set_selected_count(selected.len() as i32);
     for i in 0..models.files.row_count() {
@@ -679,6 +735,26 @@ fn sync_selection(ui: &MainWindow, dispatcher: &CommandDispatcher, models: &UiMo
             }
         }
     }
+}
+
+fn sync_preview_path(ui: &MainWindow, ctrl: &AppController) {
+    let state = ui.global::<AppState>();
+    let path = if !ctrl.is_loading() && ctrl.selected_count() == 1 {
+        ctrl.primary_selection()
+            .and_then(|i| ctrl.snapshot()?.entries.get(i))
+            .filter(|e| !e.is_directory())
+            .map(|e| e.path.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    if state.get_preview_path() != path {
+        state.set_preview_page(0);
+        state.set_preview_path(path.into());
+        state.set_preview_has_image(false);
+        state.set_preview_text("Select one file to preview".into());
+    }
+    state.set_preview_revision(ctrl.snapshot().map(|s| s.request_id as i32).unwrap_or(0));
 }
 
 /// Show a user-visible error for a failed user action and re-sync the UI.
@@ -701,7 +777,39 @@ fn wire_callbacks(
     pending_dialog: Arc<Mutex<Option<PendingDialog>>>,
     last_address: LastAddress,
     models: Rc<UiModels>,
+    icon_store: Rc<RefCell<IconStore>>,
+    icon_requests: std::sync::mpsc::Sender<IconRequest>,
 ) {
+    let d = dispatcher.clone();
+    let ui_view = ui.clone();
+    let last_view = Arc::clone(&last_address);
+    let models_view = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_view_option(move |option| {
+            let Some(ui) = ui_view.upgrade() else { return };
+            let state = ui.global::<AppState>();
+            match option {
+                0 => state.set_show_hidden(!state.get_show_hidden()),
+                1 => state.set_show_system(!state.get_show_system()),
+                2 => state.set_show_extensions(!state.get_show_extensions()),
+                3 => state.set_preview_visible(!state.get_preview_visible()),
+                4 => state.set_compact_rows(!state.get_compact_rows()),
+                5 => state.set_alternating_rows(!state.get_alternating_rows()),
+                6 => state.set_animations(!state.get_animations()),
+                7 => state.set_folder_sizes(!state.get_folder_sizes()),
+                _ => return,
+            }
+            let controller = d.controller();
+            let mut ctrl = controller.lock().unwrap();
+            if option <= 1 {
+                ctrl.set_visibility(state.get_show_hidden(), state.get_show_system());
+                queue_icon_requests(&icon_store, &icon_requests, &mut ctrl);
+            }
+            ctrl.show_extensions = state.get_show_extensions();
+            ctrl.folder_sizes_enabled = state.get_folder_sizes();
+            update_ui(&ui, &ctrl, &last_view, &models_view);
+        });
     let d = dispatcher.clone();
     let ui_nav = ui.clone();
     let last_nav = Arc::clone(&last_address);
@@ -753,6 +861,11 @@ fn wire_callbacks(
     ui.unwrap()
         .global::<AppState>()
         .on_request_refresh(move || {
+            if let Some(ui) = ui_refresh.upgrade() {
+                if ui.global::<AppState>().get_drive_overview() {
+                    refresh_drive_info(&ui);
+                }
+            }
             if let Err(e) = d.dispatch_refresh() {
                 show_action_error(&ui_refresh, &d, &last_refresh, &models_refresh, &e);
             }
@@ -768,6 +881,21 @@ fn wire_callbacks(
             d.dispatch_new_tab();
             if let Some(ui) = ui_new.upgrade() {
                 sync_ui(&ui, &d, &last_new, &models_new);
+            }
+        });
+
+    let d = dispatcher.clone();
+    let ui_duplicate = ui.clone();
+    let last_duplicate = Arc::clone(&last_address);
+    let models_duplicate = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_duplicate_location(move || {
+            if let Err(e) = d.dispatch_duplicate_location() {
+                show_action_error(&ui_duplicate, &d, &last_duplicate, &models_duplicate, &e);
+            }
+            if let Some(ui) = ui_duplicate.upgrade() {
+                sync_ui(&ui, &d, &last_duplicate, &models_duplicate);
             }
         });
 
@@ -1114,6 +1242,7 @@ fn update_ui(
     last_address: &LastAddress,
     models: &UiModels,
 ) {
+    sync_preview_path(ui, controller);
     // Only touch the address bar when the navigation state actually changed;
     // otherwise a background refresh would clobber text being typed.
     let address = controller.address_path();
@@ -1129,8 +1258,14 @@ fn update_ui(
 
     let state = ui.global::<AppState>();
     state.set_current_path(controller.address_path().into());
+    state.set_drive_overview(
+        controller
+            .current_location()
+            .is_some_and(|location| location.is_home()),
+    );
     state.set_status_text(controller.status_text().into());
     state.set_item_count(controller.item_count() as i32);
+    state.set_filtered_count(controller.filtered_count() as i32);
     state.set_selected_count(controller.selected_count() as i32);
     state.set_loading(controller.is_loading());
     state.set_directory_error(controller.directory_error().into());

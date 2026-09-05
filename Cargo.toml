@@ -26,6 +26,12 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 # Windows bindings
 windows = { version = "0.61", features = [
+    "Foundation",
+    "Storage",
+    "Storage_Streams",
+    "Graphics_Imaging",
+    "Data_Pdf",
+    "Win32_System_WinRT",
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",

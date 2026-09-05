@@ -21,7 +21,7 @@ native UI.
 - Compact command bar for New Folder, Cut, Copy, Paste, Rename and Delete;
   labeled actions collapse to icons in smaller windows.
 - Optional default folder/drive opening in Kova, with backup and restore in the
-  KOVA menu. See [setup and scope](docs/INTERACTION_INTEGRATION.md).
+  logo menu. See [setup and scope](docs/INTERACTION_INTEGRATION.md).
 - Mouse back/forward (XBUTTON1/XBUTTON2) handled through the normal
   Slint input pipeline — no hooks, no window subclassing.
 - Stale-result protection: per-tab generation/request IDs discard
@@ -29,11 +29,15 @@ native UI.
 
 **Sidebar & drives**
 
-- Quick Access (Home, Desktop, Documents, Downloads) via
+- Home opens the storage overview on startup and in new tabs, with independent
+  Back/Forward history. Explicit folder launches still open their target directly.
+- Quick Access (Desktop, Documents, Downloads) via
   `SHGetKnownFolderPath`, with real shell icons.
 - Drive discovery at startup (`GetLogicalDriveStringsW` / `GetDriveTypeW`)
   with usage bars and "X GB free of Y GB" details (danger color above 90 %
   usage).
+- Storage overview with file system, precise free/total capacity and animated
+  usage percentages; double-click a drive to open it.
 
 **File list**
 
@@ -44,6 +48,12 @@ native UI.
   automatic scrolling at the list edges.
 - Shell icons resolved asynchronously by a dedicated worker thread with
   caching and generic fallbacks.
+- View menu for hidden/system files, file extensions, row density and alternating
+  row colors. Visibility changes preserve selection by path and use cached entries.
+- Optional bounded background folder-size calculations on local fixed disks,
+  with incomplete totals explicitly marked.
+- Optional image, text and paginated PDF preview pane, decoded off the UI thread.
+  See [view options and preview limits](docs/VIEW_AND_PREVIEW.md).
 
 **Native Windows integration**
 
@@ -51,7 +61,8 @@ native UI.
   `IContextMenu2`/`IContextMenu3` message forwarding) for files and
   folders, including installed shell extensions (7-Zip, Git, "Open with",
   Properties). Multi-selection behaves like Explorer.
-- A small Kova context menu on empty space (New Folder, Paste, Refresh).
+- Background context menu with New Folder, Paste, current folder in a new tab,
+  sort column/direction, Refresh, Select All and Clear Selection.
 - Copy / Cut / Paste / Delete through `IFileOperation` on a dedicated COM
   thread: Recycle-Bin deletes, native progress and conflict dialogs, the
   UI thread is never blocked.
@@ -63,6 +74,7 @@ native UI.
 - `F5` refresh, `F2` rename, `Del` delete, `Ctrl+C`/`Ctrl+X`/`Ctrl+V`
   clipboard, `Ctrl+A` select all, `Enter` open, `Alt+←/→/↑`
   back/forward/parent, `Ctrl+L` address bar.
+- `Ctrl+H` toggles hidden files; `Space` toggles the preview pane from the file list.
 
 ## Architecture
 
@@ -113,8 +125,8 @@ Implemented: M0 (runtime foundation), M1 (shell icons, context menus, mouse
 navigation), M2 (native shell menus, copy/cut/paste/delete), M3 (visual
 polish: sidebar, tabs, toolbar, rows, drives, empty states).
 
-Not started yet: global search, preview pane, drag & drop, undo, resizable
-columns, "This PC" overview, cloud/network-specific handling. See
+Not started yet: global search, drag & drop, undo, resizable
+columns and cloud/network-specific handling. See
 [`docs/PRODUCT.md`](docs/PRODUCT.md).
 
 ## Documentation
