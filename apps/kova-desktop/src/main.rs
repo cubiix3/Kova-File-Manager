@@ -6,6 +6,7 @@ mod default_manager;
 mod folder_sizes;
 mod preferences;
 mod preview;
+mod storage;
 mod thumbnails;
 mod window_chrome;
 
@@ -247,6 +248,7 @@ async fn main() {
     window_chrome::connect(&app);
     default_manager::connect(&app, dispatcher.clone());
     let _preview_timer = preview::connect(&app);
+    let _storage_timer = storage::connect(&app, dispatcher.clone());
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -895,7 +897,6 @@ fn sync_preview_path(ui: &MainWindow, ctrl: &AppController) {
     let path = if !ctrl.is_loading() && ctrl.selected_count() == 1 {
         ctrl.primary_selection()
             .and_then(|i| ctrl.snapshot()?.entries.get(i))
-            .filter(|e| !e.is_directory())
             .map(|e| e.path.to_string_lossy().into_owned())
             .unwrap_or_default()
     } else {
@@ -962,6 +963,24 @@ fn wire_callbacks(
             ctrl.show_extensions = state.get_show_extensions();
             ctrl.folder_sizes_enabled = state.get_folder_sizes();
             update_ui(&ui, &ctrl, &last_view, &models_view);
+        });
+    let d = dispatcher.clone();
+    let ui_search = ui.clone();
+    let last_search = Arc::clone(&last_address);
+    let models_search = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_search(move |text| {
+            let Some(ui) = ui_search.upgrade() else {
+                return;
+            };
+            if ui.global::<AppState>().get_inline_visible() {
+                return;
+            }
+            let controller = d.controller();
+            let mut ctrl = controller.lock().unwrap();
+            ctrl.set_search(text.to_string());
+            update_ui(&ui, &ctrl, &last_search, &models_search);
         });
     let d = dispatcher.clone();
     let ui_nav = ui.clone();
@@ -1086,9 +1105,8 @@ fn wire_callbacks(
     let ui_marquee = ui.clone();
     let models_marquee = Rc::clone(&models);
     let gesture = RefCell::new(None);
-    ui.unwrap()
-        .global::<AppState>()
-        .on_request_marquee(move |phase, first, end, additive| {
+    ui.unwrap().global::<AppState>().on_request_grid_marquee(
+        move |phase, first, end, left, right, columns, additive| {
             let controller = d.controller();
             let mut ctrl = controller.lock().unwrap();
             let key = (ctrl.active_tab_id(), ctrl.snapshot().map(|s| s.request_id));
@@ -1104,14 +1122,26 @@ fn wire_callbacks(
                 *gesture = None;
                 return;
             }
-            let range = (first.max(0) as usize, end.max(0) as usize, additive);
+            let columns = columns.max(1) as usize;
+            let range = (
+                first.max(0) as usize,
+                end.max(0) as usize,
+                left.clamp(0, columns as i32) as usize,
+                right.clamp(0, columns as i32) as usize,
+                columns,
+                additive,
+            );
             if phase == 1 && *last_range == Some(range) {
                 return;
             }
             let len = ctrl.item_count();
             if let Some(selection) = ctrl.selection_mut() {
                 if phase == 1 {
-                    selection.marquee(baseline, range.0..range.1, additive, len);
+                    let rows =
+                        range.0.min(len.div_ceil(columns))..range.1.min(len.div_ceil(columns));
+                    let indices =
+                        rows.flat_map(|row| (range.2..range.3).map(move |col| row * columns + col));
+                    selection.marquee_indices(baseline, indices, additive, len);
                     *last_range = Some(range);
                 } else if phase == 3 {
                     *selection = baseline.clone();
@@ -1125,7 +1155,8 @@ fn wire_callbacks(
             if let Some(u) = ui_marquee.upgrade() {
                 sync_selection(&u, &d, &models_marquee);
             }
-        });
+        },
+    );
     let d = dispatcher.clone();
     let ui_sel = ui.clone();
 
@@ -1425,7 +1456,7 @@ fn update_ui(
         crumbs.insert(
             0,
             Breadcrumb {
-                label: "Dieser PC".into(),
+                label: "This PC".into(),
                 path: "Home".into(),
             },
         );
@@ -1446,6 +1477,7 @@ fn update_ui(
     }
 
     let state = ui.global::<AppState>();
+    state.set_search_text(controller.search_text().into());
     state.set_current_path(controller.address_path().into());
     state.set_drive_overview(
         controller

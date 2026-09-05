@@ -12,7 +12,8 @@ use std::{
 
 struct Output {
     id: u64,
-    result: Result<Preview, String>,
+    result: Option<Result<Preview, String>>,
+    metadata: Option<Vec<(String, String)>>,
     delay: Duration,
     animated: bool,
 }
@@ -59,6 +60,20 @@ pub fn connect(app: &MainWindow) -> slint::Timer {
                     continue;
                 }
                 let path = std::path::Path::new(&path);
+                let metadata = kova_platform_windows::inspector::read(path);
+                if !send(
+                    &output_tx,
+                    &latest,
+                    Output {
+                        id,
+                        result: None,
+                        metadata: Some(metadata),
+                        delay: Duration::ZERO,
+                        animated: false,
+                    },
+                ) {
+                    continue;
+                }
                 let animation = kova_platform_windows::preview_animation::stream(
                     path,
                     || latest.load(Ordering::Relaxed) == id,
@@ -68,7 +83,8 @@ pub fn connect(app: &MainWindow) -> slint::Timer {
                             &latest,
                             Output {
                                 id,
-                                result: Ok(preview),
+                                result: Some(Ok(preview)),
+                                metadata: None,
                                 delay,
                                 animated,
                             },
@@ -89,7 +105,8 @@ pub fn connect(app: &MainWindow) -> slint::Timer {
                     &latest,
                     Output {
                         id,
-                        result,
+                        result: Some(result),
+                        metadata: None,
                         delay: Duration::ZERO,
                         animated: false,
                     },
@@ -127,6 +144,7 @@ pub fn connect(app: &MainWindow) -> slint::Timer {
                 state.set_preview_has_image(false);
                 state.set_preview_image(slint::Image::default());
                 state.set_preview_pages(0);
+                state.set_inspector_info(slint::ModelRc::default());
                 state.set_preview_animated(false);
                 state.set_preview_paused(false);
                 clock.remaining = Duration::ZERO;
@@ -158,9 +176,22 @@ pub fn connect(app: &MainWindow) -> slint::Timer {
                 if generation.load(Ordering::Relaxed) != output.id {
                     continue;
                 }
+                if let Some(rows) = output.metadata {
+                    state.set_inspector_info(slint::ModelRc::new(slint::VecModel::from(
+                        rows.into_iter()
+                            .map(|(label, value)| crate::InfoItem {
+                                label: label.into(),
+                                value: value.into(),
+                            })
+                            .collect::<Vec<_>>(),
+                    )));
+                }
+                let Some(result) = output.result else {
+                    continue;
+                };
                 state.set_preview_animated(output.animated);
                 clock.remaining = output.delay;
-                match output.result {
+                match result {
                     Ok(preview) => {
                         state.set_preview_text(preview.text.into());
                         state.set_preview_pages(preview.pages as i32);
@@ -203,7 +234,8 @@ mod tests {
         let latest = AtomicU64::new(1);
         let output = || Output {
             id: 1,
-            result: Err("test".into()),
+            result: Some(Err("test".into())),
+            metadata: None,
             delay: Duration::ZERO,
             animated: true,
         };

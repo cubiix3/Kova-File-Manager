@@ -238,6 +238,9 @@ impl CommandDispatcher {
 
     pub fn dispatch_select_single(&self, index: usize) {
         let mut ctrl = self.controller.lock().unwrap();
+        if ctrl.is_loading() || index >= ctrl.item_count() {
+            return;
+        }
         if let Some(sel) = ctrl.selection_mut() {
             sel.select_single(index);
         }
@@ -245,6 +248,9 @@ impl CommandDispatcher {
 
     pub fn dispatch_select_toggle(&self, index: usize) {
         let mut ctrl = self.controller.lock().unwrap();
+        if ctrl.is_loading() || index >= ctrl.item_count() {
+            return;
+        }
         if let Some(sel) = ctrl.selection_mut() {
             sel.toggle(index);
         }
@@ -252,6 +258,9 @@ impl CommandDispatcher {
 
     pub fn dispatch_select_range(&self, index: usize) {
         let mut ctrl = self.controller.lock().unwrap();
+        if ctrl.is_loading() || index >= ctrl.item_count() {
+            return;
+        }
         if let Some(sel) = ctrl.selection_mut() {
             sel.range_select(index);
         }

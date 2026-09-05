@@ -26,6 +26,7 @@ pub struct AppController {
     tabs: TabCollection,
     snapshots: HashMap<TabId, DirectorySnapshot>,
     excluded: HashMap<TabId, Vec<FileEntry>>,
+    searches: HashMap<TabId, String>,
     pub show_hidden: bool,
     pub show_system: bool,
     pub show_extensions: bool,
@@ -43,6 +44,7 @@ impl AppController {
             tabs: TabCollection::new(initial),
             snapshots: HashMap::new(),
             excluded: HashMap::new(),
+            searches: HashMap::new(),
             show_hidden: false,
             show_system: false,
             show_extensions: true,
@@ -210,8 +212,15 @@ impl AppController {
             .get(&tab_id)
             .map(|s| s.entries.iter().map(|e| e.path.clone()).collect())
             .unwrap_or_default();
+        let query = kova_core::domain::SearchQuery::parse(
+            self.searches
+                .get(&tab_id)
+                .map(String::as_str)
+                .unwrap_or_default(),
+            chrono::Local::now(),
+        );
         let (mut entries, excluded) =
-            partition_visible(snapshot.entries, self.show_hidden, self.show_system);
+            partition_query(snapshot.entries, self.show_hidden, self.show_system, &query);
         self.excluded.insert(tab_id, excluded);
         kova_core::domain::sort_entries(&mut entries, tab.sort);
         let new_indices: HashMap<_, _> = entries
@@ -255,6 +264,7 @@ impl AppController {
     }
 
     pub fn navigate(&mut self, location: Location) {
+        self.searches.remove(&self.active_tab_id());
         if let Some(tab) = self.tabs.active_mut() {
             tab.history.navigate(location);
             // Entering a different directory invalidates index-based
@@ -264,6 +274,7 @@ impl AppController {
     }
 
     pub fn back(&mut self) -> Option<Location> {
+        self.searches.remove(&self.active_tab_id());
         let tab = self.tabs.active_mut()?;
         let location = tab.history.back();
         if location.is_some() {
@@ -273,6 +284,7 @@ impl AppController {
     }
 
     pub fn forward(&mut self) -> Option<Location> {
+        self.searches.remove(&self.active_tab_id());
         let tab = self.tabs.active_mut()?;
         let location = tab.history.forward();
         if location.is_some() {
@@ -299,6 +311,7 @@ impl AppController {
         let id = self.tabs.tabs().get(index)?.id;
         let active = self.tabs.close(id)?;
         self.snapshots.remove(&id);
+        self.searches.remove(&id);
         self.excluded.remove(&id);
         self.request_ids.remove(&id);
         self.pending.remove(&id);
@@ -454,7 +467,14 @@ impl AppController {
             let old_paths: Vec<_> = snapshot.entries.iter().map(|e| e.path.clone()).collect();
             let mut all = std::mem::take(&mut snapshot.entries);
             all.extend(self.excluded.remove(id).unwrap_or_default());
-            let (mut visible, excluded) = partition_visible(all, hidden, system);
+            let query = kova_core::domain::SearchQuery::parse(
+                self.searches
+                    .get(id)
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+                chrono::Local::now(),
+            );
+            let (mut visible, excluded) = partition_query(all, hidden, system, &query);
             kova_core::domain::sort_entries(&mut visible, tab.sort);
             let indices: HashMap<_, _> = visible
                 .iter()
@@ -467,16 +487,32 @@ impl AppController {
             self.excluded.insert(*id, excluded);
         }
     }
+
+    pub fn search_text(&self) -> &str {
+        self.searches
+            .get(&self.active_tab_id())
+            .map(String::as_str)
+            .unwrap_or_default()
+    }
+
+    pub fn set_search(&mut self, text: String) {
+        if self.search_text() == text {
+            return;
+        }
+        self.searches.insert(self.active_tab_id(), text);
+        self.set_visibility(self.show_hidden, self.show_system);
+    }
 }
 
-fn partition_visible(
+fn partition_query(
     entries: Vec<FileEntry>,
     hidden: bool,
     system: bool,
+    query: &kova_core::domain::SearchQuery,
 ) -> (Vec<FileEntry>, Vec<FileEntry>) {
-    entries
-        .into_iter()
-        .partition(|e| (!e.metadata.is_hidden || hidden) && (!e.metadata.is_system || system))
+    entries.into_iter().partition(|e| {
+        (!e.metadata.is_hidden || hidden) && (!e.metadata.is_system || system) && query.matches(e)
+    })
 }
 
 /// Icon id for a row: the resolved shell icon when present, otherwise the
@@ -549,6 +585,43 @@ fn dummy_snapshot(request_id: u64, name: &str) -> DirectorySnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_refilters_ten_thousand_cached_entries_without_new_requests() {
+        let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+        let id = ctrl.active_tab_id();
+        let mut snapshot = dummy_snapshot(1, "unused");
+        snapshot.entries = (0..10_000)
+            .map(|i| {
+                let name = format!("photo-{i:05}.png");
+                FileEntry {
+                    name: name.clone(),
+                    path: std::path::Path::new("C:\\dummy").join(name),
+                    kind: FileKind::File,
+                    metadata: FileMetadata {
+                        size: Some(i * 1024),
+                        ..FileMetadata::empty()
+                    },
+                    icon_handle: None,
+                }
+            })
+            .collect();
+        ctrl.record_request(id, 1);
+        ctrl.apply_snapshot(id, snapshot);
+        ctrl.selection_mut().unwrap().select_single(9999);
+        let selection = ctrl.selected_paths();
+        ctrl.set_search("type:image size:>9MB".into());
+        assert_eq!(ctrl.item_count(), 783);
+        assert_eq!(ctrl.selected_paths(), selection);
+        assert_eq!(ctrl.snapshot().unwrap().request_id, 1);
+        assert!(!ctrl.is_loading());
+        ctrl.set_search(String::new());
+        assert_eq!(ctrl.item_count(), 10_000);
+        assert_eq!(ctrl.selected_paths(), selection);
+        ctrl.set_search("nothing-matches".into());
+        assert_eq!(ctrl.selected_count(), 0);
+        assert!(ctrl.selected_paths().is_empty());
+    }
 
     #[test]
     fn home_is_a_history_location_without_a_filesystem_target() {
