@@ -18,6 +18,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-workspace-crates: true
+          cache-on-failure: true
       - name: Verify
         shell: pwsh
         run: |
@@ -44,6 +47,7 @@ jobs:
         shell: pwsh
         run: ./scripts/test-installer.ps1
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: kova-windows-x64
           path: dist/*

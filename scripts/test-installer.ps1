@@ -31,7 +31,9 @@ Write-Host 'Setup, installed app startup and uninstall passed.'
 
 # Exercise the real per-user directory and optional associations only on this runner.
 $stable = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Kova'
-if (Test-Path -LiteralPath $stable) { throw 'Refusing to overwrite an existing stable installation.' }
+if ((Test-Path (Join-Path $stable 'Kova.exe')) -or (Test-Path (Join-Path $stable 'folder-associations.json'))) {
+    throw 'Refusing to overwrite an existing stable installation or folder integration.'
+}
 $process = Start-Process -FilePath $setup.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/TASKS=desktopicon', "/DIR=`"$stable`"") -WindowStyle Hidden -PassThru -Wait
 if ($process.ExitCode) { throw 'Stable-directory installation failed.' }
 $shell = New-Object -ComObject WScript.Shell
