@@ -153,7 +153,11 @@ The WebP regression test encodes a transparent image and checks its thumbnail's
 dimensions, pixel-buffer length and preserved RGBA values without a Windows codec.
 Animation tests cover frame timing, looping, pause timing, cancellation with a
 full output queue, zero-delay throttling and oversized canvas rejection.
-The five local quality gates passed with 58 tests passing and 3 intentionally ignored.
+The five local quality gates passed with 60 tests passing and 3 intentionally ignored.
+
+The inspector now has a draggable divider, file type/size metadata and Fit or
+25–400% zoom. Zoom refers to decoded preview pixels, not original-file resolution.
+See [desktop refinement and naming verification](PRODUCT_REFINEMENT.md).
 
 NOT VERIFIED: Windows 10 runtime, reachable UNC shares, password-protected PDFs,
 huge/malformed image and PDF fixtures, EXIF-rotated photos, optional installed

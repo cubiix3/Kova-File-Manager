@@ -3,27 +3,27 @@ import { ListView, ScrollView } from "std-widgets.slint";
 
 // Theme tokens — central place for colors and metrics.
 export global Theme {
-    out property <color> window-bg: #202328;
+    out property <color> window-bg: #1d212b;
     // Raised fill used by the address bar and other inset controls.
-    out property <color> surface: #30343b;
-    out property <color> surface-alt: #353a42;
-    out property <color> surface-hover: #3b414a;
-    out property <color> surface-pressed: #454d57;
-    out property <color> sidebar-bg: #1d2025;
-    out property <color> sidebar-selected: #2d3740;
-    out property <color> sidebar-hover: #292e35;
-    out property <color> selection: #3a4955;
-    out property <color> selection-strong: #435969;
-    out property <color> border: #3a3a42;
-    out property <color> border-subtle: #414750;
+    out property <color> surface: #292f3b;
+    out property <color> surface-alt: #303746;
+    out property <color> surface-hover: #343e4e;
+    out property <color> surface-pressed: #3d495c;
+    out property <color> sidebar-bg: #191d26;
+    out property <color> sidebar-selected: #29394b;
+    out property <color> sidebar-hover: #252e3b;
+    out property <color> selection: #30465e;
+    out property <color> selection-strong: #3a5471;
+    out property <color> border: #333b4b;
+    out property <color> border-subtle: #303846;
     out property <color> text-primary: #f2f2f4;
-    out property <color> text-secondary: #c9c9d1;
-    out property <color> text-muted: #98989f;
-    out property <color> text-disabled: #63636e;
-    out property <color> accent: #7cc6eb;
+    out property <color> text-secondary: #c3ccda;
+    out property <color> text-muted: #8f9bad;
+    out property <color> text-disabled: #677387;
+    out property <color> accent: #8bb8f2;
     out property <color> danger: #e5534b;
-    out property <color> content-bg: #292d33;
-    out property <color> tabs-bg: #16191d;
+    out property <color> content-bg: #242a35;
+    out property <color> tabs-bg: #151922;
     out property <color> shadow: #00000066;
 }
 
@@ -78,6 +78,10 @@ export global AppState {
     in-out property <int> preview-page: 0;
     in-out property <int> preview-pages: 0;
     in-out property <int> preview-revision: 0;
+    in-out property <string> preview-info: "";
+    in-out property <int> primary-row: -1;
+    in-out property <int> preview-pixel-width: 0;
+    in-out property <int> preview-pixel-height: 0;
     in-out property <[Breadcrumb]> breadcrumbs: [];
     in-out property <string> address_path: "";
     in-out property <string> status_text: "Ready";
@@ -110,6 +114,11 @@ export global AppState {
     in-out property <int> sort_column: 0;
     in-out property <bool> sort_ascending: true;
 
+    in-out property <bool> inline-visible: false;
+    in-out property <bool> creating-folder: false;
+    in-out property <int> inline-row: -1;
+    in-out property <int> inline-selection-end: 0;
+    in-out property <string> inline-path: "";
     in-out property <bool> dialog_visible: false;
     in-out property <string> dialog_title: "";
     in-out property <string> dialog_value: "";
@@ -157,21 +166,21 @@ export global Metrics {
     out property <length> radius-sm: 4px;
     out property <length> radius-md: 6px;
     out property <length> radius-lg: 8px;
-    out property <length> tabs-height: 40px;
-    out property <length> toolbar-height: 56px;
+    out property <length> tabs-height: 36px;
+    out property <length> toolbar-height: 44px;
     out property <length> statusbar-height: 24px;
-    out property <length> sidebar-width: 224px;
-    out property <length> sidebar-item-height: 36px;
-    out property <length> sidebar-drive-height: 58px;
-    out property <length> actions-height: 48px;
-    out property <length> panel-gap: 8px;
+    out property <length> sidebar-width: 228px;
+    out property <length> sidebar-item-height: 32px;
+    out property <length> sidebar-drive-height: 52px;
+    out property <length> actions-height: 40px;
+    out property <length> panel-gap: 6px;
     out property <length> header-height: 32px;
-    out property <length> row-height: AppState.compact-rows ? 29px : 35px;
+    out property <length> row-height: AppState.compact-rows ? 28px : 34px;
     out property <length> icon-size: 18px;
     out property <length> icon-size-sm: 16px;
-    out property <length> col-type: 100px;
-    out property <length> col-size: 84px;
-    out property <length> col-modified: 144px;
+    out property <length> col-type: 108px;
+    out property <length> col-size: 88px;
+    out property <length> col-modified: 146px;
 }
 
 // TouchArea that additionally reacts to the mouse back/forward buttons
@@ -298,6 +307,7 @@ component InputField inherits Rectangle {
     in property <length> left-inset: 12px;
     in property <bool> quiet: false;
     in property <bool> navigation: false;
+    in property <bool> inline-mode: false;
     out property <bool> editing: ti.has-focus;
     in-out property <string> text <=> ti.text;
     callback accepted();
@@ -305,6 +315,7 @@ component InputField inherits Rectangle {
 
     public function focus-field() { ti.focus(); }
     public function select-all-text() { ti.select-all(); }
+    public function focus-name(end: int) { ti.focus(); ti.set-selection-offsets(0, end); }
 
     forward-focus: ti;
     height: 32px;
@@ -335,7 +346,7 @@ component InputField inherits Rectangle {
             selection-foreground-color: root.navigation && !ti.has-focus ? transparent : Theme.text-primary;
             accepted => { root.accepted(); }
             key-pressed(event) => {
-                if root.navigation && event.text == Key.Escape {
+                if (root.navigation || root.inline-mode) && event.text == Key.Escape {
                     root.cancelled();
                     accept
                 } else { reject }
@@ -380,12 +391,14 @@ component SidebarButton inherits Rectangle {
     in property <string> target: "";
     in property <bool> selected: false;
     in property <bool> home: false;
+    in property <color> base-background: transparent;
 
     height: Metrics.sidebar-item-height;
+    animate background { duration: AppState.animations ? 120ms : 0ms; }
     border-radius: Metrics.radius-md;
-    background: selected ? Theme.sidebar-selected : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.sidebar-hover : transparent));
+    background: selected ? Theme.sidebar-selected : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.sidebar-hover : root.base-background));
 
-    Rectangle { x: 0; y: 10px; width: 3px; height: 16px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
+    Rectangle { x: 0; y: (parent.height - 14px) / 2; width: 3px; height: 14px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
 
     HorizontalLayout {
         padding-left: 12px;
@@ -428,15 +441,15 @@ component DriveRow inherits Rectangle {
     border-radius: Metrics.radius-md;
     background: selected ? Theme.sidebar-selected : (drive-ta.pressed ? Theme.surface-pressed : (drive-ta.has-hover ? Theme.sidebar-hover : transparent));
 
-    Rectangle { x: 0; y: 10px; width: 3px; height: 16px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
-    Image { x: 12px; y: 8px; source: drive.icon; width: 18px; height: 18px; image-rendering: smooth; }
+    Rectangle { x: 0; y: (parent.height - 14px) / 2; width: 3px; height: 14px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
+    Image { x: 12px; y: 6px; source: drive.icon; width: 18px; height: 18px; image-rendering: smooth; }
     Text {
-        x: 38px; y: 6px; width: parent.width - 46px; height: 20px;
+        x: 38px; y: 3px; width: parent.width - 46px; height: 20px;
         text: drive.name; color: root.selected ? Theme.text-primary : Theme.text-secondary;
         font-size: 12px; vertical-alignment: center; overflow: elide;
     }
     Rectangle {
-        x: 38px; y: 29px; width: parent.width - 48px; height: 5px;
+        x: 38px; y: 41px; width: parent.width - 48px; height: 3px;
         border-radius: 2px; background: Theme.surface-hover;
         visible: drive.capacity-known;
         Rectangle {
@@ -449,8 +462,8 @@ component DriveRow inherits Rectangle {
         }
     }
     Text {
-        x: 38px; y: 37px; width: parent.width - 46px; height: 15px;
-        text: drive.detail; color: Theme.text-muted;
+        x: 38px; y: 23px; width: parent.width - 46px; height: 15px;
+        text: drive.capacity-known ? drive.free-text + " free / " + drive.total-text : drive.detail; color: Theme.text-muted;
         font-size: 10px; vertical-alignment: center; overflow: elide;
     }
 
@@ -462,7 +475,7 @@ component DriveRow inherits Rectangle {
 component SectionLabel inherits Rectangle {
     in property <string> text;
     in property <string> detail;
-    height: 28px;
+    height: 26px;
     Text { x: 12px; height: parent.height; text: root.text; color: Theme.text-muted; font-size: 11px; font-weight: 600; vertical-alignment: center; }
     Text { x: parent.width - 64px; width: 52px; height: parent.height; text: root.detail; color: Theme.text-disabled; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
 }
@@ -491,11 +504,14 @@ component HeaderCell inherits Rectangle {
             font-weight: 600;
             vertical-alignment: center;
         }
-        Text {
-            text: AppState.sort_column == root.column ? (AppState.sort_ascending ? "▲" : "▼") : "";
-            color: Theme.accent;
-            font-size: 9px;
-            vertical-alignment: center;
+        VerticalLayout {
+            width: 10px; alignment: center;
+            Path {
+                width: 8px; height: 5px; viewbox-width: 8; viewbox-height: 5;
+                visible: AppState.sort_column == root.column;
+                commands: AppState.sort_ascending ? "M1 4L4 1L7 4" : "M1 1L4 4L7 1";
+                fill: transparent; stroke: Theme.accent; stroke-width: 1.2px;
+            }
         }
     }
 
@@ -527,7 +543,7 @@ component NameDialog inherits Rectangle {
             x: 24px; y: 20px; width: 372px; height: 24px;
             text: root.title;
             color: root.title == "Error" ? Theme.danger : Theme.text-primary;
-            font-size: 14px; font-weight: 600;
+            font-size: 18px; font-weight: 600;
         }
 
         dialog-scope := FocusScope {
@@ -587,6 +603,11 @@ export component MainWindow inherits Window {
     resize-border-width: 5px;
     callback window-action(int);
     in-out property <bool> window-maximized: false;
+    property <length> inspector-width: 340px;
+    property <float> preview-zoom: 1;
+    property <bool> preview-fit: true;
+    property <string> zoom-path: AppState.preview-path;
+    changed zoom-path => { self.preview-fit = true; self.preview-zoom = 1; }
     property <length> tab-width: Math.min(198px, Math.max(140px, (root.width - Metrics.sidebar-width - 202px) / Math.max(1, AppState.tabs.length) - 4px));
     min-width: 760px;
     min-height: 500px;
@@ -629,7 +650,7 @@ export component MainWindow inherits Window {
         }
 
         Image {
-            x: 14px; y: 8px; width: 24px; height: 24px;
+            x: 18px; y: 8px; width: 20px; height: 20px;
             source: @image-url("../assets/kova.svg");
             opacity: AppState.loading && AppState.animations && logo-pulse.dim ? 0.55 : 1;
             animate opacity { duration: 350ms; }
@@ -664,7 +685,7 @@ export component MainWindow inherits Window {
                 alignment: start;
             for item[idx] in AppState.tabs: Rectangle {
                 width: root.tab-width;
-                height: 36px;
+                height: 32px;
                 border-radius: Metrics.radius-md;
                 background: idx == AppState.active_tab ? Theme.window-bg : (tab-ta.pressed ? Theme.surface-pressed : (tab-ta.has-hover ? Theme.surface-hover : transparent));
 
@@ -673,8 +694,8 @@ export component MainWindow inherits Window {
                 }
 
                 Rectangle {
-                    y: parent.height - 7px; height: 7px; width: parent.width;
-                    background: Theme.window-bg; visible: idx == AppState.active_tab;
+                    x: 12px; y: parent.height - 2px; height: 2px; width: parent.width - 24px;
+                    border-radius: 1px; background: Theme.accent.with-alpha(0.6); visible: idx == AppState.active_tab;
                 }
 
                 HorizontalLayout {
@@ -684,7 +705,8 @@ export component MainWindow inherits Window {
 
                     VerticalLayout {
                         alignment: center;
-                        IconFolderNew { width: 15px; height: 15px; tint: idx == AppState.active_tab ? Theme.accent : Theme.text-muted; }
+                        if item == "Home": IconHome { width: 15px; height: 15px; tint: idx == AppState.active_tab ? Theme.accent : Theme.text-muted; }
+                        if item != "Home": IconFolderNew { width: 15px; height: 15px; tint: idx == AppState.active_tab ? Theme.accent : Theme.text-muted; }
                     }
                     Text {
                         text: item;
@@ -771,13 +793,13 @@ export component MainWindow inherits Window {
 
         HorizontalLayout {
             width: parent.width; height: parent.height;
-            padding: 8px; spacing: 6px;
+            padding-left: 10px; padding-right: 8px; padding-top: 4px; padding-bottom: 4px; spacing: 4px;
             NavIconButton { enabled: AppState.can_go_back; clicked => { AppState.request_back(); } FilesNavBack { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
             NavIconButton { enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } FilesNavForward { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
             NavIconButton { enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } FilesNavUp { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
             NavIconButton { clicked => { AppState.request_refresh(); } FilesRefresh { x: 7px; y: 7px; } }
             address-field := InputField {
-                height: 38px; horizontal-stretch: 1;
+                height: 34px; horizontal-stretch: 1; quiet: true;
                 border-radius: Metrics.radius-lg;
                 left-inset: 38px;
                 navigation: true;
@@ -785,20 +807,21 @@ export component MainWindow inherits Window {
                 accepted => { AppState.request_navigate(AppState.address_path); list-scope.focus(); }
                 cancelled => { AppState.address_path = AppState.current-path; list-scope.focus(); }
                 HorizontalLayout {
-                    x: 36px; y: 4px; width: parent.width - 48px; height: 30px;
+                    x: 36px; y: 2px; width: parent.width - 48px; height: 30px;
                     visible: !address-field.editing;
                     alignment: start; spacing: 2px;
                     for crumb[index] in AppState.breadcrumbs: Rectangle {
-                        width: Math.min(156px, (address-field.width - 54px) / Math.max(1, AppState.breadcrumbs.length));
+                        width: Math.min(156px, crumb-label.preferred-width + 28px, (address-field.width - 54px) / Math.max(1, AppState.breadcrumbs.length));
                         height: 30px;
                         border-radius: Metrics.radius-sm;
                         background: crumb-ta.has-hover ? Theme.surface-hover : transparent;
-                        Text { x: 8px; width: parent.width - 26px; height: parent.height; text: crumb.label; font-size: 13px; color: index == AppState.breadcrumbs.length - 1 ? Theme.text-primary : Theme.text-secondary; vertical-alignment: center; overflow: elide; }
+                        crumb-label := Text { x: 8px; width: parent.width - 26px; height: parent.height; text: crumb.label; font-size: 13px; color: index == AppState.breadcrumbs.length - 1 ? Theme.text-primary : Theme.text-secondary; vertical-alignment: center; overflow: elide; }
                         Path { x: parent.width - 12px; y: 11px; width: 5px; height: 8px; viewbox-width: 5; viewbox-height: 8; fill: transparent; stroke: Theme.text-muted; stroke-width: 1px; commands: "M 1 1 L 4 4 L 1 7"; visible: index < AppState.breadcrumbs.length - 1; }
                         crumb-ta := NavTouchArea { clicked => { AppState.request_navigate(crumb.path); list-scope.focus(); } }
                     }
                 }
-                IconFolderNew { x: 13px; y: 11px; tint: Theme.accent; }
+                IconFolderNew { x: 13px; y: 9px; tint: Theme.accent; visible: !AppState.drive-overview; }
+                IconHome { x: 12px; y: 8px; tint: Theme.accent; visible: AppState.drive-overview; }
             }
         }
     }
@@ -829,19 +852,20 @@ export component MainWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 viewport-width: self.width;
-                viewport-height: Math.max(self.height, 264px + AppState.drives.length * (Metrics.sidebar-drive-height + 2px));
+                viewport-height: Math.max(self.height, 302px + AppState.drives.length * (Metrics.sidebar-drive-height + 2px));
             VerticalLayout {
                 x: 0;
                 y: 0;
                 width: parent.width;
                 height: sidebar-scroll.viewport-height;
-                padding: Metrics.space-md;
+                padding: Metrics.space-sm;
                 spacing: 2px;
                 alignment: start;
 
                 SidebarButton { text: "Home"; home: true; target: "Home"; selected: AppState.drive-overview; }
                 Rectangle { height: Metrics.space-md; }
                 SectionLabel { text: "Places"; }
+                SidebarButton { text: "Personal folder"; icon: AppState.home_icon; target: AppState.home_path; selected: AppState.current-path == AppState.home_path; }
                 SidebarButton { text: "Desktop"; icon: AppState.desktop_icon; target: AppState.desktop_path; selected: AppState.current-path == AppState.desktop_path; }
                 SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; selected: AppState.current-path == AppState.documents_path; }
                 SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; selected: AppState.current-path == AppState.downloads_path; }
@@ -859,18 +883,18 @@ export component MainWindow inherits Window {
             x: Metrics.sidebar-width; y: 0;
             width: parent.width - Metrics.sidebar-width - Metrics.space-sm;
             height: Metrics.actions-height;
-            background: Theme.surface;
+            background: Theme.content-bg;
             border-radius: Metrics.radius-lg;
-            border-width: 1px; border-color: Theme.border-subtle;
             HorizontalLayout {
-                padding: 7px; spacing: 4px;
-                ActionButton { label: "New folder"; shortcut: ""; width: 108px; enabled: !AppState.drive-overview && !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_new_folder(); } IconFolderNew { x: 10px; y: 9px; tint: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                Rectangle { width: 1px; background: Theme.border-subtle; }
-                ActionButton { label: "Cut"; shortcut: "Ctrl+X"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_cut(); } FilesCut { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                ActionButton { label: "Copy"; shortcut: "Ctrl+C"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_copy(); } FilesCopy { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                ActionButton { label: "Paste"; shortcut: "Ctrl+V"; show-label: root.width >= 1000px; enabled: !AppState.drive-overview && !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_paste(); } FilesPaste { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                ActionButton { label: "Rename"; shortcut: "F2"; show-label: root.width >= 1000px; enabled: AppState.selected_count == 1; triggered => { list-scope.focus(); AppState.request_rename(-1); } FilesRename { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                ActionButton { label: "Delete"; shortcut: "Del"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_delete(); } FilesDelete { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                padding: 3px; spacing: 4px;
+                if AppState.drive-overview: Text { text: "Overview"; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; width: 110px; }
+                if !AppState.drive-overview: ActionButton { label: "New folder"; shortcut: "Ctrl+Shift+N"; width: 108px; enabled: !AppState.creating-folder && !AppState.drive-overview && !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_new_folder(); } IconFolderNew { x: 10px; y: 9px; tint: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                if !AppState.drive-overview: Rectangle { width: 1px; background: Theme.border-subtle; }
+                if !AppState.drive-overview: ActionButton { label: "Cut"; shortcut: "Ctrl+X"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_cut(); } FilesCut { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                if !AppState.drive-overview: ActionButton { label: "Copy"; shortcut: "Ctrl+C"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_copy(); } FilesCopy { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                if !AppState.drive-overview: ActionButton { label: "Paste"; shortcut: "Ctrl+V"; show-label: root.width >= 1000px; enabled: !AppState.drive-overview && !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_paste(); } FilesPaste { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                if !AppState.drive-overview: ActionButton { label: "Rename"; shortcut: "F2"; show-label: root.width >= 1000px; enabled: AppState.selected_count == 1; triggered => { list-scope.focus(); AppState.request_rename(-1); } FilesRename { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                if !AppState.drive-overview: ActionButton { label: "Delete"; shortcut: "Del"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_delete(); } FilesDelete { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
                 Rectangle { horizontal-stretch: 1; }
                 view-menu := ContextMenuArea {
                     width: 64px;
@@ -899,7 +923,7 @@ export component MainWindow inherits Window {
 
         preview-panel := Rectangle {
             visible: AppState.preview-visible && !AppState.drive-overview;
-            width: root.width >= 1100px ? 340px : 280px;
+            width: Math.clamp(root.inspector-width, 260px, Math.max(260px, root.width - Metrics.sidebar-width - 280px));
             x: parent.width - self.width - Metrics.space-sm;
             y: Metrics.actions-height + Metrics.panel-gap;
             height: parent.height - self.y;
@@ -918,12 +942,47 @@ export component MainWindow inherits Window {
                 preview-close := TouchArea { clicked => { AppState.request-view-option(3); } }
             }
             Rectangle { x: 12px; y: 42px; width: parent.width - 24px; height: 1px; background: Theme.border; }
-            if AppState.preview-has-image: Image {
-                x: 12px; y: 54px; width: parent.width - 24px; height: parent.height - 106px;
-                source: AppState.preview-image; image-fit: contain;
+            Text {
+                x: 14px; y: 44px; width: parent.width - 28px; height: 20px;
+                text: AppState.preview-info; color: Theme.text-muted; font-size: 11px;
+                overflow: elide; vertical-alignment: center;
+            }
+            if AppState.preview-has-image: HorizontalLayout {
+                x: 12px; y: 68px; width: parent.width - 24px; height: 28px; spacing: 4px;
+                Text { text: "Zoom"; color: Theme.text-muted; font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; }
+                NavIconButton { width: 28px; height: 28px; enabled: root.preview-fit || root.preview-zoom > 0.25;
+                    accessible-role: button; accessible-label: "Zoom out";
+                    clicked => { root.preview-fit = false; root.preview-zoom = Math.max(0.25, root.preview-zoom - 0.25); }
+                    Text { text: "−"; color: Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                NavIconButton { width: 60px; height: 28px;
+                    accessible-role: button; accessible-label: "Fit or actual preview pixels";
+                    clicked => { root.preview-fit = !root.preview-fit; root.preview-zoom = 1; }
+                    Text { text: root.preview-fit ? "Fit" : Math.round(root.preview-zoom * 100) + "%"; color: Theme.accent; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                NavIconButton { width: 28px; height: 28px; enabled: root.preview-fit || root.preview-zoom < 4;
+                    accessible-role: button; accessible-label: "Zoom in";
+                    clicked => { root.preview-fit = false; root.preview-zoom = Math.min(4, root.preview-zoom + 0.25); }
+                    IconPlus { x: 7px; y: 7px; }
+                }
+            }
+            if AppState.preview-has-image: Rectangle {
+                x: 12px; y: 104px; width: parent.width - 24px; height: parent.height - 156px;
+                background: Theme.sidebar-bg; border-radius: Metrics.radius-md; clip: true;
+                ScrollView {
+                    width: parent.width; height: parent.height;
+                    viewport-width: root.preview-fit ? self.width : Math.max(self.width, AppState.preview-pixel-width * root.preview-zoom * 1px);
+                    viewport-height: root.preview-fit ? self.height : Math.max(self.height, AppState.preview-pixel-height * root.preview-zoom * 1px);
+                    Image {
+                        width: root.preview-fit ? parent.width : AppState.preview-pixel-width * root.preview-zoom * 1px;
+                        height: root.preview-fit ? parent.height : AppState.preview-pixel-height * root.preview-zoom * 1px;
+                        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                        source: AppState.preview-image; image-fit: contain;
+                    }
+                }
             }
             if !AppState.preview-has-image: ScrollView {
-                x: 12px; y: 54px; width: parent.width - 24px; height: parent.height - 68px;
+                x: 12px; y: 72px; width: parent.width - 24px; height: parent.height - 86px;
                 viewport-width: self.width;
                 viewport-height: Math.max(self.height, preview-copy.preferred-height + 8px);
                 preview-copy := Text {
@@ -947,6 +1006,26 @@ export component MainWindow inherits Window {
                 if AppState.preview-pages > 0: NavIconButton { enabled: AppState.preview-page > 0; width: 30px; clicked => { AppState.preview-page -= 1; } FilesNavBack { x: 7px; y: 7px; width: 16px; height: 16px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; } }
                 Text { text: AppState.preview-text; color: Theme.text-muted; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; horizontal-stretch: 1; }
                 if AppState.preview-pages > 0: NavIconButton { enabled: AppState.preview-page + 1 < AppState.preview-pages; width: 30px; clicked => { AppState.preview-page += 1; } FilesNavForward { x: 7px; y: 7px; width: 16px; height: 16px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; } }
+            }
+        }
+
+        Rectangle {
+            visible: preview-panel.visible;
+            x: preview-panel.x - Metrics.panel-gap; y: preview-panel.y;
+            width: Metrics.panel-gap; height: preview-panel.height;
+            Rectangle { x: 2px; width: 2px; height: parent.height; border-radius: 1px; background: splitter.has-hover || splitter.pressed ? Theme.accent.with-alpha(0.5) : transparent; }
+            splitter := TouchArea {
+                mouse-cursor: ew-resize;
+                property <length> start-width;
+                property <length> start-position;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                        self.start-width = preview-panel.width;
+                        self.start-position = self.mouse-x + parent.x;
+                    }
+                }
+                moved => { if self.pressed { root.inspector-width = Math.clamp(self.start-width + self.start-position - (self.mouse-x + parent.x), 260px, Math.max(260px, root.width - Metrics.sidebar-width - 280px)); } }
+                double-clicked => { root.inspector-width = 340px; }
             }
         }
 
@@ -992,9 +1071,9 @@ export component MainWindow inherits Window {
                     y: 0;
                     width: parent.width;
                     height: parent.height;
-                    spacing: 6px;
+                    spacing: 8px;
                     padding-right: 16px;
-                    HeaderCell { text: "Name"; column: 0; horizontal-stretch: 1; min-width: 140px; text-indent: 32px; }
+                    HeaderCell { text: "Name"; column: 0; horizontal-stretch: 1; min-width: 140px; text-indent: 38px; }
                     if file-list.width >= 700px: HeaderCell { text: "Type"; column: 1; width: Metrics.col-type; text-indent: 0px; }
                     if file-list.width >= 360px: HeaderCell { text: "Size"; column: 2; width: Metrics.col-size; text-indent: 0px; right-align: true; }
                     if file-list.width >= 530px: HeaderCell { text: "Modified"; column: 3; width: Metrics.col-modified; text-indent: 0px; }
@@ -1068,7 +1147,9 @@ export component MainWindow inherits Window {
                     height: parent.height;
 
                     key-pressed(event) => {
-                        if event.text == "h" && event.modifiers.control {
+                        if event.text == "n" && event.modifiers.control && event.modifiers.shift {
+                            AppState.request_new_folder(); accept
+                        } else if event.text == "h" && event.modifiers.control {
                             AppState.request-view-option(0); accept
                         } else if event.text == " " && !event.modifiers.control && !event.modifiers.alt {
                             AppState.request-view-option(3); accept
@@ -1141,13 +1222,14 @@ export component MainWindow inherits Window {
                             // edges — the modern Files/OneDrive look. The
                             // hit target stays the full row.
                             row-pill := Rectangle {
+                                animate background { duration: AppState.animations ? 100ms : 0ms; }
                                 x: 4px;
                                 y: 1px;
                                 width: parent.width - 8px;
                                 height: parent.height - 2px;
                                 border-radius: Metrics.radius-sm;
                                 border-width: item.selected ? 1px : 0px;
-                                border-color: list-scope.has-focus ? #5485a3 : Theme.border-subtle;
+                                border-color: list-scope.has-focus && AppState.primary-row == idx ? Theme.accent.with-alpha(0.75) : transparent;
                                 background: item.selected
                                     ? ((marquee.has-hover && marquee.hover-row == idx) ? Theme.selection-strong : Theme.selection)
                                     : ((marquee.pressed && marquee.hover-row == idx) ? Theme.surface-pressed : ((marquee.has-hover && marquee.hover-row == idx) ? Theme.surface-hover : (AppState.alternating-rows && Math.mod(idx, 2) == 1 ? Theme.window-bg.with-alpha(0.32) : transparent)));
@@ -1158,9 +1240,9 @@ export component MainWindow inherits Window {
                                 y: 0;
                                 width: parent.width;
                                 height: parent.height;
-                                padding-left: 8px;
+                                padding-left: 12px;
                                 padding-right: 16px;
-                                spacing: 6px;
+                                spacing: 8px;
 
                                 VerticalLayout {
                                     alignment: center;
@@ -1226,6 +1308,7 @@ export component MainWindow inherits Window {
                                         AppState.request_shell_menu(self.hover-row);
                                     } else { empty-area-menu.show({ x: self.mouse-x, y: self.mouse-y }); }
                                 } else if event.button == PointerEventButton.left && !AppState.loading {
+                                    if AppState.inline-visible { AppState.request_dialog_confirm(AppState.dialog_value); }
                                     self.armed = true; self.dragging = false;
                                     self.start-x = self.mouse-x;
                                     self.start-y = self.mouse-y - file-viewport.viewport-y;
@@ -1272,6 +1355,30 @@ export component MainWindow inherits Window {
                         height: Math.max(1px, Math.clamp(Math.max(marquee.start-y + file-viewport.viewport-y, marquee.mouse-y), 0px, marquee.height) - self.y);
                         background: Theme.accent.with-alpha(0.14);
                         border-width: 1px; border-color: Theme.accent;
+                    }
+
+                    inline-editor := InputField {
+                        visible: AppState.inline-visible;
+                        x: 36px; y: AppState.inline-row * Metrics.row-height + file-viewport.viewport-y;
+                        width: Math.max(108px, file-list.width - 60px - (file-list.width >= 700px ? Metrics.col-type + 8px : 0px) - (file-list.width >= 360px ? Metrics.col-size + 8px : 0px) - (file-list.width >= 530px ? Metrics.col-modified + 8px : 0px));
+                        height: Metrics.row-height;
+                        inline-mode: true; left-inset: 3px; right-inset: 3px;
+                        border-radius: 2px;
+                        text <=> AppState.dialog_value;
+                        property <bool> focus-pending: false;
+                        changed visible => { if self.visible { self.focus-pending = true; } }
+                        Timer {
+                            running: inline-editor.focus-pending; interval: 1ms;
+                            triggered => {
+                                inline-editor.focus-pending = false;
+                                if inline-editor.y < 0px || inline-editor.y + Metrics.row-height > file-viewport.height {
+                                    file-viewport.viewport-y = Math.clamp(-AppState.inline-row * Metrics.row-height, Math.min(0px, file-viewport.height - file-viewport.viewport-height), 0px);
+                                }
+                                inline-editor.focus-name(AppState.inline-selection-end);
+                            }
+                        }
+                        accepted => { AppState.request_dialog_confirm(AppState.dialog_value); if !AppState.inline-visible { list-scope.focus(); } }
+                        cancelled => { AppState.request_dialog_cancel(); list-scope.focus(); }
                     }
 
                     // Empty and loading states, centered in the content area.
@@ -1413,10 +1520,17 @@ export component MainWindow inherits Window {
                     else { reject }
                 }
             }
-            Text { x: 20px; y: 12px; height: 38px; text: "Drives & storage"; color: Theme.text-primary; font-size: 18px; font-weight: 600; }
-            Text { x: 20px; y: 52px; text: AppState.drives-loading ? "Refreshing drives…" : "Double-click a drive to open it"; color: Theme.text-muted; font-size: 12px; }
+            Text { x: 20px; y: 12px; height: 38px; text: "Home"; color: Theme.text-primary; font-size: 22px; font-weight: 600; }
+            Text { x: 20px; y: 52px; text: "Your folders and storage, in one place."; color: Theme.text-muted; font-size: 12px; }
             HorizontalLayout {
-                x: 20px; y: 82px; width: parent.width - 50px; height: 28px; spacing: 12px;
+                x: 20px; y: 84px; width: parent.width - 40px; height: 44px; spacing: 8px;
+                SidebarButton { text: "Desktop"; icon: AppState.desktop_icon; target: AppState.desktop_path; horizontal-stretch: 1; base-background: Theme.surface; }
+                SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; horizontal-stretch: 1; base-background: Theme.surface; }
+                SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; horizontal-stretch: 1; base-background: Theme.surface; }
+            }
+            Text { x: 20px; y: 146px; height: 20px; text: AppState.drives-loading ? "Refreshing storage…" : "Devices & drives"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+            HorizontalLayout {
+                x: 20px; y: 182px; width: parent.width - 50px; height: 28px; spacing: 12px;
                 Text { text: "Drive"; horizontal-stretch: 1; min-width: 150px; color: Theme.text-muted; font-size: 11px; }
                 if root.width >= 1100px: Text { text: "File system"; width: 70px; color: Theme.text-muted; font-size: 11px; }
                 Text { text: "Free"; width: 82px; horizontal-alignment: right; color: Theme.text-muted; font-size: 11px; }
@@ -1424,12 +1538,12 @@ export component MainWindow inherits Window {
                 Text { text: "Used"; width: root.width >= 1200px ? 240px : (root.width >= 1000px ? 180px : 100px); color: Theme.text-muted; font-size: 11px; }
             }
             ScrollView {
-                x: 12px; y: 106px; width: parent.width - 24px; height: parent.height - 122px;
-                viewport-width: self.width; viewport-height: AppState.drives.length * 46px;
+                x: 12px; y: 206px; width: parent.width - 24px; height: parent.height - 222px;
+                viewport-width: self.width; viewport-height: AppState.drives.length * 48px;
                 VerticalLayout {
                     spacing: 4px; padding-right: 10px;
                     for drive[drive-index] in AppState.drives: Rectangle {
-                        height: 42px; border-radius: Metrics.radius-md;
+                        height: 44px; border-radius: Metrics.radius-md;
                         background: home-focus.selected-drive == drive-index ? Theme.selection : (overview-drive-touch.has-hover ? Theme.surface-hover : Theme.surface);
                         HorizontalLayout {
                             padding: 8px; spacing: 12px;
@@ -1444,7 +1558,6 @@ export component MainWindow inherits Window {
                             Rectangle {
                                 width: root.width >= 1200px ? 240px : (root.width >= 1000px ? 180px : 100px); height: 24px;
                                 background: Theme.window-bg; border-radius: Metrics.radius-sm;
-                                border-width: 1px; border-color: Theme.border-subtle;
                                 property <bool> revealed: !AppState.animations;
                                 Timer { running: !parent.revealed; interval: 40ms; triggered => { parent.revealed = true; } }
                                 Rectangle {

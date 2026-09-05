@@ -21,6 +21,8 @@ Select a file and press **Space**, or enable **View > Preview pane**, to inspect
 images, text and PDF pages beside the file list. Preview work runs off the UI thread.
 GIF, animated WebP and APNG play directly in the pane, with a **Pause / Play**
 control. Playback stops when you change the selection or close the pane.
+Drag the pane divider to resize it. Image and PDF previews offer Fit and
+25–400% zoom; 100% refers to the decoded preview, not the original file resolution.
 Small thumbnails also appear beside file names: common image formats and PDF
 first pages are decoded directly, while other types use available Windows
 thumbnail providers. Files without a thumbnail keep their associated type icon.
@@ -46,6 +48,11 @@ thumbnail providers. Files without a thumbnail keep their associated type icon.
   address editing, canonical path handling with visible errors.
 - Compact command bar for New Folder, Cut, Copy, Paste, Rename and Delete;
   labeled actions collapse to icons in smaller windows.
+- New Folder (`Ctrl+Shift+N`) creates a uniquely named folder and edits its name
+  directly in the list. `F2` renames the selection; Enter confirms and Escape
+  cancels editing. File extensions are excluded from the initial text selection.
+- Programs open through the Windows Shell. Executables start with their parent
+  folder as the working directory so portable apps can find relative assets.
 - Optional default folder/drive opening in Kova, with backup and restore in the
   logo menu. See [setup and scope](docs/INTERACTION_INTEGRATION.md).
 - Mouse back/forward (XBUTTON1/XBUTTON2) handled through the normal
@@ -57,7 +64,7 @@ thumbnail providers. Files without a thumbnail keep their associated type icon.
 
 - Home opens the storage overview on startup and in new tabs, with independent
   Back/Forward history. Explicit folder launches still open their target directly.
-- Places shortcuts (Desktop, Documents, Downloads) via
+- Places shortcuts (Personal folder, Desktop, Documents, Downloads) via
   `SHGetKnownFolderPath`, with real shell icons.
 - Drive discovery at startup (`GetLogicalDriveStringsW` / `GetDriveTypeW`)
   with aligned Storage entries, usage bars and "X GB free of Y GB" details (danger color above 90 %

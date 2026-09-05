@@ -31,8 +31,14 @@ slint::include_modules!();
 
 #[derive(Debug, Clone)]
 enum PendingDialog {
-    NewFolder,
-    Rename { path: std::path::PathBuf },
+    Creating {
+        tab: kova_core::domain::TabId,
+        parent: kova_core::domain::Location,
+    },
+    Rename {
+        path: std::path::PathBuf,
+        suffix: String,
+    },
 }
 
 /// One resolved icon batch coming back from the icon worker thread.
@@ -322,6 +328,8 @@ async fn main() {
     let models_for_pump = Rc::clone(&ui_models);
     let store_for_pump = Rc::clone(&icon_store);
     let icon_req_for_pump = icon_req_tx.clone();
+    let pending_for_pump = Arc::clone(&pending_dialog);
+    let mut reveal: Option<(kova_core::domain::TabId, std::path::PathBuf, bool)> = None;
     let pump_timer = slint::Timer::default();
     pump_timer.start(
         slint::TimerMode::Repeated,
@@ -349,8 +357,29 @@ async fn main() {
                         if ctrl.is_current_request(tab_id, snapshot.request_id) =>
                     {
                         ctrl.apply_snapshot(tab_id, snapshot);
+                        let mut edit_path = None;
+                        if reveal.as_ref().is_some_and(|(tab, _, _)| *tab == tab_id) {
+                            if let Some((tab, path, edit)) = reveal.take() {
+                                if tab == ctrl.active_tab_id() {
+                                    if let Some(index) = ctrl
+                                        .snapshot()
+                                        .and_then(|s| s.entries.iter().position(|e| e.path == path))
+                                    {
+                                        if let Some(selection) = ctrl.selection_mut() {
+                                            selection.select_single(index);
+                                        }
+                                        if edit {
+                                            edit_path = Some(path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         queue_icon_requests(&store_ref, &icon_req_ref, &mut ctrl);
                         update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
+                        if let Some(path) = edit_path {
+                            begin_inline_rename(&ui, &ctrl, path, &pending_for_pump);
+                        }
                     }
                     KovaEvent::DirectoryError {
                         tab_id,
@@ -361,7 +390,39 @@ async fn main() {
                         ctrl.apply_error(tab_id, request_id, error_message);
                         update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
                     }
-                    KovaEvent::FolderCreated { .. } | KovaEvent::ItemRenamed { .. } => {
+                    KovaEvent::FolderCreated { parent, name } => {
+                        ui.global::<AppState>().set_creating_folder(false);
+                        let creating = {
+                            let mut pending = pending_for_pump.lock().unwrap();
+                            if matches!(*pending, Some(PendingDialog::Creating { .. })) {
+                                pending.take()
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some(PendingDialog::Creating {
+                            tab,
+                            parent: expected,
+                        }) = creating
+                        {
+                            if parent == expected
+                                && tab == ctrl.active_tab_id()
+                                && ctrl.current_directory() == Some(&parent)
+                            {
+                                reveal = Some((tab, parent.path.join(name), true));
+                            }
+                        }
+                        drop(ctrl);
+                        reload_ref.refresh_tabs();
+                        return;
+                    }
+                    KovaEvent::ItemRenamed { new_path, .. } => {
+                        if ctrl
+                            .current_directory()
+                            .is_some_and(|loc| Some(loc.path.as_path()) == new_path.parent())
+                        {
+                            reveal = Some((ctrl.active_tab_id(), new_path, false));
+                        }
                         drop(ctrl);
                         reload_ref.refresh_tabs();
                         return;
@@ -370,6 +431,7 @@ async fn main() {
                         context,
                         error_message,
                     } => {
+                        ui.global::<AppState>().set_creating_folder(false);
                         tracing::error!("{}: {}", context, error_message);
                         ctrl.set_status(format!("{}: {}", context, error_message));
                         update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
@@ -678,29 +740,51 @@ fn refresh_drive_info(ui: &MainWindow) {
     }
 }
 
-fn show_dialog(
+fn begin_inline_rename(
     ui: &MainWindow,
-    title: &str,
-    value: &str,
-    mode: PendingDialog,
+    ctrl: &AppController,
+    path: std::path::PathBuf,
     pending: &Arc<Mutex<Option<PendingDialog>>>,
 ) {
+    let Some((index, entry)) = ctrl
+        .snapshot()
+        .and_then(|s| s.entries.iter().enumerate().find(|(_, e)| e.path == path))
+    else {
+        return;
+    };
     let state = ui.global::<AppState>();
-    state.set_dialog_title(title.into());
-    state.set_dialog_value(value.into());
-    state.set_dialog_visible(true);
-    *pending.lock().unwrap() = Some(mode);
+    let stem = if entry.is_directory() {
+        entry.name.as_str()
+    } else {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&entry.name)
+    };
+    let hide_extension = !entry.is_directory() && !state.get_show_extensions();
+    let suffix = if hide_extension {
+        entry.name[stem.len()..].to_owned()
+    } else {
+        String::new()
+    };
+    state.set_dialog_value(if hide_extension { stem } else { &entry.name }.into());
+    state.set_inline_selection_end(stem.len() as i32);
+    state.set_inline_path(path.to_string_lossy().as_ref().into());
+    state.set_inline_row(index as i32);
+    state.set_inline_visible(true);
+    *pending.lock().unwrap() = Some(PendingDialog::Rename { path, suffix });
 }
 
 fn close_dialog(ui: &MainWindow, pending: &Arc<Mutex<Option<PendingDialog>>>) {
     let state = ui.global::<AppState>();
     state.set_dialog_visible(false);
+    state.set_inline_visible(false);
     state.set_dialog_value("".into());
     *pending.lock().unwrap() = None;
 }
 
 fn show_error_dialog(ui: &MainWindow, message: &str) {
     let state = ui.global::<AppState>();
+    state.set_inline_visible(false);
     state.set_dialog_title("Error".into());
     state.set_dialog_value(
         message
@@ -743,6 +827,45 @@ fn sync_selection(ui: &MainWindow, dispatcher: &CommandDispatcher, models: &UiMo
 
 fn sync_preview_path(ui: &MainWindow, ctrl: &AppController) {
     let state = ui.global::<AppState>();
+    state.set_primary_row(ctrl.primary_selection().map(|i| i as i32).unwrap_or(-1));
+    if state.get_inline_visible() {
+        let edit_path = state.get_inline_path();
+        if ctrl.is_loading()
+            || !ctrl
+                .selected_paths()
+                .iter()
+                .any(|p| p.to_string_lossy() == edit_path.as_str())
+        {
+            state.set_inline_visible(false);
+        } else if let Some(index) = ctrl.snapshot().and_then(|s| {
+            s.entries
+                .iter()
+                .position(|e| e.path.to_string_lossy() == edit_path.as_str())
+        }) {
+            state.set_inline_row(index as i32);
+        }
+    }
+    let info = if ctrl.selected_count() == 1 {
+        ctrl.primary_selection()
+            .and_then(|i| ctrl.snapshot()?.entries.get(i))
+            .filter(|e| !e.is_directory())
+            .map(|entry| {
+                let extension = entry.extension_lower();
+                let kind = if extension.is_empty() {
+                    "File".into()
+                } else {
+                    extension.to_uppercase()
+                };
+                match entry.metadata.size {
+                    Some(bytes) => format!("{kind} · {}", format_bytes(bytes)),
+                    None => kind,
+                }
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    state.set_preview_info(info.into());
     let path = if !ctrl.is_loading() && ctrl.selected_count() == 1 {
         ctrl.primary_selection()
             .and_then(|i| ctrl.snapshot()?.entries.get(i))
@@ -1129,20 +1252,35 @@ fn wire_callbacks(
             }
         });
 
+    let d = dispatcher.clone();
     let pending = Arc::clone(&pending_dialog);
     let dialog_ui = ui.clone();
     ui.unwrap()
         .global::<AppState>()
         .on_request_new_folder(move || {
-            if let Some(ui) = dialog_ui.upgrade() {
-                show_dialog(
-                    &ui,
-                    "New Folder",
-                    "New folder",
-                    PendingDialog::NewFolder,
-                    &pending,
-                );
+            let Some(ui) = dialog_ui.upgrade() else {
+                return;
+            };
+            let state = ui.global::<AppState>();
+            if state.get_creating_folder() {
+                return;
             }
+            let controller = d.controller();
+            let ctrl = controller.lock().unwrap();
+            let Some(parent) = ctrl.current_directory().cloned() else {
+                return;
+            };
+            if ctrl.is_loading() {
+                return;
+            }
+            *pending.lock().unwrap() = Some(PendingDialog::Creating {
+                tab: ctrl.active_tab_id(),
+                parent,
+            });
+            drop(ctrl);
+            state.set_inline_visible(false);
+            state.set_creating_folder(true);
+            d.dispatch_new_folder_named("New folder");
         });
 
     let d = dispatcher.clone();
@@ -1159,13 +1297,9 @@ fn wire_callbacks(
                 return;
             };
             if let Some(ui) = dialog_ui.upgrade() {
-                show_dialog(
-                    &ui,
-                    "Rename",
-                    &name,
-                    PendingDialog::Rename { path },
-                    &pending,
-                );
+                let controller = d.controller();
+                let ctrl = controller.lock().unwrap();
+                begin_inline_rename(&ui, &ctrl, path, &pending);
             }
         });
 
@@ -1180,14 +1314,16 @@ fn wire_callbacks(
         .global::<AppState>()
         .on_request_dialog_confirm(move |value: SharedString| {
             if let Some(ui) = dialog_ui.upgrade() {
-                if ui.global::<AppState>().get_dialog_title() == "Error" {
+                if ui.global::<AppState>().get_dialog_visible()
+                    && ui.global::<AppState>().get_dialog_title() == "Error"
+                {
                     close_dialog(&ui, &pending);
                     return;
                 }
             }
             let name = value.to_string();
-            if name.is_empty() {
-                status_dispatcher.set_status_message("Name must not be empty".into());
+            if let Err(error) = kova_ops::file_ops::validate_name(&name) {
+                status_dispatcher.set_status_message(error.to_string());
                 if let Some(u) = ui_status.upgrade() {
                     sync_ui(&u, &status_dispatcher, &last_status, &models_status);
                 }
@@ -1196,11 +1332,15 @@ fn wire_callbacks(
             let mode = pending.lock().unwrap().take();
             if let Some(mode) = mode {
                 match mode {
-                    PendingDialog::NewFolder => {
-                        d.dispatch_new_folder_named(&name);
-                    }
-                    PendingDialog::Rename { path } => {
-                        d.dispatch_rename_path(path, &name);
+                    PendingDialog::Creating { .. } => {}
+                    PendingDialog::Rename { path, suffix } => {
+                        let name = format!("{name}{suffix}");
+                        if path
+                            .file_name()
+                            .is_none_or(|old| old != std::ffi::OsStr::new(&name))
+                        {
+                            d.dispatch_rename_path(path, &name);
+                        }
                     }
                 }
             }
@@ -1225,6 +1365,7 @@ fn wire_callbacks(
 fn breadcrumb_items(address: &str) -> Vec<Breadcrumb> {
     let mut items: Vec<_> = std::path::Path::new(address)
         .ancestors()
+        .filter(|path| !path.as_os_str().is_empty())
         .take(3)
         .map(|path| Breadcrumb {
             label: path
@@ -1330,6 +1471,14 @@ fn update_ui(
 #[cfg(test)]
 mod breadcrumb_tests {
     use super::breadcrumb_items;
+
+    #[test]
+    fn home_has_no_empty_parent_breadcrumb() {
+        let items = breadcrumb_items("Home");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, "Home");
+        assert_eq!(items[0].path, "Home");
+    }
 
     #[test]
     fn breadcrumbs_keep_full_navigation_targets_when_deep_paths_are_shortened() {
