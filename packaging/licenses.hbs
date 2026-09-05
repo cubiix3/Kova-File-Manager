@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Kova — Third-party licenses</title>
+<style>body{font:16px system-ui;max-width:960px;margin:40px auto;padding:0 24px}pre{white-space:pre-wrap}section{margin:40px 0;border-top:1px solid #bbb}</style>
+<h1>Kova — Third-party licenses</h1>
+<p>License texts and package attributions for the Windows dependency graph.</p>
+{{#each licenses}}
+<section><h2>{{name}}</h2><ul>{{#each used_by}}<li>{{crate.name}} {{crate.version}}</li>{{/each}}</ul>
+<pre>{{text}}</pre></section>
+{{/each}}
+</html>
