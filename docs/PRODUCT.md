@@ -1,41 +1,38 @@
-# Kova Product Document — M0
+# Product scope
 
-## Vision
+Kova is a native-first, open-source Windows file manager built around responsive
+browsing, familiar interactions and visible file-operation outcomes.
 
-Kova is a fast, native-first, open-source file manager for Windows.
+## Current preview
 
-## Current Status
+- Home with drive capacity, free space, file system and usage bars.
+- Tabbed browsing, breadcrumbs, history, known folders and direct folder launches.
+- Native Windows Shell menus, associated application launch and file clipboard.
+- Copy, move and Recycle Bin deletion through Windows `IFileOperation`.
+- Inline New Folder and Rename, including filename validation.
+- Sorting, resizable columns, Ctrl/Shift selection and mouse selection rectangle.
+- Asynchronous Shell icons and thumbnails with fallback type icons.
+- Image, text and PDF previews; GIF, WebP and APNG animation playback.
+- View preferences and optional bounded background folder-size calculations.
+- Reversible, per-user folder-opening integration.
+- Windows setup and portable ZIP packaging.
 
-M0 foundation. A usable desktop shell with navigation, tabs, sorting,
-selection, and safe file operations in a sandbox.
+The primary interface labels are currently German. GitHub documentation is English.
+The [README](../README.md) introduces the current product; the
+[view guide](VIEW_AND_PREVIEW.md) records preview limits and runtime evidence.
 
-## What Works
+## Planned work
 
-- Directory enumeration off the UI thread.
-- Back / Forward / Parent / Refresh / direct path navigation.
-- Tabs with independent history.
-- Sorting by Name, Type, Size, Modified in both directions with header indicators.
-- Selection: single, Ctrl multi-select, Shift range-select, select all, clear.
-- New Folder and Rename through an in-app dialog (empty names rejected).
-- Windows known folder resolution for the initial location and sidebar.
-- Dynamic local drive enumeration in the sidebar.
-- File open via `ShellExecuteExW`.
-- Stale async result protection via per-tab generation IDs.
+Global search, drag & drop, split panes, application-level undo, batch rename,
+full session restoration and dedicated cloud/network handling remain future work.
+These are directions, not promised release dates.
 
-## Known Limitations
+## Boundaries
 
-- Generic placeholder icons instead of real shell icons.
-- No Copy / Move / Delete UI (only sandbox-tested core operations).
-- No global search.
-- No preview pane.
-- No custom context menu.
-- Keyboard shortcuts require focus in the file-list scope.
-- No session persistence.
+Kova uses Rust, Slint and native Windows APIs. It does not use Electron, a WebView,
+React or Tauri. Filesystem and preview work run outside the UI thread. File
+identity, selection consistency and data integrity take precedence over visual
+effects. See [data safety](SECURITY_AND_DATA_SAFETY.md).
 
-## Roadmap (post-M0)
-
-1. Real Windows shell icons and thumbnails.
-2. Recycle-bin-safe delete, copy, move with progress.
-3. Global search via USN / MFT in a dedicated milestone.
-4. Preview pane and split view.
-5. Session persistence.
+Historical milestone reports describe their original build, not the current
+feature set. See the [documentation index](README.md).

@@ -1,139 +1,101 @@
-# KOVA M2 REPORT — NATIVE SHELL + FILE OPERATIONS + UI POLISH
+# M2 report — Native Shell, file operations and UI
 
-Datum: 2026-09-02
-Branch: `main`
-Basis: M1-Final (`b12485c`)
+Date: September 2, 2026 · Branch: `main` · Baseline: M1 (`b12485c`)
 
----
+> Historical report. Results and limitations below apply to the M2 build.
+> See [current documentation](README.md) for subsequent changes.
 
-## A. Git
+## Native Windows context menus
 
-```text
-cec0b7d  feat(platform): native shell context menu, IFileOperation ops thread, Explorer file clipboard, drive capacity
-377b553  feat(desktop): wire native shell menus and clipboard ops, product-quality UI polish
-<this commit>  docs: add m2 report
-```
+`kova-platform-windows::shell_menu` uses `IContextMenu`, resolving all selected
+PIDLs through the Desktop Shell folder and `GetUIObjectOf`. `IContextMenu2/3`
+messages (`WM_INITMENUPOPUP`, `WM_DRAWITEM`, `WM_MEASUREITEM`, `WM_MENUCHAR`)
+are forwarded through a dedicated hidden `KovaShellMenuHost` window. This avoids
+subclassing Slint's window, hooks and `unsafe impl Send`.
 
----
+Commands use `CMINVOKECOMMANDINFOEX`, MAKEINTRESOURCE offsets in
+`CMD_FIRST..=0x7FFF`, raw IDs outside that range, and `CMIC_MASK_PTINVOKE` with
+cursor coordinates. Right-click inside the selection targets the whole group;
+otherwise it targets the clicked row. Invoking a command triggers refresh.
 
-## B. Umsetzung
+Blank space retains Kova's New Folder/Paste/Refresh menu without an extra overlay.
+`ensure_com_sta` initializes the UI thread's COM apartment.
 
-### B.1 Natives Windows Shell-Kontextmenü (Dateien/Ordner)
+## Copy, cut, paste, move and delete
 
-* `kova-platform-windows::shell_menu`: echtes Explorer-Menü via `IContextMenu`
-  (Desktop-Shellfolder + `GetUIObjectOf` mit **allen** selektierten Pidls →
-  Mehrfachauswahl wie im Explorer).
-* `IContextMenu2`/`IContextMenu3` Message-Forwarding (`WM_INITMENUPOPUP`,
-  `WM_DRAWITEM`, `WM_MEASUREITEM`, `WM_MENUCHAR`) über ein eigenes verstecktes
-  Host-Fenster (`KovaShellMenuHost`) — **kein** Subclassing des Slint-Fensters,
-  keine Hooks, kein `unsafe impl Send`. Shell-Extension-Einträge (7-Zip, Git,
-  „Öffnen mit“, Eigenschaften) rendern und funktionieren dadurch korrekt.
-* Verb-Invocation über `CMINVOKECOMMANDINFOEX` mit MAKEINTRESOURCE-Offset
-  (`CMD_FIRST..=0x7FFF`), Out-of-Range-Ids werden als Raw-Id invoke-t,
-  `CMIC_MASK_PTINVOKE` + Cursor-Position für Extensions.
-* Rechtsklick-Verhalten wie Explorer: klickte Zeile in der Auswahl → Menü für
-  die ganze Auswahl, sonst nur für diese Zeile. Nach invoke → Refresh.
-* Leere Fläche: weiter Kova-Menü (New Folder, **Paste**, Refresh) via Slint
-  `ContextMenuArea` — nicht überlagert.
-* COM STA auf dem UI-Thread beim Start sichergestellt (`ensure_com_sta`).
+- Clipboard: unit-tested `CF_HDROP` encoder/parser plus Preferred DropEffect
+  (`COPY=1`, `MOVE=2`), interoperable with Explorer in both directions.
+- Operations: dedicated COM STA thread using `IFileOperation` CopyItems,
+  MoveItems and DeleteItems with `FOF_ALLOWUNDO`, native progress/conflict UI and
+  `catch_unwind` to report failures instead of terminating the worker.
+- Shortcuts: Ctrl+C/X/V and Delete, with Ctrl/Shift multi-selection.
+- Cancellation codes `0x800704C7`, `0x800703E3` and
+  `COPYENGINE_E_USER_CANCELLED` produce cancellation status; other failures
+  produce status and an error dialog. Views refresh after completion.
 
-### B.2 Copy / Cut / Paste / Move / Delete
+## UI changes and runtime fixes
 
-* **Clipboard** (`clipboard.rs`): `CF_HDROP` (eigener DROPFILES-Encoder/Parser,
-  unit-getestet) + „Preferred DropEffect“ (COPY=1 / MOVE=2) → Explorer-
-  kompatibel in beide Richtungen.
-* **IFileOperation** auf dediziertem Thread (`shell_ops.rs`, eigener COM-STA,
-  `catch_unwind` → Fehler werden als Outcome gemeldet statt den Thread zu
-  töten): CopyItems / MoveItems / DeleteItems mit `FOF_ALLOWUNDO` (Papierkorb)
-  + native Progress-/Konflikt-Dialoge. UI-Thread blockiert nie.
-* Tastatur: Ctrl+C / Ctrl+X / Ctrl+V / Entf, Multi-Selection via Strg/Shift.
-* User-Cancel (0x800704C7 / 0x800703E3 / COPYENGINE_E_USER_CANCELLED) wird als
-  „abgebrochen“-Status behandelt, echte Fehler als Status + Fehlerdialog.
-* Nach jedem Ops-Abschluss wird die Ansicht automatisch aktualisiert.
+Vector toolbar icons, separators and an accent address-field focus border replaced
+text glyphs. Tabs used an accent underline and showed Close on hover/active state.
+The denser sidebar grouped Quick Access and Drives; usage bars used
+`GetDiskFreeSpaceExW`, free/total labels and a danger color above 90% use.
 
-### B.3 Produkt-Qualität UI
+File rows were 26px high with aligned columns and quieter hover/selection colors.
+The status bar showed status and item/selection counts. Dialogs had rounded corners.
 
-* Toolbar mit echten Vektor-Icons (Path-Glyphen: Back/Forward/Up/Refresh/
-  New Folder), flache Toolbars, Trennlinien, fokussierte Addressbar mit
-  Accent-Border.
-* Tabs: Pill-Style, aktive Tabs mit Accent-Underline, Close-Button nur bei
-  Hover/Aktiv, dichteres Layout.
-* Sidebar: „Quick Access“ + „Drives“-Sektionen, dichtere Zeilen, **Laufwerke
-  mit Usage-Bar** (GetDiskFreeSpaceExW) + „X GB free of Y GB“-Detail, Danger-
-  Farbe >90 % Belegung.
-* Dateiliste: 26-px-Zeilen, sanftere Hover-/Selection-States, konsistente
-  Spaltenbreiten über `Metrics`, Header-Alignment stimmt mit Zeilen überein.
-* Statusbar reduziert auf Status + „N items · M selected“.
-* Dialog: abgerundet, Accent-OK.
+Fixed selection indices leaking across navigation by clearing selection on
+Navigate/Back/Forward. Ctrl+L now focused and selected the address field instead
+of navigating again. Submitting an address attempted to return focus to the list.
 
-### B.4 UX-Fixes (Runtime gefunden)
+## Quality gates
 
-* **Selection überstand Navigationen** (alte Indizes leuchteten in der neuen
-  Ansicht) → Selection wird bei Navigate/Back/Forward geleert (Explorer-
-  Verhalten).
-* **Ctrl+L** fokussiert jetzt die Adressleiste mit Select-All (Standard-
-  Shortcut, vorher sinnlos „re-navigieren“).
-* Nach Enter in der Adressleiste versucht Kova, den Fokus zurück auf die
-  Liste zu geben.
-
----
-
-## C. Quality Gates
-
-```text
-cargo fmt --all -- --check:            PASS
-cargo check --workspace --all-targets: PASS
-cargo test --workspace:                PASS (38 passed, 1 ignored: perf baseline)
-cargo clippy -D warnings:              PASS
-cargo build --release:                 PASS (~30 s)
-```
-
-Neue Tests: HDROP-Buffer-Roundtrip + ANSI/Short-Image-Ablehnung,
-Clipboard-Files-Roundtrip (echte Zwischenablage, gegen Race serialisiert —
-der parallele Zugriff zweier Clipboard-Tests hatte STATUS_HEAP_CORRUPTION
-erzeugt, jetzt via Mutex serialisiert), Selected-Paths-Reihenfolge,
-Drive-Capacity, Shell-Op-Labeling.
-
----
-
-## D. Runtime-Verifikation (real, Release-Binary, UIA + SendInput)
-
-Sandbox: `%TEMP%\kova-m2-run` (alpha.txt, beta.log, SubFolder) + Staging-
-Ordner für Paste-Quelle. Navigation log-verifiziert, Dateisystem als Ground
-Truth.
-
-| Test | Ergebnis |
+| Gate | Result |
 | --- | --- |
-| Navigation in Sandbox (Ctrl+L, Adressbar) | PASS (log) |
-| Ctrl+C → CF_HDROP alpha.txt | PASS (PowerShell liest `GetFileDropList`) |
-| Multi-Selection (Ctrl+Click) | PASS (Status „3 items · 2 selected“ via UIA) |
-| Ctrl+X → DropEffect=MOVE(2) | PASS |
-| Ctrl+V (cut) → beta.log nach SubFolder **verschoben** | PASS (Disk + Log `entries=2`) |
-| Explorer-CF_HDROP → Ctrl+V **kopiert** paste_me.txt | PASS (Disk + Log `entries=3`) |
-| Entf → paste_me.txt **Papierkorb** | PASS (Disk + Log `entries=2`) |
-| Rechtsklick → **natives Shell-Menü** (#32768-Popup) | PASS |
-| Screenshots | lokale PrintWindow-Aufnahmen (echter dunkler Inhalt verifiziert; nicht committed) |
+| Formatting | PASS |
+| Workspace/all-target check | PASS |
+| Workspace tests | PASS: 38 passed, 1 ignored performance baseline |
+| Clippy with `-D warnings` | PASS |
+| Release build | PASS: approximately 30 seconds |
 
-Hinweise:
+New tests covered HDROP roundtrips and malformed/ANSI buffer rejection, live
+clipboard file roundtrips, selected-path ordering, drive capacity and operation
+labels. Clipboard tests were serialized after parallel access caused
+`STATUS_HEAP_CORRUPTION`.
 
-* 7-Zip und Git sind auf dieser Maschine installiert; das Menü wird aus dem
-  echten `IContextMenu` aufgebaut, damit erscheinen deren Einträge nativ.
-  Eine item-level UIA-Verifikation des Popup-Menüs war nicht möglich (Win32-
-  Menüs exponieren keine MenuItem-Elemente über den Popup-HWND) — bitte
-  visuell bestätigen (Screenshot liegt vor).
-* Regressionen M1 (Icons, Tabs, Back/Forward, Sidebar, Addressbar, New Folder,
-  Rename, Auswahl/Multi-Selection, Doppelklick, Resize) unverändert in der
-  Pipeline; Row-Kontextmenü-Einträge „Open/Rename/Copy Path“ wanderten
-  bewusst ins native Shell-Menü bzw. Keyboard (F2, Entf, Ctrl+C/X/V/T).
+## Runtime verification
 
----
+Release build, UIA and SendInput in `%TEMP%\kova-m2-run` with `alpha.txt`,
+`beta.log`, `SubFolder` and a separate paste-source folder. Filesystem state and
+application logs were used as evidence.
 
-## E. Bekannte Grenzen / Deferred
+| Test | Result |
+| --- | --- |
+| Ctrl+L navigation into sandbox | PASS: log |
+| Ctrl+C produces CF_HDROP for alpha.txt | PASS: PowerShell `GetFileDropList` |
+| Ctrl+click multi-selection | PASS: UIA status `3 items · 2 selected` |
+| Ctrl+X sets MOVE(2) | PASS |
+| Ctrl+V moves beta.log into SubFolder | PASS: disk and `entries=2` |
+| Paste Explorer CF_HDROP source as paste_me.txt | PASS: disk and `entries=3` |
+| Delete paste_me.txt to Recycle Bin | PASS: disk and `entries=2` |
+| Native Shell right-click menu | PASS: `#32768` popup |
+| Screenshots | Local PrintWindow captures verified dark content; not committed |
 
-* „This PC“-Übersicht als eigene Ansicht: geprüft, bewusst vertagt (Sidebar-
-  Laufwerke mit Usage-Bars decken den Anwendungsfall ab); M3-Kandidat.
-* Drag & Drop, Undo, Multi-Select-Rename: M3+.
-* Zwischenablage-Konflikt-Dialoge kommen nativ von IFileOperation (kein
-  eigenes UI nötig).
-* Die Tests mutieren die Zwischenablage nur, wenn keine Dateien dort lagen
-  (guarded), sonst nur Lese-Verifikation.
+7-Zip and Git were installed. Menus came from the real Shell context object, but
+item-level UIA inspection was unavailable through the popup HWND. Individual
+extension entries therefore still needed visual confirmation.
+
+M1 navigation, icons, tabs, New Folder, Rename and selection retained their
+existing pipelines. Open/Rename/Copy Path moved into the Shell menu or existing
+keyboard commands; this was an intentional interaction change.
+
+## Deferred at M2
+
+The dedicated This PC overview was evaluated and deferred; sidebar usage bars
+covered drive access at that stage. Drag & drop, undo and batch rename remained
+future work. Conflict dialogs were provided by Windows. Clipboard-mutating tests
+were guarded when existing clipboard files were present.
+
+## Commits
+
+- `cec0b7d`: native Shell menu, operation thread, Explorer clipboard and capacity.
+- `377b553`: desktop wiring and visual polish.

@@ -40,6 +40,13 @@ if($Mode -eq 'Enable') {
     }
     # Install first; never leave a registry command pointing into a build folder.
     if([IO.Path]::GetFullPath($Executable) -ne [IO.Path]::GetFullPath($installedExe)){
+        # Portable packages must retain their app-local runtime and notices
+        # when opting into the stable folder-opening integration.
+        $sourceDir = Split-Path -Parent ([IO.Path]::GetFullPath($Executable))
+        foreach($name in @('msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll','msvcp140_atomic_wait.dll','msvcp140_codecvt_ids.dll','vcruntime140.dll','vcruntime140_1.dll','concrt140.dll','LICENSE-MIT','LICENSE-APACHE','FILES-ICONS-LICENSE.txt','THIRD-PARTY-LICENSES.html','SLINT-LICENSE.md','SKIA-LICENSE.txt')){
+            $source = Join-Path $sourceDir $name
+            if(Test-Path -LiteralPath $source){Copy-Item -LiteralPath $source -Destination (Join-Path $stateDir $name) -Force}
+        }
         Copy-Item -LiteralPath $Executable -Destination $installedExe -Force
     }
     if(-not (Test-Path -LiteralPath $backupPath)){

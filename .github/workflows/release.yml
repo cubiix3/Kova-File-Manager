@@ -1,0 +1,73 @@
+name: Windows packages
+
+on:
+  push:
+    branches: [release/windows-installer]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-workspace-crates: true
+          cache-on-failure: true
+      - name: Verify
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --workspace
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Install license inventory tool
+        shell: pwsh
+        run: |
+          $name = 'cargo-about-0.9.2-x86_64-pc-windows-msvc'
+          $base = 'https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.2'
+          Invoke-WebRequest "$base/$name.tar.gz" -OutFile "$env:RUNNER_TEMP/about.tar.gz"
+          $expected = (Invoke-RestMethod "$base/$name.tar.gz.sha256").Trim().Split(' ')[0]
+          if ((Get-FileHash "$env:RUNNER_TEMP/about.tar.gz").Hash -ne $expected) { throw 'Checksum mismatch' }
+          tar -xf "$env:RUNNER_TEMP/about.tar.gz" -C $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/$name" | Out-File $env:GITHUB_PATH -Append
+      - name: Build setup and portable ZIP
+        shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - name: Test installation, launch and removal
+        shell: pwsh
+        run: ./scripts/test-installer.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kova-windows-x64
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: kova-windows-x64
+          path: dist
+      - name: Publish preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --prerelease --title "Kova $RELEASE_TAG — Windows preview" --notes-file packaging/release-notes.md
