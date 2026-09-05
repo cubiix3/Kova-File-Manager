@@ -498,13 +498,13 @@ fn generic_icon_id(entry: &FileEntry) -> i32 {
 
 fn kind_text(entry: &FileEntry) -> String {
     if entry.is_directory() {
-        "Ordner".into()
+        "Folder".into()
     } else {
         let ext = entry.extension_lower();
         if ext.is_empty() {
-            "Datei".into()
+            "File".into()
         } else {
-            format!("{}-Datei", ext.to_uppercase())
+            format!("{} file", ext.to_uppercase())
         }
     }
 }
@@ -521,7 +521,7 @@ fn modified_text(entry: &FileEntry) -> String {
     entry
         .metadata
         .modified
-        .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default()
 }
 

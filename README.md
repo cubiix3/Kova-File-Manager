@@ -12,14 +12,20 @@
   <a href="https://github.com/cubiix3/Kova-File-Manager/issues">Report an issue</a>
 </p>
 
-![Kova's graphite interface with tabs, a compact command bar and a readable file list](docs/images/details-view.png)
+[![Watch Kova: drive overview, tabs, image and animated GIF previews, and native Windows menus](docs/media/kova-demo.gif)](docs/media/kova-demo.mp4?raw=true)
+
+**Kova in 28 seconds** · [Download the MP4](docs/media/kova-demo.mp4?raw=true) · [Static screenshot](docs/images/details-view.png)
+
+Recorded from the English development build on Windows 11. Native Shell menus
+follow the Windows language. [Recording details](docs/DEMO.md).
 
 Kova combines tabbed browsing, native Windows context menus and file previews in
 a compact desktop interface. Built with **Rust, Slint and Win32/Shell APIs** for
 Windows 10/11 x64. No Electron or WebView.
 
-> **Early preview:** Kova is under active development. The current interface uses
-> German navigation labels; this documentation is in English. See the
+> **Early preview:** Kova is under active development. The current source uses
+> English interface labels; the v0.1.0 download still contains the earlier mixed-language UI.
+> See the
 > [verification notes](docs/APPROVED_DESIGN.md) for tested behavior and limits.
 
 ## Download & install
