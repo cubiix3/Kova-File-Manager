@@ -40,6 +40,21 @@ list. The pane supports common raster images, plain text/source files, and PDF
 pages with previous/next controls. Unsupported, unreadable and binary files show
 a message. It is read-only; scripts and document content are not executed.
 
+GIF, animated WebP and APNG (`.png` or `.apng`) play automatically in a loop in
+the inspector. **Pause / Play** preserves the current frame. Switching files,
+navigating, refreshing, showing Home or closing the pane cancels the old stream.
+Single-frame files have no playback button. List thumbnails stay still.
+
+Animation uses the bundled image decoders on the preview worker. Frames are
+composited by the decoder and scaled to at most 640 pixels, with two output frames
+queued rather than the entire clip cached. GIF/APNG decoder allocations are
+limited to 64 MiB; all animation canvases are limited to 4 million pixels before
+frame allocation. Oversized or failed animation decoding falls back to a still
+preview where possible and explains the limitation. Authored frame delays are
+retained with a 20 ms minimum, scheduled on a 16 ms UI timer; slow decoding can
+reduce playback speed. The inspector loops independently of the file's repeat
+count. Video/audio playback is not included.
+
 One worker performs filesystem reads and Windows Runtime decoding. Its pending
 queue is bounded to one request; obsolete results are rejected by generation,
 selected path and page. Images are rendered at up to 1024 pixels on the long edge,
@@ -99,6 +114,13 @@ Real release mouse/keyboard verification on Windows 11:
   replaced its thumbnail; returning between folders retained the correct images.
 - Two-page PDF rendered; clicking Next changed the displayed page and page count.
 - Binary text fixture produced the expected message.
+- GIF, animated WebP and APNG fixtures each showed three different frames in
+  captured release-app playback. GIF Pause held the same preview pixels across
+  eight captures; Play resumed the three-frame sequence. Switching from a paused
+  animation to text displayed the text correctly; a broken GIF showed an error,
+  and a still PNG showed its image without playback controls. Closing/reopening
+  the pane, Home/Back, F5 and 780 × 600 resize were exercised with the animation.
+  [Release playback recording](images/animated-preview.gif).
 - Actual Hidden/System attribute fixtures appeared when their View switches were
   enabled (5 to 6 to 7 visible items); hiding extensions changed labels only.
 - Preview remained usable at 1140 × 780 and 780 × 600 without overlapping controls.
@@ -129,7 +151,9 @@ when hiding extensions, text encodings and binary detection, alongside the
 existing navigation/selection/operations suite.
 The WebP regression test encodes a transparent image and checks its thumbnail's
 dimensions, pixel-buffer length and preserved RGBA values without a Windows codec.
-The five local quality gates passed with 54 tests passing and 3 intentionally ignored.
+Animation tests cover frame timing, looping, pause timing, cancellation with a
+full output queue, zero-delay throttling and oversized canvas rejection.
+The five local quality gates passed with 58 tests passing and 3 intentionally ignored.
 
 NOT VERIFIED: Windows 10 runtime, reachable UNC shares, password-protected PDFs,
 huge/malformed image and PDF fixtures, EXIF-rotated photos, optional installed

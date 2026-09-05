@@ -19,6 +19,8 @@ return to the overview.*
 
 Select a file and press **Space**, or enable **View > Preview pane**, to inspect
 images, text and PDF pages beside the file list. Preview work runs off the UI thread.
+GIF, animated WebP and APNG play directly in the pane, with a **Pause / Play**
+control. Playback stops when you change the selection or close the pane.
 Small thumbnails also appear beside file names: common image formats and PDF
 first pages are decoded directly, while other types use available Windows
 thumbnail providers. Files without a thumbnail keep their associated type icon.
@@ -26,6 +28,13 @@ thumbnail providers. Files without a thumbnail keep their associated type icon.
 ![Kova details view with a PDF page rendered in the preview pane](docs/images/pdf-preview.png)
 
 *Screenshots show the real Windows release application. The PDF is a test fixture.*
+
+<details>
+<summary>Animated preview in action (release app recording)</summary>
+
+![GIF playback inside Kova's preview pane](docs/images/animated-preview.gif)
+
+</details>
 
 ## Features
 

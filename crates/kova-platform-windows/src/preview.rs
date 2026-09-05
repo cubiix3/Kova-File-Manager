@@ -40,7 +40,7 @@ pub fn is_image(path: &Path) -> bool {
             .to_string_lossy()
             .to_ascii_lowercase()
             .as_str(),
-        "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tif" | "tiff" | "ico" | "webp"
+        "png" | "apng" | "jpg" | "jpeg" | "bmp" | "gif" | "tif" | "tiff" | "ico" | "webp"
     )
 }
 
