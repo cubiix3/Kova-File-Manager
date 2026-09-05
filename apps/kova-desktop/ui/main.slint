@@ -96,6 +96,11 @@ export global AppState {
     in-out property <bool> transfers-visible: false;
     in-out property <[TransferItem]> transfers: [];
     in-out property <int> transfer-count: 0;
+    in-out property <int> context-pin: -1;
+    in-out property <string> context-group-key;
+    in-out property <string> context-group-name;
+    in-out property <bool> context-group-tag;
+    in-out property <string> context-drive;
     in-out property <string> transfer-summary: "";
     callback cancel-transfer(int);
     callback clear-transfers();
@@ -231,7 +236,9 @@ export global Metrics {
 // interactive region uses this component to keep global mouse navigation
 // working; a press that nothing grabs bubbles up to the region wrappers.
 component NavTouchArea inherits TouchArea {
+    callback secondary-clicked(length, length);
     pointer-event(event) => {
+        if event.kind == PointerEventKind.up && event.button == PointerEventButton.right { root.secondary-clicked(self.mouse-x, self.mouse-y); }
         if event.kind == PointerEventKind.down && !AppState.dialog_visible {
             if event.button == PointerEventButton.back {
                 AppState.request_back();
@@ -452,6 +459,7 @@ component SidebarButton inherits Rectangle {
     in property <bool> selected: false;
     in property <bool> home: false;
     in property <bool> collection: false;
+    callback context-requested(length, length);
     in property <int> count: -1;
     in property <color> base-background: transparent;
 
@@ -492,6 +500,7 @@ component SidebarButton inherits Rectangle {
     }
 
     side-ta := NavTouchArea {
+        secondary-clicked(x, y) => { root.context-requested(x, y); }
         clicked => { if root.target != "" { AppState.request_navigate(root.target); } }
     }
 }
@@ -949,20 +958,20 @@ export component MainWindow inherits Window {
                 for pin[index] in AppState.quick-access: ContextMenuArea {
                     height: Metrics.sidebar-item-height;
                     Menu {
-                        MenuItem { title: "Remove from Quick access"; activated => { AppState.library-action(1, "" + index, ""); } }
-                        MenuItem { title: "Move up"; enabled: index > 0; activated => { AppState.library-action(2, "" + index, ""); } }
-                        MenuItem { title: "Move down"; enabled: index + 1 < AppState.quick-access.length; activated => { AppState.library-action(3, "" + index, ""); } }
+                        MenuItem { title: "Remove from Quick access"; activated => { AppState.library-action(1, "" + AppState.context-pin, ""); } }
+                        MenuItem { title: "Move up"; enabled: AppState.context-pin > 0; activated => { AppState.library-action(2, "" + AppState.context-pin, ""); } }
+                        MenuItem { title: "Move down"; enabled: AppState.context-pin + 1 < AppState.quick-access.length; activated => { AppState.library-action(3, "" + AppState.context-pin, ""); } }
                     }
-                    SidebarButton { text: pin.name; icon: AppState.home_icon; target: pin.key; selected: AppState.current-path == pin.key; }
+                    SidebarButton { text: pin.name; icon: AppState.home_icon; target: pin.key; selected: AppState.current-path == pin.key; context-requested(x, y) => { AppState.context-pin = index; parent.show({x: x, y: y}); } }
                 }
                 if AppState.library-groups.length > 0: SectionLabel { text: "Collections & tags"; }
                 for group in AppState.library-groups: ContextMenuArea {
                     height: Metrics.sidebar-item-height;
                     Menu {
-                        MenuItem { title: "Add selection"; enabled: AppState.selected_count > 0; activated => { AppState.library-action(group.tag ? 5 : 4, "", group.name); } }
-                        MenuItem { title: "Remove group (keep files)"; activated => { AppState.library-action(7, group.key, ""); } }
+                        MenuItem { title: "Add selection"; enabled: AppState.selected_count > 0; activated => { AppState.library-action(AppState.context-group-tag ? 5 : 4, "", AppState.context-group-name); } }
+                        MenuItem { title: "Remove group (keep files)"; activated => { AppState.library-action(7, AppState.context-group-key, ""); } }
                     }
-                    SidebarButton { text: (group.tag ? "# " : "") + group.name; count: group.count; collection: true; target: group.key; selected: AppState.current-path == group.key; }
+                    SidebarButton { text: (group.tag ? "# " : "") + group.name; count: group.count; collection: true; target: group.key; selected: AppState.current-path == group.key; context-requested(x, y) => { AppState.context-group-key = group.key; AppState.context-group-name = group.name; AppState.context-group-tag = group.tag; parent.show({x: x, y: y}); } }
                 }
                 SectionLabel { text: "Drives  ⌄"; }
                 for drive in AppState.drives: DriveRow { drive: drive; }
@@ -1366,6 +1375,8 @@ export component MainWindow inherits Window {
                         } else if event.text == Key.F2 {
                             AppState.request_rename(-1);
                             accept
+                        } else if event.text == Key.Return && event.modifiers.control {
+                            AppState.request_context_open_in_new_tab(-1); accept
                         } else if event.text == Key.Return {
                             AppState.request_activate(-1);
                             accept
@@ -1382,8 +1393,10 @@ export component MainWindow inherits Window {
                             AppState.request_paste();
                             accept
                         } else if event.text == "t" && event.modifiers.control {
-                            AppState.request_context_open_in_new_tab(-1);
+                            AppState.request_new_tab();
                             accept
+                        } else if event.text == "w" && event.modifiers.control {
+                            AppState.request_close_tab(AppState.active_tab); accept
                         } else if event.text == Key.Escape {
                             if marquee.armed { marquee.finish(true); } else { AppState.request_clear_selection(); }
                             accept
@@ -1769,10 +1782,10 @@ export component MainWindow inherits Window {
                         }
                         ContextMenuArea {
                             Menu {
-                                MenuItem { title: "Open"; activated => { AppState.request_navigate(drive.path); } }
-                                MenuItem { title: "Analyze storage"; activated => { AppState.request-analyze(drive.path); } }
+                                MenuItem { title: "Open"; activated => { AppState.request_navigate(AppState.context-drive); } }
+                                MenuItem { title: "Analyze storage"; activated => { AppState.request-analyze(AppState.context-drive); } }
                             }
-                        overview-drive-touch := NavTouchArea { clicked => { home-focus.selected-drive = drive-index; home-focus.focus(); } double-clicked => { AppState.request_navigate(drive.path); } }
+                        overview-drive-touch := NavTouchArea { secondary-clicked(x, y) => { AppState.context-drive = drive.path; parent.show({x: x, y: y}); } clicked => { home-focus.selected-drive = drive-index; home-focus.focus(); } double-clicked => { AppState.request_navigate(drive.path); } }
                         }
                     }
                 }
