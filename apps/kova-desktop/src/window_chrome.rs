@@ -1,6 +1,7 @@
 //! Custom caption controls backed by the existing winit window. Slint's
 //! frameless resize border handles edge/corner resizing; no Win32 hooks.
 use crate::MainWindow;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
 use slint::winit_030::{EventResult, WinitWindowAccessor};
 
@@ -27,9 +28,20 @@ pub fn connect(app: &MainWindow) {
         });
     });
     let weak = app.as_weak();
+    let styled = std::cell::Cell::new(false);
     app.window().on_winit_window_event(move |window, _event| {
         if let Some(app) = weak.upgrade() {
-            window.with_winit_window(|native| app.set_window_maximized(native.is_maximized()));
+            window.with_winit_window(|native| {
+                app.set_window_maximized(native.is_maximized());
+                if !styled.get() {
+                    if let Ok(handle) = native.window_handle() {
+                        if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                            kova_platform_windows::window_theme::style_window(handle.hwnd.get());
+                            styled.set(true);
+                        }
+                    }
+                }
+            });
         }
         EventResult::Propagate
     });

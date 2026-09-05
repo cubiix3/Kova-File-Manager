@@ -8,3 +8,4 @@ pub mod shell_icons;
 pub mod shell_menu;
 pub mod shell_ops;
 pub mod volumes;
+pub mod window_theme;

@@ -213,6 +213,7 @@ async fn main() {
         ops_tx,
     );
 
+    let _menu_theme = kova_platform_windows::window_theme::initialize_dark_menus();
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .select()

@@ -12,5 +12,6 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 windows = { workspace = true }
+windows-version = { workspace = true }
 
 [dev-dependencies]
