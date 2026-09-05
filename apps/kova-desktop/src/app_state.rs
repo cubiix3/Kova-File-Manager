@@ -23,6 +23,7 @@ pub struct FileListItem {
 /// domain. All mutation happens on the main thread; filesystem I/O is
 /// delegated to the worker.
 pub struct AppController {
+    pub library: kova_core::domain::Library,
     tabs: TabCollection,
     snapshots: HashMap<TabId, DirectorySnapshot>,
     excluded: HashMap<TabId, Vec<FileEntry>>,
@@ -41,6 +42,7 @@ pub struct AppController {
 impl AppController {
     pub fn new(initial: Location) -> Self {
         Self {
+            library: kova_core::domain::Library::default(),
             tabs: TabCollection::new(initial),
             snapshots: HashMap::new(),
             excluded: HashMap::new(),
@@ -76,7 +78,7 @@ impl AppController {
 
     pub fn current_directory(&self) -> Option<&Location> {
         self.current_location()
-            .filter(|location| !location.is_home())
+            .filter(|location| !location.is_virtual())
     }
 
     pub fn tab_locations(&self) -> Vec<(TabId, Location)> {
@@ -159,6 +161,13 @@ impl AppController {
                     .map(|l| {
                         if l.is_home() {
                             return "Home".into();
+                        }
+                        if let Some(key) = l.virtual_key() {
+                            return key
+                                .split_once(':')
+                                .map(|(_, name)| name)
+                                .unwrap_or(key)
+                                .into();
                         }
                         l.path
                             .file_name()
@@ -533,6 +542,9 @@ fn generic_icon_id(entry: &FileEntry) -> i32 {
 }
 
 fn kind_text(entry: &FileEntry) -> String {
+    if entry.kind == kova_core::domain::FileKind::Unknown {
+        return "Unavailable".into();
+    }
     if entry.is_directory() {
         "Folder".into()
     } else {

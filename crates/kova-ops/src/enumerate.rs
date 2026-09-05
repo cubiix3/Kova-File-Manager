@@ -99,10 +99,69 @@ fn classify_kind(metadata: &std::fs::Metadata, _path: &std::path::Path) -> FileK
     }
 }
 
+/// A virtual collection retains unavailable references so that users can
+/// remove or repair them. It never silently changes a reference's target.
+pub async fn enumerate_references(
+    location: Location,
+    request_id: u64,
+    paths: Vec<std::path::PathBuf>,
+) -> DirectorySnapshot {
+    let mut entries = Vec::with_capacity(paths.len());
+    for path in paths {
+        let metadata = fs::symlink_metadata(&path).await;
+        let (kind, metadata) = match metadata {
+            Ok(metadata) => (
+                classify_kind(&metadata, &path),
+                FileMetadata {
+                    size: metadata.is_file().then_some(metadata.len()),
+                    modified: metadata
+                        .modified()
+                        .ok()
+                        .map(chrono::DateTime::<chrono::Local>::from),
+                    is_hidden: metadata.file_attributes() & 2 != 0,
+                    is_system: metadata.file_attributes() & 4 != 0,
+                    raw_attributes: metadata.file_attributes(),
+                },
+            ),
+            Err(_) => (FileKind::Unknown, FileMetadata::empty()),
+        };
+        entries.push(FileEntry {
+            name: path
+                .file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned(),
+            path,
+            kind,
+            metadata,
+            icon_handle: None,
+        });
+    }
+    DirectorySnapshot {
+        location,
+        request_id,
+        entries,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn unavailable_collection_references_are_retained_without_following_links() {
+        let path = std::env::temp_dir()
+            .join(format!("kova-missing-reference-{}", std::process::id()))
+            .join("unavailable.png");
+        let location = Location::virtual_folder("collection:Assets".into());
+        let snapshot = enumerate_references(location.clone(), 17, vec![path.clone()]).await;
+        assert_eq!(snapshot.location, location);
+        assert_eq!(snapshot.request_id, 17);
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].path, path);
+        assert_eq!(snapshot.entries[0].kind, FileKind::Unknown);
+    }
 
     #[tokio::test]
     async fn enumerate_project_root_contains_cargo_toml() {

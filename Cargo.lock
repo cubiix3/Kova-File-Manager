@@ -2500,6 +2500,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.13.1",
  "chrono",
+ "serde",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -2513,6 +2514,7 @@ dependencies = [
  "kova-ops",
  "kova-platform-windows",
  "raw-window-handle",
+ "serde_json",
  "slint",
  "slint-build",
  "tokio",

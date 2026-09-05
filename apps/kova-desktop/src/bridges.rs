@@ -77,6 +77,17 @@ impl CommandDispatcher {
                 return;
             }
             ctrl.set_status(format!("Loading {}...", location.display()));
+            if let Some(key) = location.virtual_key() {
+                let paths = ctrl.library.entries(key).unwrap_or_default().to_vec();
+                drop(ctrl);
+                self.send(WorkerCommand::EnumerateReferences {
+                    tab_id,
+                    location,
+                    request_id,
+                    paths,
+                });
+                return;
+            }
         }
         self.send(WorkerCommand::Enumerate {
             tab_id,
@@ -102,6 +113,8 @@ impl CommandDispatcher {
 
         let location = if input.raw.trim().eq_ignore_ascii_case("home") {
             Location::home()
+        } else if input.raw.starts_with("collection:") || input.raw.starts_with("tag:") {
+            Location::virtual_folder(input.raw.clone())
         } else {
             resolve_input(&input, &base).map_err(|e| e.to_string())?
         };
@@ -479,6 +492,29 @@ fn resolve_index(ctrl: &AppController, index: usize) -> Option<&kova_core::domai
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn collection_navigation_uses_references_and_cannot_be_a_paste_destination() {
+        let controller = Arc::new(Mutex::new(AppController::new(Location::home())));
+        let file = std::env::temp_dir().join("reference.png");
+        controller
+            .lock()
+            .unwrap()
+            .library
+            .add(false, "Assets", [file.clone()])
+            .unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (ops_tx, _ops_rx) = std::sync::mpsc::channel();
+        let dispatcher = CommandDispatcher::new(controller.clone(), tx, Default::default(), ops_tx);
+        dispatcher
+            .dispatch_navigate(LocationInput::new("collection:Assets"))
+            .unwrap();
+        assert!(controller.lock().unwrap().current_directory().is_none());
+        assert!(
+            matches!(rx.try_recv().unwrap(), WorkerCommand::EnumerateReferences { paths, .. } if paths == vec![file])
+        );
+        dispatcher.dispatch_new_folder_named("must-not-be-created");
+        assert!(rx.try_recv().is_err());
+    }
     #[test]
     fn home_does_not_enqueue_filesystem_reads_or_folder_creation() {
         let controller = Arc::new(Mutex::new(AppController::new(Location::home())));

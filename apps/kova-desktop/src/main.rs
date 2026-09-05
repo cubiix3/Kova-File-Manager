@@ -4,6 +4,7 @@ mod app_state;
 mod bridges;
 mod default_manager;
 mod folder_sizes;
+mod library;
 mod preferences;
 mod preview;
 mod storage;
@@ -249,6 +250,7 @@ async fn main() {
     default_manager::connect(&app, dispatcher.clone());
     let _preview_timer = preview::connect(&app);
     let _storage_timer = storage::connect(&app, dispatcher.clone());
+    let _library_timer = library::connect(&app, dispatcher.clone());
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -418,10 +420,14 @@ async fn main() {
                         reload_ref.refresh_tabs();
                         return;
                     }
-                    KovaEvent::ItemRenamed { new_path, .. } => {
+                    KovaEvent::ItemRenamed { old_path, new_path } => {
+                        ctrl.library.relocate(&old_path, &new_path);
                         if ctrl
                             .current_directory()
                             .is_some_and(|loc| Some(loc.path.as_path()) == new_path.parent())
+                            || ctrl.snapshot().is_some_and(|snapshot| {
+                                snapshot.entries.iter().any(|entry| entry.path == old_path)
+                            })
                         {
                             reveal = Some((ctrl.active_tab_id(), new_path, false));
                         }
@@ -1452,7 +1458,7 @@ fn update_ui(
     for crumb in &mut crumbs {
         crumb.label = location_label(ui, crumb.path.as_str(), crumb.label.as_str()).into();
     }
-    if crumbs.len() == 1 && address != "Home" {
+    if crumbs.len() == 1 && controller.current_directory().is_some() {
         crumbs.insert(
             0,
             Breadcrumb {
@@ -1479,6 +1485,7 @@ fn update_ui(
     let state = ui.global::<AppState>();
     state.set_search_text(controller.search_text().into());
     state.set_current_path(controller.address_path().into());
+    state.set_filesystem_location(controller.current_directory().is_some());
     state.set_drive_overview(
         controller
             .current_location()
