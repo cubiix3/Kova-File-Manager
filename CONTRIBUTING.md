@@ -6,7 +6,7 @@ Thanks for your interest in improving Kova!
 
 - Windows 10/11 x64 with the MSVC toolchain (Kova uses real Win32/Shell/COM
   APIs and does not build on other platforms yet).
-- Rust stable (pinned via `rust-toolchain.toml`) and Visual Studio 2022
+- Rust stable (selected via `rust-toolchain.toml`) and Visual Studio
   Build Tools with the C++ workload.
 - Use `scripts/cargo-msvc.ps1` to run cargo with the Visual Studio
   environment, e.g.:

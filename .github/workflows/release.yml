@@ -56,6 +56,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: kova-windows-x64
@@ -65,4 +66,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --prerelease --title "Kova $RELEASE_TAG — Windows preview" --generate-notes
+        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --prerelease --title "Kova $RELEASE_TAG — Windows preview" --notes-file packaging/release-notes.md

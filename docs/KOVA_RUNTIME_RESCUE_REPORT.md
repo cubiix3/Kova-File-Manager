@@ -1,191 +1,168 @@
-# KOVA RUNTIME RESCUE FINAL REPORT
+# Runtime rescue report
 
-Datum: 2026-09-01 · Branch: `main` · Lead: Runtime Rescue Gate
+Date: September 1, 2026 · Branch: `main` · Baseline: `91ad5b4`
 
-## A. Starting State
+> Historical report. This records the original rescue investigation and its
+> verification limits. See [current documentation](README.md) for later fixes.
 
-| Item | Value |
-|------|-------|
-| Branch | `main` |
-| Start SHA | `91ad5b4` ("docs: finalize verified m0 baseline") |
-| Working Tree | Dirty: 4 modified files (main.rs, main.slint, worker.rs, cargo-msvc.ps1) + 3 untracked (`.cargo/config.toml` mit hartcodiertem Linker, `docs/research/`, `scripts/build-debug.ps1`) |
-| Build State | **BROKEN** — `cargo check` schlug fehl: das Slint-UI kompilierte nicht (erfundene `event.key == Key.A` API, `cell_width: 45%` Prozent-Konvertierung, 3× `duplicated element id 'ta'`) |
-| Runtime | App startete, zeigte aber laut User: leere Dateiliste, kein aktiver Tab, keine funktionierenden Buttons |
+## Starting state
 
-Die Claims des vorherigen Agents („M0 abgeschlossen", „PASS") waren falsch: der Working Tree kompilierte nicht einmal.
+The working tree contained four modified files (`main.rs`, `main.slint`,
+`worker.rs`, `cargo-msvc.ps1`) and untracked local linker configuration,
+reference material and a debug-build helper. `cargo check` failed: unsupported
+`event.key == Key.A`, invalid percentage conversion and three duplicate `ta` IDs.
+The user reported a blank file list, no active tab and unresponsive buttons.
+Earlier completion claims were not supported by this build state.
 
-## B. Root Cause — Dead UI
+## Root causes and fixes
 
-**B1. UI-Zugriff vom Worker-Thread (P0)**
-- Datei: `apps/kova-desktop/src/main.rs` (vorher)
-- Komponente: Tokio-Event-Consumer rief `update_ui`/`Weak::upgrade()` direkt im Tokio-Task auf
-- Mechanismus: Slint-Properties dürfen nur vom UI-Thread gesetzt werden. Zugriffe aus dem Tokio-Task panicken/versanden lautlos → Tabs/Status/Dateiliste blieben leer.
-- Fix: Event-Pump — Worker-Events gehen in einen `std::sync::mpsc`-Kanal, ein `slint::Timer` (50 ms) leert ihn auf dem UI-Thread.
+### UI access from the worker thread
 
-**B2. Slint-Layout rechnet mit Fensterkoordinaten statt Layout-Container (P0)**
-- Datei: `apps/kova-desktop/ui/main.slint`
-- Mechanismus 1: `height: 100%` auf Layout-Kindern löst gegen das **Fenster** auf, nicht gegen die Layout-Row. GridLayout-Zeilen summierten sich auf 578 px in einem 480-px-Fenster → Statusbar und Drive-Bereich rutschten unter die Fensterkante.
-- Mechanismus 2: `width: 100%` auf `SidebarButton` gab der Sidebar eine Preferred-Breite von ~892 px (Fensterbreite + Padding) → die komplette File-Liste wurde hinter die rechte Fensterkante gelegt (Rows bei X=3300, Fensterkante 3292). **Das ist die Ursache der „leeren Dateiliste" trotz korrekter Enumeration (97 Entries im Model, Rows unsichtbar außerhalb).**
-- Mechanismus 3: `Text`-Header ohne feste Höhe absorbierten 104–194 px Extra-Höhe und schoben die Drives unter die Fensterkante → Drive-Klicks toten.
+The Tokio event consumer called `update_ui`/`Weak::upgrade()` directly from a
+worker task. Slint properties must be updated on the UI thread. The replacement
+forwards events through `std::sync::mpsc`; a 50ms `slint::Timer` drains them on the
+UI thread. This removed the cross-thread UI access.
 
-**B3. Model-Recreation zerstört Double-Click**
-- Datei: `apps/kova-desktop/src/main.rs` (`update_ui`)
-- Mechanismus: Jeder Selection-Klick baute ein neues `VecModel` → Slint rekreierte alle Row-Delegates → der zweite Klick des Doppelklicks landete auf einem neuen `TouchArea` → `double-clicked` feuerte nie → Ordner ließen sich nicht öffnen.
-- Fix: Eine `VecModel`-Instanz pro Liste für die App-Laufzeit; Updates per `set_row_data` (Row-Identität bleibt erhalten).
+### Layout outside the visible window
 
-**B4. Keyboard-Focus nach Mausklicks**
-- Datei: `apps/kova-desktop/ui/main.slint`
-- Mechanismus: Row-`TouchArea`s nehmen keinen Fokus; der `FocusScope` hatte nie Keyboard-Focus → F2/F5/Enter/Ctrl+A tot. Zusätzlich hatte der vorherige Agent `event.key == Key.A` erfunden (API existiert in Slint 1.13.1 nicht) → kompilierte gar nicht.
-- Fix: `forward-focus: list-scope` am Window + `list-scope.focus()` im Row-Pointer-Handler. Key-Events gegen die **verifizierte** Slint-1.13.1-API (`event.text == "a"` mit `modifiers.control`, `Key.F5`, `Key.Return`, `Key.LeftArrow`; winit entfernt Ctrl vor `logical_key`, daher `text == "a"`, nicht `"\u{1}"`).
+Percentage geometry resolved against the window instead of the intended layout
+row. Grid rows totaled 578px in a 480px window, placing status/drives below it.
+`SidebarButton` requested approximately 892px, moving file rows to X=3300 beyond
+the window edge at X=3292. Enumeration had correctly returned 97 entries; their
+delegates were rendered outside the visible area. Unconstrained text headers
+absorbed another 104–194px and displaced drive controls.
 
-## C. Root Cause — Blank File List
+Explicit geometry and bounded header/sidebar dimensions corrected the layout.
 
-Pipeline (verifiziert per tracing):
-```
-start_location=<user profile> (Known Folder API)
-worker: enumerate tab=TabId(1) request=1        → OK
-worker: loaded entries=97                       → OK
-controller: snapshot accepted files=97 tabs=1   → OK
-update_ui → Slint Model                         → OK
-```
-Die Pipeline funktionierte datenseitig **bereits korrekt**; die Rows wurden nur außerhalb des sichtbaren Bereichs gerendert (B2). Fix = Layout-Neuaufbau (B2). Zusätzlich: initialer `update_ui`-Aufruf vor `app.run()`, damit Tab/Address/Status nie leer sind, und Stale-Snapshot-Guards (Tests vorhanden).
+### Recreated models broke double-click
 
-## D. Files Reference Findings
+Every selection click created a fresh `VecModel`, replacing row delegates.
+The second click hit a different `TouchArea`, so `double-clicked` did not fire.
+The fix retains one model per list and updates rows through `set_row_data`.
 
-`docs/research/FILES_REFERENCE.md` — konkrete Pfade/Methoden aus files-community/Files (MIT):
-- Pointer-States + non-pure Commands: `SidebarItem.cs` (ItemBorder_PointerPressed/Released), `BaseShellPage.cs`
-- Tab-Wechsel sofort sichtbar, nicht erst nach Async-Load: `BaseTabBar.cs`
-- Refresh-Zyklus + sichtbarer Status statt blanker Liste: `ShellViewModel.RefreshItems`
-- Navigation-Booleans an Toolbar: `NavigationToolbarViewModel` (`CanGoBack`…)
-- Error-Surfacing: `ShowLocationUnavailable` — kein stilles Verschlucken
+### Keyboard focus and API misuse
 
-Übernommen (konzeptionell): alle Side-Effect-Callbacks non-pure; Fehler in Statusbar; Navigation-Booleans bei jedem `update_ui`; sofortiges UI-Update bei Tab-Wechsel/Startup; List-Virtualisierung via `ListView`.
+Row touch areas did not acquire focus, leaving the file-list `FocusScope`
+inactive. The fix uses `forward-focus: list-scope` and focuses it on row input.
+Keyboard checks use verified Slint 1.13.1 APIs: `event.text`, modifiers and
+`Key.F5`/`Return`/`LeftArrow`. For Ctrl+A, winit's logical key is `a`, not a
+control character. An initial UI update before `app.run()` supplies tab, address
+and status values before asynchronous enumeration completes.
 
-## E. Runtime Architecture After Fix
+## Data flow and reference study
 
-```
-UI (Slint, UI-Thread)
-  → AppState callbacks (non-pure)
-  → CommandDispatcher (bridges.rs, GenerationCounter pro Tab)
-  → WorkerCommand via mpsc
-  → Worker (tokio, einziges I/O-Subsystem)
-  → KovaEvent via mpsc
-  → std::sync::mpsc forwarding
-  → slint::Timer Pump (UI-Thread)
-  → AppController (snapshots, stale check, sort, selection)
-  → update_ui (UiModels: files/tabs VecModel in-place row updates)
-  → Slint properties/models
+The enumeration pipeline was already producing valid data:
+
+```text
+start_location=<user profile>
+worker: enumerate tab=TabId(1) request=1
+worker: loaded entries=97
+controller: snapshot accepted files=97 tabs=1
+update_ui → Slint Model
 ```
 
-## F. Fixed Controls (automated GUI-Verifikation via UIA + echte Maus-/Tastatur-Events)
+The [Files reference study](research/FILES_REFERENCE.md) examined pointer states
+in `SidebarItem.cs`, commands in `BaseShellPage.cs`, immediate tab updates in
+`BaseTabBar.cs`, refresh behavior in `ShellViewModel.RefreshItems`, navigation
+availability in `NavigationToolbarViewModel`, and `ShowLocationUnavailable`.
+Kova adopted these concepts: non-pure action callbacks, visible errors, updated
+navigation flags, immediate tab/startup state and virtualized lists.
 
-| Control | Callback | Visible Effect | Result |
-|---|---|---|---|
-| New Tab (`+`) | request_new_tab | Neuer Tab aktiv, springt zu Home | PASS |
-| Close Tab (`×`) | request_close_tab | Tab verschwindet, Switch auf Nachbar | PASS |
-| Switch Tab | request_switch_tab | Address/Liste wechseln | PASS |
-| Home | request_navigate | `<user profile>` | PASS |
-| Desktop | request_navigate | `<user profile>\Desktop` | PASS |
-| Documents | request_navigate | `<user profile>\Documents` | PASS |
-| Downloads | request_navigate | `<user profile>\Downloads` | PASS |
-| Drive C:\ / G:\ / D:\ / I:\ | request_navigate | Drive-Root | PASS |
-| Back / Forward / Parent | dispatch_back/forward/parent | History korrekt | PASS |
-| Refresh | request_refresh | Re-Enumerate | PASS |
-| Address submit | request_navigate | Canonical Pfad, Invalid → Status-Error | PASS |
-| Sort (Header-Klick) | request_sort | ▲/▼ Indikator, Re-Sort | PASS (Callback/State; visuell bestätigt) |
-| Row select / Ctrl / Shift | request_select/toggle/range | Selection-Highlight | PASS (State) |
-| Folder double-click | request_activate | Navigation in Ordner | PASS |
-| File double-click | request_activate → Open | Notepad++ öffnete file-a.txt | PASS |
-| New Folder | request_new_folder + dialog | Ordner real erstellt, Liste refreshed, AlreadyExists zeigt Error | PASS |
-| Rename (F2) | request_rename → dialog | Real umbenannt auf Disk (TestFolder1→TestFolder2) | PASS |
-| Ctrl+A / Enter / Alt+←→↑ | FocusScope key-pressed | Dispatch bestätigt | PASS (FocusScope-Focus via forward-focus + list-scope.focus()) |
-
-Hinweis: Sort wurde als Controller/State-Änderung verifiziert (Callback feuert, Snapshot wird neu sortiert); die visuelle Bestätigung des Re-Orders im laufenden Fenster ist Teil der User-Verifikation.
-
-## G. Runtime Evidence
-
-```
-Kova starting at <user profile>                       (Known Folder API, kein Hardcode)
-worker: enumerate tab=TabId(1) loc=<user profile> request=1
-worker: loaded tab=TabId(1) request=1 entries=97
-controller: snapshot accepted tab=TabId(1) files=97 tabs=1
-```
-- Stale-Guard: Requests #1..#14 beobachtet; alte Results werden verworfen (Unit-Tests `stale_snapshot_is_rejected_after_newer_request`, `out_of_order_results_keep_latest_navigation_visible`).
-- Drives dynamisch: C:\, D:\, G:\, I:\ (GetLogicalDriveStringsW, fixed/removable/ramdisk).
-- Known Folders: Profile/Desktop/Documents/Downloads via SHGetKnownFolderPath.
-
-## H. Visual Changes
-
-- Tabs: echter Start-Tab mit Label + `×`-Close + `+`; aktiver Tab klar hervorgehoben (Doppelklick-Schließen entfernt).
-- Toolbar: `← → ↑ ↻` mit Disabled-States (Pointer + Optik), flexible Address Bar, New Folder rechts.
-- Sidebar: Favorites + Drives, 180 px, Hover/Pressed, feste Header-Höhen.
-- File list: ListView (virtualisiert), Header Name/Type/Size/Modified sortierbar, Row-Hover/Pressed/Selected.
-- Statusbar: voll breit, neutral dunkel (`2d2d30`), links Status („97 items", „Loading …", „Error: …"), kein Debug-Blau.
-- Theme-Tokens zentral (`Theme`-Global) statt verstreuter Hex-Codes; Layout-Metriken in `Metrics`.
-- Loading/Empty/Error unterscheidbar: Statuszeile „Loading <path>…", „N items", „Error reading …"; Error-Dialog für Operation-Fehler.
-
-## I. Tests / Gates (exakte Ergebnisse)
-
-| Gate | Ergebnis |
-|---|---|
-| `cargo fmt --all -- --check` | PASS (nach `cargo fmt`) |
-| `cargo check --workspace` | PASS |
-| `cargo test --workspace` | PASS — 23 Tests (14 core, 2 desktop controller, 4 ops + 1 ignored perf-baseline, 3 platform) |
-| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS |
-| `cargo build --workspace --release` | PASS |
-
-Neue automatisierte Tests (vorhanden + verifiziert): stale-snapshot rejection, out-of-order results, sandbox outside-path rejection, new_folder+rename in TEMP-Sandbox, known folders resolve, drive listing.
-
-## J. GUI Verification
-
-Verifiziert mit echter GUI-Automation (UIA-Baum + reale Mouse/SendKeys-Events, Sandbox `%%TEMP%\kova-runtime-test\<id>\`):
-- PASS: New Tab, Close Tab, Switch Tab, Home, Desktop, Documents, Downloads, Drives (C:/G:), Back, Forward, Parent, Refresh, Address submit, New Folder (Disk verifiziert), Rename F2 (Disk verifiziert), Folder-Aktivierung (Doppelklick, Log+Adresse), File-Aktivierung (Notepad++ öffnete file-a.txt), Sort (State).
-- NOT VERIFIED (automatisiert): Shift-Range-Selektion und Ctrl-A im Live-UI (nur Controller-Tests), Scroll-Verhalten bei 10k Entries im Live-UI, Visuelles Feinsampling der Spaltenbreiten bei Resize.
-- Render-Hinweis: In dieser Agenten-Umgebung erzeugt der femtovg-GPU-Renderer eine transparente Client-Area (GL-Kontext schlägt still fehl). Mit `SLINT_BACKEND=winit-software` rendert das UI korrekt (pixel-verifiziert: Tab-Selection `#094771`, Sidebar `#252526`, File-List `#1e1e1e`). Im interaktiven User-Session-Screenshot (vor der Rescue) war das GPU-Rendering funktionsfähig; die reale Nutzer-Verifikation bleibt offen für: endgültige Optik, Sort-Visuell, Resize-Verhalten.
-
-Screenshot: local PrintWindow capture during the verification session (software renderer; not committed to the repository).
-
-## K. Remaining Issues
-
-- **P0**: none known.
-- **P1**: femtovg/GPU-Renderer kann in GPU-losen Sessions transparent bleiben — Software-Fallback dokumentiert; langfristig automatischer Fallback prüfen.
-- **P1**: Spalten sind fix (320/120/90/140 px) — kein Resize-Adaption der Spaltenbreiten.
-- **P2**: Address-Bar-Edit kann bei Background-Refresh während der Eingabe normalisiert werden (last_address-Guard reduziert, eliminiert nicht).
-- **P2**: Rename via Kontextmenü fehlt (F2 existiert).
-- **P3**: Icons sind Platzhalter (IconHandle 0/1), Drive-Labels fehlen, Statusbar-Text englisch.
-
-## L. Commits
-
-| SHA | Message |
-|---|---|
-| `3a4bbf1` | fix: route all UI updates through a UI-thread event pump |
-| `f637f7e` | fix: rebuild desktop window skeleton with explicit geometry |
-| `ebebe2f` | chore: make msvc helper resilient and exclude local cargo overrides |
-| `6f6e9e8` | docs: add files-community research reference |
-| `e35e8e3` | docs: record verified runtime rescue root causes in files reference |
-| *(dieser Commit)* | docs: kova runtime rescue final report |
-
-## M. Final Git State
-
-```
-git status --short   → (siehe unten; erwartet clean außer diesem Report)
-git log --oneline -8
-e35e8e3 docs: record verified runtime rescue root causes in files reference
-6f6e9e8 docs: add files-community research reference
-ebebe2f chore: make msvc helper resilient and exclude local cargo overrides
-f637f7e fix: rebuild desktop window skeleton with explicit geometry
-3a4bbf1 fix: route all UI updates through a UI-thread event pump
-91ad5b4 (origin/main) docs: finalize verified m0 baseline
-31ae4f3 chore: add msvc cargo helper
-61c1e0a fix: complete kova m0 interaction wiring
+```text
+Slint UI → AppState callbacks → CommandDispatcher / per-tab GenerationCounter
+  → WorkerCommand → Tokio worker → KovaEvent
+  → mpsc forwarding → UI-thread Timer
+  → AppController (stale checks, sorting, selection)
+  → update_ui (persistent row models) → Slint
 ```
 
-Keine Secrets, kein `target/`, keine Research-Repos, keine Maschinenpfade committed (`.cargo/` via `.gitignore` ausgeschlossen, `build-debug.ps1` mit hartcodiertem Linker entfernt).
+## Runtime evidence
 
-## N. Verdict
+| Control | Callback | Result and evidence |
+| --- | --- | --- |
+| New tab | request_new_tab | PASS: new active Home tab |
+| Close tab | request_close_tab | PASS: removed tab, adjacent tab activated |
+| Switch tab | request_switch_tab | PASS: address and list changed |
+| Home, Desktop, Documents, Downloads | request_navigate | PASS: Known Folder paths |
+| Drives C:, G:, D:, I: | request_navigate | PASS: dynamic drive roots |
+| Back, Forward, Parent | dispatch_back/forward/parent | PASS: history |
+| Refresh | request_refresh | PASS: enumeration repeated |
+| Address submit | request_navigate | PASS: canonical path; invalid input surfaced an error |
+| Header sort | request_sort | PASS: callback and state; live reorder needed visual confirmation |
+| Select, Ctrl-toggle, Shift-range | request_select/toggle/range | PASS: controller state |
+| Folder double-click | request_activate | PASS: target address and enumeration |
+| File double-click | request_activate → Open | PASS: Notepad++ opened file-a.txt |
+| New Folder | request_new_folder + dialog | PASS: disk creation, refreshed list, AlreadyExists error |
+| F2 Rename | request_rename + dialog | PASS: TestFolder1 became TestFolder2 on disk |
+| Ctrl+A, Enter, Alt+arrows | FocusScope key-pressed | PASS: dispatch; full live-input suite remained incomplete |
 
-**RUNTIME BASELINE PARTIAL**
+Requests 1–14 were observed. Older results were rejected; tests included
+`stale_snapshot_is_rejected_after_newer_request` and
+`out_of_order_results_keep_latest_navigation_visible`. Drives came from
+`GetLogicalDriveStringsW`; known folders used `SHGetKnownFolderPath`.
 
-Begründung: Alle funktionalen Pass-Kriterien 1–18 sind automatisiert verifiziert (Kriterium 19 teilweise — Statusbar/Hierarchie korrekt, aber das endgültige visuelle Urteil und die Punkte Sort-visual/Resize/Keyboard-in-der-Full-Suite liegen in der User-Verifikation, da der GPU-Renderer in dieser Automationssession transparent rendert und nur Software-Rendering pixel-verifiziert werden konnte). Quality Gates (Kriterium 20) sind vollständig grün.
+GUI automation used UIA and mouse/keyboard input in a temporary runtime sandbox.
+Live Shift-range/Ctrl+A selection, scrolling with 10,000 entries and detailed
+column behavior during resize were not verified in that session.
 
-Der Benutzer startet Kova normal (interaktive Session, funktionierender GL-Kontext) und prüft Optik + Interaktion. Bei leerem/transparentem Fenster: `set SLINT_BACKEND=winit-software` vor dem Start.
+The femtovg renderer produced a transparent client area in the automation session.
+`SLINT_BACKEND=winit-software` rendered correctly, with pixel-verified tab
+selection `#094771`, sidebar `#252526` and list `#1e1e1e`. Earlier user captures
+showed GPU rendering working interactively. Final visual judgment, sort order
+and resize behavior therefore remained user-verification items. A local
+PrintWindow capture was retained during verification but not committed.
+
+## Visual changes
+
+The rescue added a visible initial tab, close/plus buttons and active-tab styling;
+disabled toolbar states; a flexible address bar; a 180px sidebar with fixed
+headers; virtualized sortable file rows; and a full-width neutral status bar.
+Shared `Theme` and `Metrics` globals replaced scattered values. Loading, empty
+and error states were differentiated, including operation-error dialogs.
+
+## Quality gates
+
+| Gate | Result |
+| --- | --- |
+| Formatting | PASS after formatting |
+| Workspace check | PASS |
+| Workspace tests | PASS: 23 tests; performance baseline ignored |
+| Clippy, all targets/features, `-D warnings` | PASS |
+| Workspace release build | PASS |
+
+The test distribution was 14 core, 2 desktop controller, 4 operations and
+3 platform tests, plus the ignored performance baseline. Coverage included
+stale/out-of-order results, sandbox path rejection, temporary New Folder/Rename,
+Known Folders and drive enumeration.
+
+## Remaining issues at that milestone
+
+- P0: none known after the fixes.
+- P1: transparent GPU rendering in sessions without a working graphics context;
+  documented software fallback, with automatic fallback left for future work.
+- P1: fixed 320/120/90/140px column widths without responsive adaptation.
+- P2: background refresh could normalize address text during editing;
+  `last_address` reduced but did not eliminate the issue.
+- P2: context-menu Rename was missing; F2 existed.
+- P3: placeholder icons, missing drive labels and English status text.
+
+## Commits
+
+| Commit | Change |
+| --- | --- |
+| `3a4bbf1` | Route UI updates through the UI-thread event pump |
+| `f637f7e` | Rebuild window skeleton with explicit geometry |
+| `ebebe2f` | Improve MSVC helper and exclude local Cargo overrides |
+| `6f6e9e8` | Add Files reference research |
+| `e35e8e3` | Record verified root causes in the reference study |
+
+No secrets, build output, reference repositories or machine-specific paths were
+committed. Local `.cargo/` overrides were ignored and the hardcoded debug helper
+was removed. The report followed these commits on `main`.
+
+## Outcome
+
+**Runtime baseline partial.** Static gates passed and the functional evidence
+above was collected, but the full visual/input suite was not complete. The
+original closeout requested interactive verification of appearance, sorting and
+resize, with the software backend as a fallback for a blank window.

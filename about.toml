@@ -5,4 +5,3 @@ accepted = [
 ]
 targets = ["x86_64-pc-windows-msvc"]
 ignore-dev-dependencies = true
-

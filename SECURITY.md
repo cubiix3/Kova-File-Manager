@@ -3,7 +3,8 @@
 ## Supported versions
 
 Kova is pre-1.0 and under active development. Only the current `main`
-branch receives security fixes; there are no versioned releases yet.
+branch and latest preview receive security fixes. Older preview builds are not
+maintained separately; use the latest available release.
 
 ## Reporting a vulnerability
 

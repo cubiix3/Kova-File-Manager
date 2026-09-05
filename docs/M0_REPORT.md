@@ -1,5 +1,8 @@
 # KOVA M0.2 FINAL CLOSEOUT REPORT
 
+> Historical report. The claims and limitations describe this milestone only.
+> See [current documentation](README.md) for subsequent changes.
+
 ## A. Git
 
 * Branch: `main`
@@ -79,13 +82,13 @@ Run command used:
 | # | Check                              | Result        |
 |---|------------------------------------|---------------|
 | 1 | Startup                            | PASS          |
-| 2 | Startdirectory sichtbar            | PASS (logs show home dir) |
+| 2 | Visible start directory            | PASS (logs show home dir) |
 | 3 | Home                               | PASS (known folder) |
 | 4 | Desktop                            | PASS (known folder) |
 | 5 | Documents                        | PASS (known folder) |
 | 6 | Downloads                        | PASS (known folder) |
-| 7 | Laufwerk öffnen                    | PASS (dynamic drives) |
-| 8 | Ordner öffnen                      | NOT VERIFIED (no automated GUI) |
+| 7 | Open drive                    | PASS (dynamic drives) |
+| 8 | Open folder                      | NOT VERIFIED (no automated GUI) |
 | 9 | Back                               | NOT VERIFIED (no automated GUI) |
 | 10| Forward                            | NOT VERIFIED (no automated GUI) |
 | 11| Parent                             | NOT VERIFIED (no automated GUI) |
@@ -101,11 +104,11 @@ Run command used:
 | 21| New Tab                            | NOT VERIFIED (no automated GUI) |
 | 22| switch tab                         | NOT VERIFIED (no automated GUI) |
 | 23| close tab                          | NOT VERIFIED (no automated GUI) |
-| 24| unabhängige Tab-History            | PASS (unit tests) |
-| 25| New Folder im Temp-Testordner      | PASS (unit/integration tests) |
-| 26| Rename im Temp-Testordner          | PASS (unit/integration tests) |
-| 27| Datei mit Default-App öffnen       | NOT VERIFIED (no automated GUI) |
-| 28| schnelles A -> B Navigation        | PASS (out-of-order test) |
+| 24| Independent tab history            | PASS (unit tests) |
+| 25| New Folder in temporary test folder      | PASS (unit/integration tests) |
+| 26| Rename in temporary test folder          | PASS (unit/integration tests) |
+| 27| Open file with default application       | NOT VERIFIED (no automated GUI) |
+| 28| Rapid A -> B navigation        | PASS (out-of-order test) |
 | 29| Resize                             | NOT VERIFIED (no automated GUI) |
 | 30| Maximize / minimize                | NOT VERIFIED (no automated GUI) |
 
