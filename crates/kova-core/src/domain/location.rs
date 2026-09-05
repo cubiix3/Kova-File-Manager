@@ -12,11 +12,16 @@ pub struct Location {
     /// enough to identify a directory uniquely within Kova.
     pub path: PathBuf,
     home: bool,
+    virtual_key: Option<String>,
 }
 
 impl Location {
     pub fn new(path: PathBuf) -> Self {
-        Self { path, home: false }
+        Self {
+            path,
+            home: false,
+            virtual_key: None,
+        }
     }
 
     /// Virtual storage start page. Never pass its empty path to filesystem I/O.
@@ -24,11 +29,28 @@ impl Location {
         Self {
             path: PathBuf::new(),
             home: true,
+            virtual_key: None,
         }
     }
 
     pub fn is_home(&self) -> bool {
         self.home
+    }
+
+    pub fn virtual_folder(key: String) -> Self {
+        Self {
+            path: PathBuf::new(),
+            home: false,
+            virtual_key: Some(key),
+        }
+    }
+
+    pub fn virtual_key(&self) -> Option<&str> {
+        self.virtual_key.as_deref()
+    }
+
+    pub fn is_virtual(&self) -> bool {
+        self.home || self.virtual_key.is_some()
     }
 
     /// Returns the display text for an address bar. The platform layer may
@@ -37,12 +59,15 @@ impl Location {
         if self.home {
             return "Home".into();
         }
+        if let Some(key) = &self.virtual_key {
+            return key.clone();
+        }
         self.path.to_string_lossy().into_owned()
     }
 
     /// Returns the parent location, or `None` if this is already a root.
     pub fn parent(&self) -> Option<Location> {
-        if self.home {
+        if self.is_virtual() {
             return None;
         }
         self.path.parent().and_then(|p| {

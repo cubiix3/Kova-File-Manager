@@ -44,6 +44,12 @@ impl GenerationCounter {
 /// Worker command type used internally by the ops runtime.
 #[derive(Debug)]
 pub enum WorkerCommand {
+    EnumerateReferences {
+        tab_id: TabId,
+        location: Location,
+        request_id: u64,
+        paths: Vec<PathBuf>,
+    },
     Enumerate {
         tab_id: TabId,
         location: Location,
@@ -73,6 +79,28 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
             enumerations.retain(|_, task| !task.is_finished());
             use WorkerCommand::*;
             match cmd {
+                EnumerateReferences {
+                    tab_id,
+                    location,
+                    request_id,
+                    paths,
+                } => {
+                    if let Some(previous) = enumerations.remove(&tab_id) {
+                        previous.abort();
+                    }
+                    let tx = tx.clone();
+                    enumerations.insert(
+                        tab_id,
+                        tokio::spawn(async move {
+                            let snapshot =
+                                crate::enumerate::enumerate_references(location, request_id, paths)
+                                    .await;
+                            let _ = tx
+                                .send(KovaEvent::DirectoryLoaded { tab_id, snapshot })
+                                .await;
+                        }),
+                    );
+                }
                 Enumerate {
                     tab_id,
                     location,

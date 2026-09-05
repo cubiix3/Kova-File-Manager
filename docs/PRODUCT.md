@@ -16,8 +16,14 @@ browsing, familiar interactions and visible file-operation outcomes.
 - View preferences and optional bounded background folder-size calculations.
 - Reversible, per-user folder-opening integration.
 - Windows setup and portable ZIP packaging.
+- Virtualized Details/Gallery views with small, medium and large thumbnails.
+- Snapshot search by name, extension, type, size and date.
+- Inspector metadata, transfer center, explicit file conflicts and storage analysis.
+- Persistent local tags, collections and reorderable pinned folders.
 
-The primary interface labels are currently German. GitHub documentation is English.
+See [the next-generation feature guide](NEXTGEN.md) for exact behavior.
+
+The primary interface labels and GitHub documentation are English. Native Shell menus follow the Windows language.
 The [README](../README.md) introduces the current product; the
 [view guide](VIEW_AND_PREVIEW.md) records preview limits and runtime evidence.
 

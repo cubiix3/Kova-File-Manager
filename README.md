@@ -14,12 +14,13 @@
 
 [![Watch the Kova product teaser](docs/images/product-teaser.png)](docs/media/Kova-Product-Teaser.mp4?raw=true)
 
-Kova combines tabbed browsing, native Windows context menus and file previews in
-a compact desktop interface. Built with **Rust, Slint and Win32/Shell APIs** for
+Kova combines tabbed browsing, a thumbnail gallery, native Windows context menus
+and an inspector in a compact desktop interface. Built with **Rust, Slint and Win32/Shell APIs** for
 Windows 10/11 x64. No Electron or WebView.
 
 > **Early preview:** Kova is under active development. The current source uses
-> English interface labels; the v0.1.0 download still contains the earlier mixed-language UI.
+> English interface labels and the next-generation features below. The v0.1.0
+> download predates this update; build the current source to try these features.
 > See the
 > [verification notes](docs/APPROVED_DESIGN.md) for tested behavior and limits.
 
@@ -48,10 +49,11 @@ replace Win+E, Windows file pickers or every explicit Explorer invocation.
 | Feature | Included |
 | --- | --- |
 | **Browse** | Tabs with independent history, breadcrumbs, familiar shortcuts and mouse Back/Forward |
-| **Manage files** | Copy, cut, paste and Recycle Bin deletion through native Windows operations; inline New Folder and Rename |
-| **See more** | Image, text and PDF previews; animated GIF, WebP and APNG playback; file thumbnails |
-| **Stay organized** | Sortable, resizable columns; Ctrl/Shift selection and mouse selection rectangle |
-| **Check storage** | Home with drive capacity, free space and usage bars; optional background folder-size calculation |
+| **Manage files** | Native copy, move and Recycle Bin deletion; transfer history, progress and cancellation; explicit Replace / Skip / Keep Both conflicts |
+| **See more** | Details and three gallery sizes; image, text and PDF inspector; animated GIF, WebP and APNG; media metadata and Shell thumbnails |
+| **Stay organized** | Local tags and collections, pinned folders with reordering; sortable columns and rectangular multi-selection |
+| **Find files** | Instant current-folder filtering by name, extension, type, size and modification date |
+| **Check storage** | Drive type, file system and capacity; cancellable background analysis with largest folders/files and proportional bars |
 | **Adjust the view** | Hidden/system files, file extensions, row density, alternating rows and a resizable preview pane |
 | **Use Windows tools** | Native Shell menus with installed extensions, associated applications and Explorer-compatible clipboard |
 
@@ -63,6 +65,13 @@ Home opens at startup. Compare capacity and free space, then double-click a driv
 to browse it. Explicit folder launches open the requested folder directly.
 
 ![Kova Home showing drives, free space and usage bars](docs/images/home-overview.png)
+
+### Browse visually
+
+Switch between Details and Gallery without changing the folder or selection.
+Choose small, medium or large tiles, then inspect a file alongside the gallery.
+
+![Kova Gallery with the file inspector](docs/images/nextgen-gallery.png)
 
 ### Preview without leaving the folder
 
@@ -81,8 +90,15 @@ changes or the pane closes.
 
 </details>
 
-These are real application captures using demonstration files, recorded on
-Windows 11 on September 5, 2026.
+The screenshots are real application captures using demonstration files.
+See [the current feature guide](docs/NEXTGEN.md) for controls and limitations.
+
+### Stay in control of transfers
+
+Review source and destination, progress and completed work in Transfers. File
+collisions wait for your choice; folder merges retain native Windows handling.
+
+![Kova file conflict comparison](docs/images/nextgen-conflict.png)
 
 ## Familiar shortcuts
 
@@ -95,6 +111,7 @@ Windows 11 on September 5, 2026.
 | Copy / cut / paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` |
 | Select all / delete | `Ctrl+A` / `Delete` |
 | Toggle preview | `Space` |
+| Filter the current folder | `Ctrl+F` |
 
 ## Build from source
 
@@ -114,6 +131,7 @@ See [Contributing](CONTRIBUTING.md) for quality checks and
 
 ## Project documentation
 
+- [Gallery, search, transfers and local organization](docs/NEXTGEN.md)
 - [User guide: views, previews and storage](docs/VIEW_AND_PREVIEW.md)
 - [Windows integration and restoration](docs/INTERACTION_INTEGRATION.md)
 - [Current design and runtime verification](docs/APPROVED_DESIGN.md)

@@ -4,8 +4,11 @@ mod app_state;
 mod bridges;
 mod default_manager;
 mod folder_sizes;
+mod library;
+mod operations;
 mod preferences;
 mod preview;
+mod storage;
 mod thumbnails;
 mod window_chrome;
 
@@ -16,7 +19,7 @@ use kova_ops::worker::{WorkerCommand, spawn_worker};
 use kova_platform_windows::known_folders::{KnownFolder, resolve_known_folder};
 use kova_platform_windows::shell_icons::{IconBitmap, IconCache, IconKey, icon_key_for};
 use kova_platform_windows::shell_menu;
-use kova_platform_windows::shell_ops::{ShellOpCommand, ShellOpOutcome, spawn_shell_ops_thread};
+use kova_platform_windows::shell_ops::{ShellOpOutcome, spawn_shell_ops_thread};
 use slint::{
     ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel, Weak,
 };
@@ -225,7 +228,8 @@ async fn main() {
 
     // Dedicated shell operations thread (IFileOperation): copy/move/delete
     // run off the UI thread with native progress and conflict dialogs.
-    let (ops_tx, ops_rx) = std::sync::mpsc::channel::<ShellOpCommand>();
+    let (ops_tx, ops_rx) =
+        std::sync::mpsc::channel::<kova_platform_windows::transfers::ShellRequest>();
     let (ops_out_tx, ops_out_rx) = std::sync::mpsc::channel::<ShellOpOutcome>();
     let _ops_thread = spawn_shell_ops_thread(ops_rx, ops_out_tx);
 
@@ -244,9 +248,12 @@ async fn main() {
         .expect("initialize desktop window backend");
     let app = MainWindow::new().unwrap();
     preferences::restore(&app, &mut app_controller.lock().unwrap());
-    window_chrome::connect(&app);
+    window_chrome::connect(&app, dispatcher.transfers.clone());
     default_manager::connect(&app, dispatcher.clone());
     let _preview_timer = preview::connect(&app);
+    let _storage_timer = storage::connect(&app, dispatcher.clone());
+    let _library_timer = library::connect(&app, dispatcher.clone());
+    let _operations_timer = operations::connect(&app, dispatcher.clone());
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -416,10 +423,14 @@ async fn main() {
                         reload_ref.refresh_tabs();
                         return;
                     }
-                    KovaEvent::ItemRenamed { new_path, .. } => {
+                    KovaEvent::ItemRenamed { old_path, new_path } => {
+                        ctrl.library.relocate(&old_path, &new_path);
                         if ctrl
                             .current_directory()
                             .is_some_and(|loc| Some(loc.path.as_path()) == new_path.parent())
+                            || ctrl.snapshot().is_some_and(|snapshot| {
+                                snapshot.entries.iter().any(|entry| entry.path == old_path)
+                            })
                         {
                             reveal = Some((ctrl.active_tab_id(), new_path, false));
                         }
@@ -443,6 +454,9 @@ async fn main() {
 
             // Shell file-operation outcomes: refresh the directory because
             // copy/move/delete may have changed it, and surface the result.
+            for (old, new) in reload_ref.transfers.take_moves() {
+                ctrl_ref.lock().unwrap().library.relocate(&old, &new);
+            }
             if let Ok(outcome) = ops_out_rx.try_recv() {
                 let Some(ui) = ui_ref.upgrade() else { return };
                 let mut ctrl = ctrl_ref.lock().unwrap();
@@ -700,6 +714,7 @@ fn apply_sidebar(ui: &MainWindow, data: SidebarData) {
                 usage,
                 detail: detail.into(),
                 file_system: drive.file_system.into(),
+                drive_type: drive.drive_type.into(),
                 total_text: if drive.total_bytes == 0 {
                     "Unavailable".into()
                 } else {
@@ -895,7 +910,6 @@ fn sync_preview_path(ui: &MainWindow, ctrl: &AppController) {
     let path = if !ctrl.is_loading() && ctrl.selected_count() == 1 {
         ctrl.primary_selection()
             .and_then(|i| ctrl.snapshot()?.entries.get(i))
-            .filter(|e| !e.is_directory())
             .map(|e| e.path.to_string_lossy().into_owned())
             .unwrap_or_default()
     } else {
@@ -962,6 +976,24 @@ fn wire_callbacks(
             ctrl.show_extensions = state.get_show_extensions();
             ctrl.folder_sizes_enabled = state.get_folder_sizes();
             update_ui(&ui, &ctrl, &last_view, &models_view);
+        });
+    let d = dispatcher.clone();
+    let ui_search = ui.clone();
+    let last_search = Arc::clone(&last_address);
+    let models_search = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_search(move |text| {
+            let Some(ui) = ui_search.upgrade() else {
+                return;
+            };
+            if ui.global::<AppState>().get_inline_visible() {
+                return;
+            }
+            let controller = d.controller();
+            let mut ctrl = controller.lock().unwrap();
+            ctrl.set_search(text.to_string());
+            update_ui(&ui, &ctrl, &last_search, &models_search);
         });
     let d = dispatcher.clone();
     let ui_nav = ui.clone();
@@ -1086,9 +1118,8 @@ fn wire_callbacks(
     let ui_marquee = ui.clone();
     let models_marquee = Rc::clone(&models);
     let gesture = RefCell::new(None);
-    ui.unwrap()
-        .global::<AppState>()
-        .on_request_marquee(move |phase, first, end, additive| {
+    ui.unwrap().global::<AppState>().on_request_grid_marquee(
+        move |phase, first, end, left, right, columns, additive| {
             let controller = d.controller();
             let mut ctrl = controller.lock().unwrap();
             let key = (ctrl.active_tab_id(), ctrl.snapshot().map(|s| s.request_id));
@@ -1104,14 +1135,26 @@ fn wire_callbacks(
                 *gesture = None;
                 return;
             }
-            let range = (first.max(0) as usize, end.max(0) as usize, additive);
+            let columns = columns.max(1) as usize;
+            let range = (
+                first.max(0) as usize,
+                end.max(0) as usize,
+                left.clamp(0, columns as i32) as usize,
+                right.clamp(0, columns as i32) as usize,
+                columns,
+                additive,
+            );
             if phase == 1 && *last_range == Some(range) {
                 return;
             }
             let len = ctrl.item_count();
             if let Some(selection) = ctrl.selection_mut() {
                 if phase == 1 {
-                    selection.marquee(baseline, range.0..range.1, additive, len);
+                    let rows =
+                        range.0.min(len.div_ceil(columns))..range.1.min(len.div_ceil(columns));
+                    let indices =
+                        rows.flat_map(|row| (range.2..range.3).map(move |col| row * columns + col));
+                    selection.marquee_indices(baseline, indices, additive, len);
                     *last_range = Some(range);
                 } else if phase == 3 {
                     *selection = baseline.clone();
@@ -1125,7 +1168,8 @@ fn wire_callbacks(
             if let Some(u) = ui_marquee.upgrade() {
                 sync_selection(&u, &d, &models_marquee);
             }
-        });
+        },
+    );
     let d = dispatcher.clone();
     let ui_sel = ui.clone();
 
@@ -1421,11 +1465,11 @@ fn update_ui(
     for crumb in &mut crumbs {
         crumb.label = location_label(ui, crumb.path.as_str(), crumb.label.as_str()).into();
     }
-    if crumbs.len() == 1 && address != "Home" {
+    if crumbs.len() == 1 && controller.current_directory().is_some() {
         crumbs.insert(
             0,
             Breadcrumb {
-                label: "Dieser PC".into(),
+                label: "This PC".into(),
                 path: "Home".into(),
             },
         );
@@ -1446,7 +1490,9 @@ fn update_ui(
     }
 
     let state = ui.global::<AppState>();
+    state.set_search_text(controller.search_text().into());
     state.set_current_path(controller.address_path().into());
+    state.set_filesystem_location(controller.current_directory().is_some());
     state.set_drive_overview(
         controller
             .current_location()

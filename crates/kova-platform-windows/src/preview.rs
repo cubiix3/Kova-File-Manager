@@ -30,7 +30,28 @@ impl Drop for Apartment {
 }
 
 pub fn load(path: &Path, page_index: u32) -> Result<Preview, String> {
-    load_scaled(path, page_index, 1024)
+    let result = load_scaled(path, page_index, 1024);
+    if result.is_ok() {
+        return result;
+    }
+    use std::os::windows::fs::MetadataExt;
+    let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if metadata.file_attributes() & 0x0044_1400 != 0 || !crate::folder_size::is_local_fixed(path) {
+        return result;
+    }
+    // SAFETY: worker-local, balanced by the guard before returning pixels.
+    unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.map_err(|e| e.to_string())?;
+    let _apartment = Apartment;
+    crate::shell_thumbnail::load_sized(path, 512, false)
+        .map(|mut preview| {
+            preview.text = if metadata.is_dir() {
+                "Folder".into()
+            } else {
+                "Windows preview".into()
+            };
+            preview
+        })
+        .ok_or_else(|| result.err().unwrap_or_else(|| "Preview unavailable".into()))
 }
 
 pub fn is_image(path: &Path) -> bool {
@@ -51,7 +72,7 @@ pub fn load_thumbnail(path: &Path) -> Result<Preview, String> {
         return Err("No automatic thumbnail for this location or type".into());
     }
     let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    if !metadata.is_file() || metadata.file_attributes() & 0x0044_1400 != 0 {
+    if metadata.file_attributes() & 0x0044_1400 != 0 {
         return Err("Automatic thumbnail skipped for link or offline file".into());
     }
     if is_image(path)
@@ -59,7 +80,7 @@ pub fn load_thumbnail(path: &Path) -> Result<Preview, String> {
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
     {
-        if let Ok(preview) = load_scaled(path, 0, 64) {
+        if let Ok(preview) = load_scaled(path, 0, 256) {
             return Ok(preview);
         }
     }
@@ -67,7 +88,13 @@ pub fn load_thumbnail(path: &Path) -> Result<Preview, String> {
     // guard balances initialization after all Shell COM objects are released.
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.map_err(|e| e.to_string())?;
     let _apartment = Apartment;
-    crate::shell_thumbnail::load(path).ok_or_else(|| "No Windows thumbnail available".into())
+    if metadata.is_dir() {
+        crate::shell_thumbnail::load_sized(path, 128, false)
+    } else {
+        crate::shell_thumbnail::load(path)
+    }
+    .or_else(|| crate::shell_thumbnail::load_sized(path, 96, false))
+    .ok_or_else(|| "No Windows thumbnail available".into())
 }
 
 fn load_scaled(path: &Path, page_index: u32, max_edge: u32) -> Result<Preview, String> {

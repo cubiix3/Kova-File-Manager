@@ -14,12 +14,19 @@ pub fn restore(app: &MainWindow, controller: &mut AppController) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
+        if key == "gallery_size" {
+            if let Ok(size) = value.parse::<i32>() {
+                state.set_gallery_size(size.clamp(0, 2));
+            }
+            continue;
+        }
         let value = match value {
             "true" => true,
             "false" => false,
             _ => continue,
         };
         match key {
+            "gallery" => state.set_gallery(value),
             "hidden" => state.set_show_hidden(value),
             "system" => state.set_show_system(value),
             "extensions" => state.set_show_extensions(value),
@@ -39,6 +46,7 @@ pub fn save(app: &MainWindow) {
     let Some(path) = path() else { return };
     let state = app.global::<AppState>();
     let values = [
+        ("gallery", state.get_gallery()),
         ("hidden", state.get_show_hidden()),
         ("system", state.get_show_system()),
         ("extensions", state.get_show_extensions()),
@@ -48,10 +56,11 @@ pub fn save(app: &MainWindow) {
         ("animations", state.get_animations()),
         ("folder_sizes", state.get_folder_sizes()),
     ];
-    let text: String = values
+    let mut text: String = values
         .into_iter()
         .map(|(key, value)| format!("{key}={value}\n"))
         .collect();
+    text.push_str(&format!("gallery_size={}\n", state.get_gallery_size()));
     let result = (|| -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;

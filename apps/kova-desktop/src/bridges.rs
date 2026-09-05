@@ -4,6 +4,7 @@ use kova_ops::worker::{GenerationCounter, WorkerCommand};
 use kova_platform_windows::known_folders::initial_location;
 use kova_platform_windows::path_resolver::{canonicalize_location, resolve_input};
 use kova_platform_windows::shell_ops::ShellOpCommand;
+use kova_platform_windows::transfers::{ShellRequest, TransferQueue};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -18,7 +19,8 @@ pub struct CommandDispatcher {
     generations: Arc<Mutex<GenerationCounter>>,
     /// Explorer-grade file operations (copy/move/delete) that must run off the
     /// UI thread on the dedicated shell-ops thread.
-    ops_tx: Sender<ShellOpCommand>,
+    ops_tx: Sender<ShellRequest>,
+    pub transfers: Arc<TransferQueue>,
 }
 
 impl CommandDispatcher {
@@ -26,13 +28,14 @@ impl CommandDispatcher {
         controller: Arc<Mutex<AppController>>,
         tx: mpsc::UnboundedSender<WorkerCommand>,
         generations: GenerationCounter,
-        ops_tx: Sender<ShellOpCommand>,
+        ops_tx: Sender<ShellRequest>,
     ) -> Self {
         Self {
             controller,
             tx,
             generations: Arc::new(Mutex::new(generations)),
             ops_tx,
+            transfers: Arc::new(TransferQueue::default()),
         }
     }
 
@@ -52,8 +55,16 @@ impl CommandDispatcher {
         }
     }
 
-    fn send_ops(&self, cmd: ShellOpCommand) {
-        let _ = self.ops_tx.send(cmd);
+    fn send_ops(&self, cmd: ShellOpCommand) -> Result<(), String> {
+        let request = self.transfers.enqueue(cmd)?;
+        self.ops_tx.send(request).map_err(|error| {
+            error.0.handle.update(|state| {
+                state.finished = true;
+                state.status = "Failed".into();
+                state.error = "Shell operations worker unavailable".into();
+            });
+            "Shell operations worker unavailable".into()
+        })
     }
 
     fn next_request_id(&self, tab_id: TabId) -> u64 {
@@ -77,6 +88,17 @@ impl CommandDispatcher {
                 return;
             }
             ctrl.set_status(format!("Loading {}...", location.display()));
+            if let Some(key) = location.virtual_key() {
+                let paths = ctrl.library.entries(key).unwrap_or_default().to_vec();
+                drop(ctrl);
+                self.send(WorkerCommand::EnumerateReferences {
+                    tab_id,
+                    location,
+                    request_id,
+                    paths,
+                });
+                return;
+            }
         }
         self.send(WorkerCommand::Enumerate {
             tab_id,
@@ -102,6 +124,8 @@ impl CommandDispatcher {
 
         let location = if input.raw.trim().eq_ignore_ascii_case("home") {
             Location::home()
+        } else if input.raw.starts_with("collection:") || input.raw.starts_with("tag:") {
+            Location::virtual_folder(input.raw.clone())
         } else {
             resolve_input(&input, &base).map_err(|e| e.to_string())?
         };
@@ -238,6 +262,9 @@ impl CommandDispatcher {
 
     pub fn dispatch_select_single(&self, index: usize) {
         let mut ctrl = self.controller.lock().unwrap();
+        if ctrl.is_loading() || index >= ctrl.item_count() {
+            return;
+        }
         if let Some(sel) = ctrl.selection_mut() {
             sel.select_single(index);
         }
@@ -245,6 +272,9 @@ impl CommandDispatcher {
 
     pub fn dispatch_select_toggle(&self, index: usize) {
         let mut ctrl = self.controller.lock().unwrap();
+        if ctrl.is_loading() || index >= ctrl.item_count() {
+            return;
+        }
         if let Some(sel) = ctrl.selection_mut() {
             sel.toggle(index);
         }
@@ -252,6 +282,9 @@ impl CommandDispatcher {
 
     pub fn dispatch_select_range(&self, index: usize) {
         let mut ctrl = self.controller.lock().unwrap();
+        if ctrl.is_loading() || index >= ctrl.item_count() {
+            return;
+        }
         if let Some(sel) = ctrl.selection_mut() {
             sel.range_select(index);
         }
@@ -374,7 +407,7 @@ impl CommandDispatcher {
                 dest,
             }
         };
-        self.send_ops(command);
+        self.send_ops(command)?;
         self.set_status_message(format!("Pasting {} item(s)...", count));
         Ok(())
     }
@@ -389,7 +422,7 @@ impl CommandDispatcher {
             return Err("nothing selected".into());
         }
         let count = paths.len();
-        self.send_ops(ShellOpCommand::Delete { sources: paths });
+        self.send_ops(ShellOpCommand::Delete { sources: paths })?;
         self.set_status_message(format!("Deleting {} item(s)...", count));
         Ok(())
     }
@@ -470,6 +503,29 @@ fn resolve_index(ctrl: &AppController, index: usize) -> Option<&kova_core::domai
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn collection_navigation_uses_references_and_cannot_be_a_paste_destination() {
+        let controller = Arc::new(Mutex::new(AppController::new(Location::home())));
+        let file = std::env::temp_dir().join("reference.png");
+        controller
+            .lock()
+            .unwrap()
+            .library
+            .add(false, "Assets", [file.clone()])
+            .unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (ops_tx, _ops_rx) = std::sync::mpsc::channel();
+        let dispatcher = CommandDispatcher::new(controller.clone(), tx, Default::default(), ops_tx);
+        dispatcher
+            .dispatch_navigate(LocationInput::new("collection:Assets"))
+            .unwrap();
+        assert!(controller.lock().unwrap().current_directory().is_none());
+        assert!(
+            matches!(rx.try_recv().unwrap(), WorkerCommand::EnumerateReferences { paths, .. } if paths == vec![file])
+        );
+        dispatcher.dispatch_new_folder_named("must-not-be-created");
+        assert!(rx.try_recv().is_err());
+    }
     #[test]
     fn home_does_not_enqueue_filesystem_reads_or_folder_creation() {
         let controller = Arc::new(Mutex::new(AppController::new(Location::home())));

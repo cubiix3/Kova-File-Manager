@@ -1,5 +1,8 @@
 # View options and previews
 
+For Gallery, search filters, inspector metadata, transfers, tags, collections and
+storage analysis, see [the current feature guide](NEXTGEN.md).
+
 The **View** menu at the right of the command bar contains preview visibility,
 storage overview, folder-size calculation, hidden files, system files, file extensions, compact rows, alternating row
 colors and the loading-logo animation. The top-left menu now uses only the
@@ -21,7 +24,7 @@ PNG, JPEG, GIF, BMP, TIFF and ICO use Windows image decoding when supported;
 WebP has a bundled Rust decoder and needs no Windows codec installation.
 PDFs use their first page. Other file types, including formats supplied by installed
 codecs/extensions, are requested through `IShellItemImageFactory` with
-`SIIGBF_THUMBNAILONLY`. Missing or failed providers leave the normal type icon.
+`SIIGBF_THUMBNAILONLY`. Missing providers fall back to a larger Shell icon; failed providers leave the normal type icon.
 Support for a video or document format depends on the installed Windows provider;
 this is not a claim that every file has a visual preview.
 

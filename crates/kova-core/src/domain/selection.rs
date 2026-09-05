@@ -104,13 +104,28 @@ impl SelectionState {
         additive: bool,
         len: usize,
     ) {
+        self.marquee_indices(
+            baseline,
+            range.start.min(len)..range.end.min(len),
+            additive,
+            len,
+        );
+    }
+
+    pub fn marquee_indices(
+        &mut self,
+        baseline: &Self,
+        indices: impl IntoIterator<Item = usize>,
+        additive: bool,
+        len: usize,
+    ) {
         self.selected.clear();
         if additive {
             self.selected
                 .extend(baseline.selected.iter().copied().filter(|&i| i < len));
         }
         self.selected
-            .extend(range.start.min(len)..range.end.min(len));
+            .extend(indices.into_iter().filter(|&i| i < len));
         self.selected.sort_unstable();
         self.selected.dedup();
         self.anchor = self.selected.first().copied();
@@ -152,6 +167,21 @@ impl SelectionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grid_band_selects_a_rectangle_and_can_shrink() {
+        let baseline = SelectionState::empty();
+        let mut s = baseline.clone();
+        s.marquee_indices(
+            &baseline,
+            (1..4).flat_map(|row| (1..3).map(move |col| row * 4 + col)),
+            false,
+            14,
+        );
+        assert_eq!(s.selected(), &[5, 6, 9, 10, 13]);
+        s.marquee_indices(&baseline, [5], false, 14);
+        assert_eq!(s.selected(), &[5]);
+    }
 
     #[test]
     fn marquee_shrinks_and_clears_without_leaving_old_rows_selected() {

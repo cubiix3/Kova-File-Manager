@@ -8,7 +8,9 @@ use windows::{
             BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS,
             DeleteDC, DeleteObject, GetDIBits, GetObjectW, HBITMAP, HGDIOBJ,
         },
-        UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_THUMBNAILONLY},
+        UI::Shell::{
+            IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF, SIIGBF_THUMBNAILONLY,
+        },
     },
     core::PCWSTR,
 };
@@ -25,6 +27,11 @@ impl Drop for BitmapGuard {
 }
 
 pub fn load(path: &Path) -> Option<Preview> {
+    load_sized(path, 256, true)
+}
+
+pub fn load_sized(path: &Path, size: i32, thumbnail_only: bool) -> Option<Preview> {
+    let size = size.clamp(32, 1024);
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     // SAFETY: wide is terminated and remains alive for the call. COM has been
     // initialized on this worker; the returned interface never leaves it.
@@ -33,7 +40,17 @@ pub fn load(path: &Path) -> Option<Preview> {
     // SAFETY: factory is a live Shell interface and the size is bounded.
     // THUMBNAILONLY fails when unavailable, preserving the existing type icon.
     let bitmap = BitmapGuard(
-        unsafe { factory.GetImage(SIZE { cx: 64, cy: 64 }, SIIGBF_THUMBNAILONLY) }.ok()?,
+        unsafe {
+            factory.GetImage(
+                SIZE { cx: size, cy: size },
+                if thumbnail_only {
+                    SIIGBF_THUMBNAILONLY
+                } else {
+                    SIIGBF(0)
+                },
+            )
+        }
+        .ok()?,
     );
     let mut info = BITMAP::default();
     // SAFETY: bitmap is owned by the guard; info is a correctly sized output.
@@ -48,7 +65,7 @@ pub fn load(path: &Path) -> Option<Preview> {
         return None;
     }
     let (w, h) = (info.bmWidth, info.bmHeight);
-    if !(1..=64).contains(&w) || !(1..=64).contains(&h) {
+    if !(1..=size).contains(&w) || !(1..=size).contains(&h) {
         return None;
     }
     let mut bmi = BITMAPINFO {

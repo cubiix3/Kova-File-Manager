@@ -151,8 +151,7 @@ pub fn connect(
                             }
                         }
                         displayed.push(index);
-                        if entry.is_file()
-                            && !cache.entries.contains_key(&entry.path)
+                        if !cache.entries.contains_key(&entry.path)
                             && !pending.contains(&entry.path)
                         {
                             needed.push(entry.path.clone());
