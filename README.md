@@ -14,12 +14,6 @@
 
 [![Watch the Kova product teaser](docs/images/product-teaser.png)](docs/media/Kova-Product-Teaser.mp4?raw=true)
 
-**Meet Kova in 15 seconds** ? [Watch / download with sound](docs/media/Kova-Product-Teaser.mp4?raw=true) ? [Silent version](docs/media/Kova-Product-Teaser-Silent.mp4?raw=true)
-
-Real Kova UI, from navigation and native Windows menus to multi-file copy and
-paste. A 1080p/60 FPS motion teaser with original sound design.
-[Watch the longer demo](docs/media/kova-demo.mp4?raw=true) ? [About the recordings](docs/DEMO.md).
-
 Kova combines tabbed browsing, native Windows context menus and file previews in
 a compact desktop interface. Built with **Rust, Slint and Win32/Shell APIs** for
 Windows 10/11 x64. No Electron or WebView.
