@@ -12,10 +12,12 @@ native UI.
 
 **Navigation & tabs**
 
-- Pill-style tabs with close buttons and independent per-tab state
+- Integrated title-bar tabs with close buttons and independent per-tab state
   (history, selection, sorting).
-- Back / Forward / Parent / Refresh, address bar with `Ctrl+L`
-  focus + select-all, canonical path handling with visible errors.
+- Back / Forward / Parent / Refresh, clickable path breadcrumbs and `Ctrl+L`
+  address editing, canonical path handling with visible errors.
+- Compact command bar for New Folder, Cut, Copy, Paste, Rename and Delete;
+  labeled actions collapse to icons in smaller windows.
 - Mouse back/forward (XBUTTON1/XBUTTON2) handled through the normal
   Slint input pipeline — no hooks, no window subclassing.
 - Stale-result protection: per-tab generation/request IDs discard
@@ -137,5 +139,6 @@ additional terms or conditions.
 - [files-community/Files](https://github.com/files-community/Files) (MIT) —
   studied as a UX/interaction reference (pointer states, tab switching,
   selection model, error surfacing). Kova is an independent implementation;
-  no code was copied. See
+  selected MIT-licensed icon geometry is adapted with attribution in
+  [`ui/third-party`](apps/kova-desktop/ui/third-party/README.md). See
   [`docs/research/FILES_REFERENCE.md`](docs/research/FILES_REFERENCE.md).

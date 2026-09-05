@@ -2,6 +2,7 @@
 
 mod app_state;
 mod bridges;
+mod window_chrome;
 
 use app_state::AppController;
 use bridges::CommandDispatcher;
@@ -212,7 +213,12 @@ async fn main() {
         ops_tx,
     );
 
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .select()
+        .expect("initialize desktop window backend");
     let app = MainWindow::new().unwrap();
+    window_chrome::connect(&app);
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -1023,6 +1029,26 @@ fn wire_callbacks(
         });
 }
 
+// Keep only the closest ancestors visible; Ctrl+L exposes the full editable path.
+// Path traversal here is lexical and never queries a drive or network share.
+fn breadcrumb_items(address: &str) -> Vec<Breadcrumb> {
+    let mut items: Vec<_> = std::path::Path::new(address)
+        .ancestors()
+        .take(3)
+        .map(|path| Breadcrumb {
+            label: path
+                .file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .as_ref()
+                .into(),
+            path: path.to_string_lossy().as_ref().into(),
+        })
+        .collect();
+    items.reverse();
+    items
+}
+
 fn update_ui(
     ui: &MainWindow,
     controller: &AppController,
@@ -1036,6 +1062,8 @@ fn update_ui(
         let mut last = last_address.lock().unwrap();
         if *last != address {
             *last = address.clone();
+            ui.global::<AppState>()
+                .set_breadcrumbs(ModelRc::new(VecModel::from(breadcrumb_items(&address))));
             ui.global::<AppState>().set_address_path(address.into());
         }
     }
@@ -1093,4 +1121,26 @@ fn update_ui(
         }
     }
     state.set_active_tab(controller.active_tab_index() as i32);
+}
+
+#[cfg(test)]
+mod breadcrumb_tests {
+    use super::breadcrumb_items;
+
+    #[test]
+    fn breadcrumbs_keep_full_navigation_targets_when_deep_paths_are_shortened() {
+        let items = breadcrumb_items(r"G:\one\two\three\four");
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].label, "two");
+        assert_eq!(items[0].path, r"G:\one\two");
+        assert_eq!(items[2].path, r"G:\one\two\three\four");
+    }
+
+    #[test]
+    fn share_root_is_one_breadcrumb_not_a_server_navigation_target() {
+        let items = breadcrumb_items(r"\\server\share\folder");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].path, r"\\server\share\");
+        assert_eq!(items[1].label, "folder");
+    }
 }

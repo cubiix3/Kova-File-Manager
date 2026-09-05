@@ -1,28 +1,33 @@
+import { FilesNavBack, FilesNavForward, FilesNavUp, FilesRefresh, FilesCut, FilesCopy, FilesPaste, FilesRename, FilesDelete } from "files-icons.slint";
 import { ListView, ScrollView } from "std-widgets.slint";
 
 // Theme tokens — central place for colors and metrics.
 export global Theme {
-    out property <color> window-bg: #171b21;
+    out property <color> window-bg: #202328;
     // Raised fill used by the address bar and other inset controls.
-    out property <color> surface: #222831;
-    out property <color> surface-alt: #2b333e;
-    out property <color> surface-hover: #262f3a;
-    out property <color> surface-pressed: #354050;
+    out property <color> surface: #30343b;
+    out property <color> surface-alt: #353a42;
+    out property <color> surface-hover: #3b414a;
+    out property <color> surface-pressed: #454d57;
     // Sidebar is one step above the content background so the shell reads as
     // "navigation chrome" vs. "document area" (Files/Explorer pattern).
-    out property <color> sidebar-bg: #1c222a;
-    out property <color> selection: #253c50;
-    out property <color> selection-strong: #2d4a62;
+    out property <color> sidebar-bg: #202328;
+    out property <color> selection: #3a4955;
+    out property <color> selection-strong: #435969;
     out property <color> border: #3a3a42;
-    out property <color> border-subtle: #2c3540;
+    out property <color> border-subtle: #414750;
     out property <color> text-primary: #f2f2f4;
     out property <color> text-secondary: #c9c9d1;
     out property <color> text-muted: #98989f;
     out property <color> text-disabled: #63636e;
     out property <color> accent: #7cc6eb;
     out property <color> danger: #e5534b;
+    out property <color> content-bg: #292d33;
+    out property <color> tabs-bg: #16191d;
     out property <color> shadow: #00000066;
 }
+
+export struct Breadcrumb { label: string, path: string }
 
 export struct FileListItem {
     name: string,
@@ -45,6 +50,7 @@ export struct DriveItem {
 }
 
 export global AppState {
+    in-out property <[Breadcrumb]> breadcrumbs: [];
     in-out property <string> address_path: "";
     in-out property <string> status_text: "Ready";
     in-out property <int> item_count: 0;
@@ -116,10 +122,12 @@ export global Metrics {
     out property <length> radius-sm: 4px;
     out property <length> radius-md: 6px;
     out property <length> radius-lg: 8px;
-    out property <length> tabs-height: 42px;
-    out property <length> toolbar-height: 48px;
+    out property <length> tabs-height: 40px;
+    out property <length> toolbar-height: 56px;
     out property <length> statusbar-height: 24px;
-    out property <length> sidebar-width: 236px;
+    out property <length> sidebar-width: 224px;
+    out property <length> actions-height: 48px;
+    out property <length> panel-gap: 8px;
     out property <length> header-height: 32px;
     out property <length> row-height: 29px;
     out property <length> icon-size: 18px;
@@ -148,64 +156,6 @@ component NavTouchArea inherits TouchArea {
 
 // --- Vector glyphs (viewbox 16x16 unless noted, self-centering) ------------
 // All icons accept a `tint` so disabled states can dim them.
-
-component IconBack inherits Path {
-    in property <color> tint: Theme.text-secondary;
-    width: 16px;
-    height: 16px;
-    viewbox-width: 16;
-    viewbox-height: 16;
-    fill: transparent;
-    stroke: root.tint;
-    stroke-width: 1.7px;
-    commands: "M 10.2 2.8 L 5 8 L 10.2 13.2";
-}
-
-component IconForward inherits Path {
-    in property <color> tint: Theme.text-secondary;
-    width: 16px;
-    height: 16px;
-    viewbox-width: 16;
-    viewbox-height: 16;
-    fill: transparent;
-    stroke: root.tint;
-    stroke-width: 1.7px;
-    commands: "M 5.8 2.8 L 11 8 L 5.8 13.2";
-}
-
-component IconUp inherits Path {
-    in property <color> tint: Theme.text-secondary;
-    width: 16px;
-    height: 16px;
-    viewbox-width: 16;
-    viewbox-height: 16;
-    fill: transparent;
-    stroke: root.tint;
-    stroke-width: 1.7px;
-    commands: "M 2.8 10.2 L 8 5 L 13.2 10.2";
-}
-
-component IconRefresh inherits Path {
-    in property <color> tint: Theme.text-secondary;
-    width: 16px;
-    height: 16px;
-    viewbox-width: 16;
-    viewbox-height: 16;
-    fill: transparent;
-    stroke: root.tint;
-    stroke-width: 1.6px;
-    commands: "M 13.2 8 C 13.2 10.87 10.87 13.2 8 13.2 C 5.13 13.2 2.8 10.87 2.8 8 C 2.8 5.13 5.13 2.8 8 2.8";
-}
-
-component IconRefreshArrow inherits Path {
-    in property <color> tint: Theme.text-secondary;
-    width: 16px;
-    height: 16px;
-    viewbox-width: 16;
-    viewbox-height: 16;
-    fill: root.tint;
-    commands: "M 10.7 2.8 L 8.1 0.7 L 8.1 4.9 Z";
-}
 
 component IconFolderNew inherits Path {
     in property <color> tint: Theme.text-secondary;
@@ -280,41 +230,21 @@ component NavIconButton inherits Rectangle {
 }
 
 // Compact "New Folder" action aligned with the nav buttons.
-component NewFolderButton inherits Rectangle {
+component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <string> shortcut;
     in property <bool> enabled: true;
-    callback clicked();
-
-    // Keep the preferred (content) width inside the toolbar layout.
-    horizontal-stretch: 0;
-    height: 32px;
-    border-radius: Metrics.radius-md;
-    background: btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : Theme.surface-alt);
-
-    HorizontalLayout {
-        padding-left: 9px;
-        padding-right: 10px;
-        spacing: 6px;
-        alignment: center;
-
-        VerticalLayout {
-            alignment: center;
-            IconFolderNew {
-                width: 14px;
-                height: 14px;
-                tint: Theme.text-secondary;
-            }
-        }
-        Text {
-            text: "New Folder";
-            color: Theme.text-primary;
-            font-size: 12px;
-            vertical-alignment: center;
-        }
-    }
-
-    btn-ta := NavTouchArea {
-        clicked => { root.clicked(); }
-    }
+    in property <bool> show-label: true;
+    callback triggered();
+    width: show-label ? 88px : 36px; height: 34px;
+    border-radius: Metrics.radius-sm;
+    background: !enabled ? transparent : (action-ta.pressed ? Theme.surface-pressed : (action-ta.has-hover ? Theme.surface-hover : transparent));
+    accessible-role: button;
+    accessible-label: label;
+    accessible-description: shortcut;
+    Text { x: 34px; width: parent.width - 38px; height: parent.height; text: root.label; visible: root.show-label; font-size: 12px; color: root.enabled ? Theme.text-primary : Theme.text-disabled; vertical-alignment: center; }
+    action-ta := NavTouchArea { enabled: root.enabled; clicked => { root.triggered(); } }
+    @children
 }
 
 // Themed single-line text field (address bar, dialogs). Built directly on
@@ -328,9 +258,13 @@ component InputField inherits Rectangle {
     in property <string> placeholder: "";
     in property <length> font-size: 13px;
     in property <length> right-inset: 10px;
+    in property <length> left-inset: 12px;
     in property <bool> quiet: false;
+    in property <bool> navigation: false;
+    out property <bool> editing: ti.has-focus;
     in-out property <string> text <=> ti.text;
     callback accepted();
+    callback cancelled();
 
     public function focus-field() { ti.focus(); }
     public function select-all-text() { ti.select-all(); }
@@ -352,16 +286,23 @@ component InputField inherits Rectangle {
     }
 
     VerticalLayout {
-        padding-left: 10px;
+        padding-left: root.left-inset;
         padding-right: root.right-inset;
         alignment: center;
 
         ti := TextInput {
+
             font-size: root.font-size;
-            color: Theme.text-primary;
-            selection-background-color: Theme.selection-strong;
-            selection-foreground-color: Theme.text-primary;
+            color: root.navigation && !ti.has-focus ? transparent : Theme.text-primary;
+            selection-background-color: root.navigation && !ti.has-focus ? transparent : Theme.selection-strong;
+            selection-foreground-color: root.navigation && !ti.has-focus ? transparent : Theme.text-primary;
             accepted => { root.accepted(); }
+            key-pressed(event) => {
+                if root.navigation && event.text == Key.Escape {
+                    root.cancelled();
+                    accept
+                } else { reject }
+            }
         }
     }
 
@@ -370,7 +311,7 @@ component InputField inherits Rectangle {
         visible: ti.text == "";
         color: Theme.text-disabled;
         font-size: root.font-size;
-        x: 10px;
+        x: root.left-inset;
         height: parent.height;
         vertical-alignment: center;
     }
@@ -394,12 +335,14 @@ component SidebarButton inherits Rectangle {
     in property <string> target: "";
     in property <bool> selected: false;
 
-    height: 29px;
+    height: 34px;
     border-radius: Metrics.radius-sm;
     background: selected ? Theme.selection : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.surface-hover : transparent));
 
+    Rectangle { x: 2px; y: 9px; width: 3px; height: 16px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
+
     HorizontalLayout {
-        padding-left: 9px;
+        padding-left: 14px;
         padding-right: 7px;
         spacing: Metrics.space-sm;
 
@@ -416,7 +359,7 @@ component SidebarButton inherits Rectangle {
         Text {
             text: root.text;
             color: selected ? Theme.text-primary : Theme.text-secondary;
-            font-size: 12px;
+            font-size: 13px;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
@@ -622,6 +565,11 @@ component NameDialog inherits Rectangle {
 }
 export component MainWindow inherits Window {
     title: "Kova";
+    no-frame: true;
+    resize-border-width: 5px;
+    callback window-action(int);
+    in-out property <bool> window-maximized: false;
+    property <length> tab-width: Math.min(198px, Math.max(140px, (root.width - Metrics.sidebar-width - 202px) / Math.max(1, AppState.tabs.length) - 4px));
     min-width: 760px;
     min-height: 500px;
     preferred-width: 1120px;
@@ -640,19 +588,39 @@ export component MainWindow inherits Window {
         x: 0;
         width: parent.width;
         height: Metrics.tabs-height;
-        background: Theme.window-bg;
+        background: Theme.tabs-bg;
 
         tabs-nav := NavTouchArea {
+            property <bool> dragging: false;
             x: 0;
             y: 0;
             width: parent.width;
             height: parent.height;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    self.dragging = false;
+                }
+            }
+            moved => {
+                if self.pressed && !self.dragging && (Math.abs(self.mouse-x - self.pressed-x) > 4px || Math.abs(self.mouse-y - self.pressed-y) > 4px) {
+                    self.dragging = true;
+                    root.window-action(0);
+                }
+            }
+            double-clicked => { root.window-action(2); }
+        }
+
+        Text {
+            x: 20px; y: 0; width: 140px; height: parent.height;
+            text: "KOVA"; font-size: 12px; font-weight: 700;
+            color: Theme.accent; vertical-alignment: center;
         }
 
         tab-scroll := ScrollView {
-            width: parent.width - 40px;
+            x: Metrics.sidebar-width;
+            width: Math.min(AppState.tabs.length * (root.tab-width + 4px) + 12px, parent.width - Metrics.sidebar-width - 190px);
             height: parent.height;
-            viewport-width: Math.max(self.width, AppState.tabs.length * 190px + 12px);
+            viewport-width: Math.max(self.width, AppState.tabs.length * (root.tab-width + 4px) + 12px);
             viewport-height: self.height;
             HorizontalLayout {
                 width: tab-scroll.viewport-width;
@@ -662,24 +630,18 @@ export component MainWindow inherits Window {
                 spacing: 4px;
                 alignment: start;
             for item[idx] in AppState.tabs: Rectangle {
-                width: 186px;
-                height: 34px;
+                width: root.tab-width;
+                height: 36px;
                 border-radius: Metrics.radius-md;
-                background: idx == AppState.active_tab ? Theme.surface-alt : (tab-ta.pressed ? Theme.surface-pressed : (tab-ta.has-hover ? Theme.surface-hover : transparent));
+                background: idx == AppState.active_tab ? Theme.window-bg : (tab-ta.pressed ? Theme.surface-pressed : (tab-ta.has-hover ? Theme.surface-hover : transparent));
 
                 tab-ta := NavTouchArea {
                     clicked => { AppState.request_switch_tab(idx); }
                 }
 
-                // Active tab marker: a short, subtle accent underline.
                 Rectangle {
-                    x: 10px;
-                    y: parent.height - 3px;
-                    width: parent.width - 20px;
-                    height: 1px;
-                    border-radius: 1px;
-                    background: Theme.accent;
-                    visible: idx == AppState.active_tab;
+                    y: parent.height - 7px; height: 7px; width: parent.width;
+                    background: Theme.window-bg; visible: idx == AppState.active_tab;
                 }
 
                 HorizontalLayout {
@@ -727,7 +689,7 @@ export component MainWindow inherits Window {
             }
         }
         Rectangle {
-            x: parent.width - 34px;
+            x: tab-scroll.x + tab-scroll.width + 2px;
             y: 4px;
             width: 28px;
             height: 30px;
@@ -735,6 +697,29 @@ export component MainWindow inherits Window {
             background: new-tab-ta.pressed ? Theme.surface-pressed : (new-tab-ta.has-hover ? Theme.surface-hover : transparent);
             IconPlus { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
             new-tab-ta := NavTouchArea { clicked => { AppState.request_new_tab(); } }
+        }
+        HorizontalLayout {
+            x: parent.width - 138px; y: 0; width: 138px; height: parent.height;
+            spacing: 0px;
+            Rectangle {
+                width: 46px; background: min-ta.has-hover ? Theme.surface-hover : transparent;
+                accessible-role: button; accessible-label: "Minimize";
+                Rectangle { x: 18px; y: 20px; width: 10px; height: 1px; background: Theme.text-secondary; }
+                min-ta := TouchArea { clicked => { root.window-action(1); } }
+            }
+            Rectangle {
+                width: 46px; background: max-ta.has-hover ? Theme.surface-hover : transparent;
+                accessible-role: button; accessible-label: root.window-maximized ? "Restore" : "Maximize";
+                Rectangle { x: 19px; y: 13px; width: 9px; height: 9px; background: transparent; border-width: 1px; border-color: Theme.text-secondary; visible: root.window-maximized; }
+                Rectangle { x: 17px; y: 15px; width: 10px; height: 10px; background: max-ta.has-hover ? Theme.surface-hover : Theme.tabs-bg; border-width: 1px; border-color: Theme.text-secondary; }
+                max-ta := TouchArea { clicked => { root.window-action(2); } }
+            }
+            Rectangle {
+                width: 46px; background: exit-ta.has-hover ? #c42b3b : transparent;
+                accessible-role: button; accessible-label: "Close window";
+                IconClose { x: 18px; y: 15px; tint: exit-ta.has-hover ? #ffffff : Theme.text-secondary; }
+                exit-ta := TouchArea { clicked => { root.window-action(3); } }
+            }
         }
     }
     toolbar := Rectangle {
@@ -751,79 +736,37 @@ export component MainWindow inherits Window {
             height: parent.height;
         }
 
-        // One compact, connected row: navigation cluster — wide central
-        // address bar (with embedded refresh) — New Folder. All controls
-        // share the same 32px height and corner radius.
         HorizontalLayout {
-            x: 0;
-            y: 0;
-            width: parent.width;
-            height: parent.height;
-            padding: 6px;
-            padding-left: 8px;
-            padding-right: 8px;
-            spacing: 4px;
-
-            Rectangle {
-                width: 104px; height: 34px;
-                background: Theme.surface;
-                border-radius: Metrics.radius-md;
-                HorizontalLayout {
-                    padding: 1px; spacing: 2px;
-            NavIconButton { enabled: AppState.can_go_back; clicked => { AppState.request_back(); } IconBack { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
-            NavIconButton { enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } IconForward { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
-            NavIconButton { enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } IconUp { tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; } }
-                }
-            }
-
+            width: parent.width; height: parent.height;
+            padding: 8px; spacing: 6px;
+            NavIconButton { enabled: AppState.can_go_back; clicked => { AppState.request_back(); } FilesNavBack { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
+            NavIconButton { enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } FilesNavForward { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
+            NavIconButton { enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } FilesNavUp { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
+            NavIconButton { clicked => { AppState.request_refresh(); } FilesRefresh { x: 7px; y: 7px; } }
             address-field := InputField {
-                height: 32px;
-                horizontal-stretch: 1;
-                quiet: false;
-                right-inset: 32px;
+                height: 38px; horizontal-stretch: 1;
+                border-radius: Metrics.radius-lg;
+                left-inset: 38px;
+                navigation: true;
                 text <=> AppState.address_path;
                 accepted => { AppState.request_navigate(AppState.address_path); list-scope.focus(); }
-
-                // Refresh lives inside the address bar (browser/Explorer
-                // pattern) so the toolbar stays a single connected unit.
-                refresh-btn := Rectangle {
-                    x: parent.width - self.width - 3px;
-                    y: (parent.height - self.height) / 2;
-                    width: 26px;
-                    height: 26px;
-                    border-radius: 5px;
-                    background: refresh-ta.pressed ? Theme.surface-pressed : (refresh-ta.has-hover ? Theme.surface-hover : transparent);
-
-                    IconRefresh {
-                        width: 14px;
-                        height: 14px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        tint: Theme.text-secondary;
-                    }
-                    IconRefreshArrow {
-                        width: 14px;
-                        height: 14px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        tint: Theme.text-secondary;
-                    }
-
-                    refresh-ta := NavTouchArea {
-                        clicked => { AppState.request_refresh(); }
+                cancelled => { AppState.address_path = AppState.current-path; list-scope.focus(); }
+                HorizontalLayout {
+                    x: 36px; y: 4px; width: parent.width - 48px; height: 30px;
+                    visible: !address-field.editing;
+                    alignment: start; spacing: 2px;
+                    for crumb[index] in AppState.breadcrumbs: Rectangle {
+                        width: Math.min(156px, (address-field.width - 54px) / Math.max(1, AppState.breadcrumbs.length));
+                        height: 30px;
+                        border-radius: Metrics.radius-sm;
+                        background: crumb-ta.has-hover ? Theme.surface-hover : transparent;
+                        Text { x: 8px; width: parent.width - 26px; height: parent.height; text: crumb.label; font-size: 13px; color: index == AppState.breadcrumbs.length - 1 ? Theme.text-primary : Theme.text-secondary; vertical-alignment: center; overflow: elide; }
+                        Path { x: parent.width - 12px; y: 11px; width: 5px; height: 8px; viewbox-width: 5; viewbox-height: 8; fill: transparent; stroke: Theme.text-muted; stroke-width: 1px; commands: "M 1 1 L 4 4 L 1 7"; visible: index < AppState.breadcrumbs.length - 1; }
+                        crumb-ta := NavTouchArea { clicked => { AppState.request_navigate(crumb.path); list-scope.focus(); } }
                     }
                 }
+                IconFolderNew { x: 13px; y: 11px; tint: Theme.accent; }
             }
-
-            NewFolderButton { clicked => { AppState.request_new_folder(); } }
-        }
-
-        // Hairline that separates the navigation chrome from the content.
-        Rectangle {
-            y: parent.height - 1px;
-            height: 1px;
-            width: parent.width;
-            background: Theme.border-subtle;
         }
     }
 
@@ -853,7 +796,7 @@ export component MainWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 viewport-width: self.width;
-                viewport-height: Math.max(self.height, 204px + AppState.drives.length * 61px);
+                viewport-height: Math.max(self.height, 238px + AppState.drives.length * 61px);
             VerticalLayout {
                 x: 0;
                 y: 0;
@@ -864,8 +807,9 @@ export component MainWindow inherits Window {
                 spacing: 1px;
                 alignment: start;
 
-                SectionLabel { text: "Quick access"; }
                 SidebarButton { text: "Home"; icon: AppState.home_icon; target: AppState.home_path; selected: AppState.current-path == AppState.home_path; }
+                Rectangle { height: 12px; }
+                SectionLabel { text: "Quick access"; }
                 SidebarButton { text: "Desktop"; icon: AppState.desktop_icon; target: AppState.desktop_path; selected: AppState.current-path == AppState.desktop_path; }
                 SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; selected: AppState.current-path == AppState.documents_path; }
                 SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; selected: AppState.current-path == AppState.downloads_path; }
@@ -878,23 +822,39 @@ export component MainWindow inherits Window {
 
             }
 
-            // Hairline between sidebar and file area.
-            Rectangle {
-                x: parent.width - 1px;
-                y: 0;
-                width: 1px;
-                height: parent.height;
-                background: Theme.border-subtle;
+        }
+
+        actionbar := Rectangle {
+            x: Metrics.sidebar-width; y: 0;
+            width: parent.width - Metrics.sidebar-width - Metrics.space-sm;
+            height: Metrics.actions-height;
+            background: Theme.surface;
+            border-radius: Metrics.radius-lg;
+            border-width: 1px; border-color: Theme.border-subtle;
+            HorizontalLayout {
+                padding: 7px; spacing: 4px;
+                ActionButton { label: "New folder"; shortcut: ""; width: 108px; enabled: !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_new_folder(); } IconFolderNew { x: 10px; y: 9px; tint: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                Rectangle { width: 1px; background: Theme.border-subtle; }
+                ActionButton { label: "Cut"; shortcut: "Ctrl+X"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_cut(); } FilesCut { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: "Copy"; shortcut: "Ctrl+C"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_copy(); } FilesCopy { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: "Paste"; shortcut: "Ctrl+V"; show-label: root.width >= 1000px; enabled: !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_paste(); } FilesPaste { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: "Rename"; shortcut: "F2"; show-label: root.width >= 1000px; enabled: AppState.selected_count == 1; triggered => { list-scope.focus(); AppState.request_rename(-1); } FilesRename { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: "Delete"; shortcut: "Del"; show-label: root.width >= 1000px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_delete(); } FilesDelete { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "Details"; visible: root.width >= 1100px; font-size: 12px; color: Theme.text-muted; vertical-alignment: center; }
             }
         }
 
         // File list column.
         file-list := Rectangle {
             x: Metrics.sidebar-width;
-            y: 0;
-            width: parent.width - Metrics.sidebar-width;
-            height: parent.height;
-            background: Theme.window-bg;
+            y: Metrics.actions-height + Metrics.panel-gap;
+            width: parent.width - Metrics.sidebar-width - Metrics.space-sm;
+            height: parent.height - Metrics.actions-height - Metrics.panel-gap;
+            background: Theme.content-bg;
+            border-radius: Metrics.radius-lg;
+            border-width: 1px; border-color: Theme.border-subtle;
+            clip: true;
 
             // Catches mouse back/forward and empty-area clicks for the whole
             // file column; interactive children grab their events first.
@@ -915,7 +875,7 @@ export component MainWindow inherits Window {
                 y: 0;
                 width: parent.width;
                 height: Metrics.header-height;
-                background: Theme.window-bg;
+                background: Theme.content-bg;
 
                 header := HorizontalLayout {
                     x: 0;
@@ -1195,7 +1155,7 @@ export component MainWindow inherits Window {
             y: 0;
             width: parent.width;
             height: parent.height;
-            padding-left: 12px;
+            padding-left: Metrics.sidebar-width + 8px;
             padding-right: 12px;
             spacing: Metrics.space-sm;
 

@@ -1,4 +1,12 @@
-# Kova Research Reference — Files (MIT License)
+# Kova Research Reference — Files
+
+Current follow-up: Kova now adapts specific MIT-marked vector geometry from
+Files' `Icons.Common.xaml`, pinned to commit
+`c6c05c6cc84137ed554c28b2b6521c3a9ae4b049`. See the current
+[icon attribution](../../apps/kova-desktop/ui/third-party/README.md).
+The older no-copy statements below describe the historical runtime rescue,
+not the later icon adaptation. Upstream also contains other licenses and
+third-party resources; the MIT label must not be assumed for every asset.
 
 Source repository studied:
 
