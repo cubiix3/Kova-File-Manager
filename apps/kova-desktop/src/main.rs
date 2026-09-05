@@ -553,7 +553,7 @@ fn op_was_cancelled(code: i32) -> bool {
 fn format_bytes(bytes: u64) -> String {
     const GB: u64 = 1024 * 1024 * 1024;
     const MB: u64 = 1024 * 1024;
-    let formatted = if bytes >= 1024 * GB {
+    if bytes >= 1024 * GB {
         format!("{:.1} TB", bytes as f64 / (1024 * GB) as f64)
     } else if bytes >= GB {
         format!("{:.1} GB", bytes as f64 / GB as f64)
@@ -563,8 +563,7 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
         format!("{bytes} B")
-    };
-    formatted.replace('.', ",")
+    }
 }
 
 /// Send icon requests for snapshot entries that do not have an icon yet.
@@ -884,7 +883,7 @@ fn sync_preview_path(ui: &MainWindow, ctrl: &AppController) {
             .map(|(bytes, partial)| {
                 format!(
                     "{}{} ({bytes} Bytes)",
-                    if partial { "Mindestens " } else { "" },
+                    if partial { "At least " } else { "" },
                     format_bytes(bytes)
                 )
             })
@@ -1307,7 +1306,7 @@ fn wire_callbacks(
             drop(ctrl);
             state.set_inline_visible(false);
             state.set_creating_folder(true);
-            d.dispatch_new_folder_named("Neuer Ordner");
+            d.dispatch_new_folder_named("New folder");
         });
 
     let d = dispatcher.clone();
