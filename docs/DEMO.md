@@ -1,9 +1,31 @@
-# Kova demo
+# Kova videos
+
+## Product teaser
+
+[Watch / download with sound](media/Kova-Product-Teaser.mp4?raw=true) ?
+[Silent version](media/Kova-Product-Teaser-Silent.mp4?raw=true)
+
+The 15-second teaser uses new recordings of the real Kova application: tab and
+folder navigation, Home, the native Windows Shell menu with the installed 7-Zip
+extension, three-file selection and Copy/Paste, and an image-preview hero view.
+The copied demonstration files were checked against their originals.
+
+Camera movement, viewport masks, typography and the existing Kova logo are
+composited around genuine UI footage. The soundtrack was synthesized for this
+teaser, including a music bed, whooshes, clicks and a logo impact; no third-party
+audio samples were used. Native Shell menu labels follow the Windows/provider
+languages. Kova's own controls are English.
+
+Both exports are 1920 ? 1080 H.264 MP4 at 60 FPS, with fast-start metadata. Main
+and Silent contain the same video payload; Main adds stereo AAC audio. All 900
+decoded frames were checked for black frames, adjacent duplicates and isolated
+luminance spikes, and the final timeline was reviewed visually.
+
+## Longer application demo
 
 [Download the 28-second MP4](media/kova-demo.mp4?raw=true)
 
-The README contains an animated GIF version of the same recording, with a link
-to the H.264 MP4. Both show the real release-mode Windows application, operated
+An [animated GIF version](media/kova-demo.gif) is also available. Both show the real release-mode Windows application, operated
 with mouse and keyboard input. No interface screens are generated or composited.
 
 The sequence covers Home and drive capacity, switching between two tabs, a PNG
