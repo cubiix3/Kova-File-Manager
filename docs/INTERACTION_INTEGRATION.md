@@ -11,16 +11,25 @@ are written to the existing model. Navigation/loading cancels the gesture.
 
 ## Open Windows folders in Kova
 
-Click the **KOVA menu at top left**, then **Use Kova for folders and drives**.
+Click the **Kova logo at top left**, then **Use Kova for folders and drives**.
 Kova installs its executable in `%LOCALAPPDATA%\Kova\Kova.exe`, backs up the
 current user's folder/drive defaults, and registers the `Kova.OpenFolder` verb
 under `HKCU\Software\Classes\Directory\shell` and `Drive\shell`. No administrator
 rights are required. File associations and the desktop shell are not changed.
 
+Explicit `open`, `explore` and `opennewwindow` verbs for Directory and Drive are
+also registered. Their previous per-user command and `DelegateExecute` values
+are saved separately in `folder-commands.json`. Empty delegate values mask the
+machine's Explorer COM handler. This fixes explicit Open calls that bypassed
+the earlier default-only registration (including a reproduced drive open).
+Older installations are upgraded without replacing their original backup.
+
 To undo, choose **Restore previous folder app** from the same menu. This restores
-the saved default values and removes Kova's own verb. If another app has changed
+the saved default/command values and removes Kova's own verb. If another app has changed
 the default since activation, that newer default is preserved. Keep the backup
 in `%LOCALAPPDATA%\Kova\folder-associations.json` until restoring.
+Keep `folder-commands.json` alongside it. Restore preserves a later replacement
+command and its delegate; it removes newly-created command keys only when empty.
 
 Equivalent repository commands:
 
@@ -55,6 +64,13 @@ Actual release mouse/keyboard input and Windows Shell execution:
   umlaut; opening `G:\` also reached the correct drive root.
 - Restore through the menu removed Kova's verb/default and consumed the backup.
   Kova was then enabled again as requested.
+- Explicit `Open` on `G:\` reproduced the previous Explorer fallback. After the
+  correction it launched the installed Kova executable. A real restore compared
+  all six command/delegate backups against the restored registry, including
+  earlier File Pilot registrations. Repeated Enable preserved the original backup.
+- All three explicit verbs (`open`, `explore`, `opennewwindow`) launched the
+  installed app at both a drive root and a folder containing spaces and an umlaut;
+  each resulting address was read from the real Slint window.
 - fmt / workspace check / tests / clippy with warnings denied / release passed;
   47 tests passed and 3 were intentionally ignored.
 
