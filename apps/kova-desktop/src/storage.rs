@@ -121,6 +121,7 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> slint::Timer 
                 .into_iter()
                 .map(|item| ("Folder", item))
                 .chain(result.largest_files.into_iter().map(|item| ("File", item)))
+                .filter(|(_, (bytes, _))| *bytes > 0)
                 .map(|(kind, (bytes, path))| StorageItem {
                     name: path
                         .file_name()

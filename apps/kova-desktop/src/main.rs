@@ -5,6 +5,7 @@ mod bridges;
 mod default_manager;
 mod folder_sizes;
 mod library;
+mod operations;
 mod preferences;
 mod preview;
 mod storage;
@@ -18,7 +19,7 @@ use kova_ops::worker::{WorkerCommand, spawn_worker};
 use kova_platform_windows::known_folders::{KnownFolder, resolve_known_folder};
 use kova_platform_windows::shell_icons::{IconBitmap, IconCache, IconKey, icon_key_for};
 use kova_platform_windows::shell_menu;
-use kova_platform_windows::shell_ops::{ShellOpCommand, ShellOpOutcome, spawn_shell_ops_thread};
+use kova_platform_windows::shell_ops::{ShellOpOutcome, spawn_shell_ops_thread};
 use slint::{
     ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel, Weak,
 };
@@ -227,7 +228,8 @@ async fn main() {
 
     // Dedicated shell operations thread (IFileOperation): copy/move/delete
     // run off the UI thread with native progress and conflict dialogs.
-    let (ops_tx, ops_rx) = std::sync::mpsc::channel::<ShellOpCommand>();
+    let (ops_tx, ops_rx) =
+        std::sync::mpsc::channel::<kova_platform_windows::transfers::ShellRequest>();
     let (ops_out_tx, ops_out_rx) = std::sync::mpsc::channel::<ShellOpOutcome>();
     let _ops_thread = spawn_shell_ops_thread(ops_rx, ops_out_tx);
 
@@ -246,11 +248,12 @@ async fn main() {
         .expect("initialize desktop window backend");
     let app = MainWindow::new().unwrap();
     preferences::restore(&app, &mut app_controller.lock().unwrap());
-    window_chrome::connect(&app);
+    window_chrome::connect(&app, dispatcher.transfers.clone());
     default_manager::connect(&app, dispatcher.clone());
     let _preview_timer = preview::connect(&app);
     let _storage_timer = storage::connect(&app, dispatcher.clone());
     let _library_timer = library::connect(&app, dispatcher.clone());
+    let _operations_timer = operations::connect(&app, dispatcher.clone());
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -451,6 +454,9 @@ async fn main() {
 
             // Shell file-operation outcomes: refresh the directory because
             // copy/move/delete may have changed it, and surface the result.
+            for (old, new) in reload_ref.transfers.take_moves() {
+                ctrl_ref.lock().unwrap().library.relocate(&old, &new);
+            }
             if let Ok(outcome) = ops_out_rx.try_recv() {
                 let Some(ui) = ui_ref.upgrade() else { return };
                 let mut ctrl = ctrl_ref.lock().unwrap();
@@ -708,6 +714,7 @@ fn apply_sidebar(ui: &MainWindow, data: SidebarData) {
                 usage,
                 detail: detail.into(),
                 file_system: drive.file_system.into(),
+                drive_type: drive.drive_type.into(),
                 total_text: if drive.total_bytes == 0 {
                     "Unavailable".into()
                 } else {

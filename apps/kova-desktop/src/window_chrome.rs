@@ -1,13 +1,26 @@
 //! Custom caption controls backed by the existing winit window. Slint's
 //! explicit edge/corner input surfaces start native resizing; no Win32 hooks.
-use crate::MainWindow;
+use crate::{AppState, MainWindow};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
 use slint::winit_030::winit::platform::windows::{IconExtWindows, WindowExtWindows};
 use slint::winit_030::winit::window::{Icon, ResizeDirection};
 use slint::winit_030::{EventResult, WinitWindowAccessor};
 
-pub fn connect(app: &MainWindow) {
+pub fn connect(
+    app: &MainWindow,
+    transfers: std::sync::Arc<kova_platform_windows::transfers::TransferQueue>,
+) {
+    let weak = app.as_weak();
+    let close_queue = transfers.clone();
+    app.window().on_close_requested(move || {
+        if let Some(app) = weak.upgrade() {
+            if defer_close(&app, &close_queue) {
+                return slint::CloseRequestResponse::KeepWindowShown;
+            }
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
     let weak = app.as_weak();
     app.on_resize_window(move |direction| {
         let Some(app) = weak.upgrade() else { return };
@@ -27,6 +40,9 @@ pub fn connect(app: &MainWindow) {
     app.on_window_action(move |action| {
         let Some(app) = weak.upgrade() else { return };
         if action == 3 {
+            if defer_close(&app, &transfers) {
+                return;
+            }
             if let Err(error) = app.hide() {
                 tracing::warn!(%error, "close window failed");
             }
@@ -67,6 +83,25 @@ pub fn connect(app: &MainWindow) {
         }
         EventResult::Propagate
     });
+}
+
+fn defer_close(
+    app: &MainWindow,
+    transfers: &kova_platform_windows::transfers::TransferQueue,
+) -> bool {
+    if transfers
+        .snapshots()
+        .iter()
+        .any(|transfer| !transfer.finished)
+    {
+        app.global::<AppState>().set_transfers_visible(true);
+        app.global::<AppState>().set_status_text(
+            "Transfers are running. Let them finish or cancel them before closing.".into(),
+        );
+        true
+    } else {
+        false
+    }
 }
 
 fn resize_direction(direction: i32) -> Option<ResizeDirection> {

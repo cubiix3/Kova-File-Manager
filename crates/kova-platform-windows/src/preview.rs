@@ -93,6 +93,7 @@ pub fn load_thumbnail(path: &Path) -> Result<Preview, String> {
     } else {
         crate::shell_thumbnail::load(path)
     }
+    .or_else(|| crate::shell_thumbnail::load_sized(path, 96, false))
     .ok_or_else(|| "No Windows thumbnail available".into())
 }
 

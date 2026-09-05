@@ -469,7 +469,15 @@ impl AppController {
     pub fn set_visibility(&mut self, hidden: bool, system: bool) {
         self.show_hidden = hidden;
         self.show_system = system;
+        self.refilter(None);
+    }
+
+    fn refilter(&mut self, only_tab: Option<TabId>) {
+        let (hidden, system) = (self.show_hidden, self.show_system);
         for (id, snapshot) in &mut self.snapshots {
+            if only_tab.is_some_and(|tab| tab != *id) {
+                continue;
+            }
             let Some(tab) = self.tabs.get_mut(*id) else {
                 continue;
             };
@@ -509,7 +517,7 @@ impl AppController {
             return;
         }
         self.searches.insert(self.active_tab_id(), text);
-        self.set_visibility(self.show_hidden, self.show_system);
+        self.refilter(Some(self.active_tab_id()));
     }
 }
 

@@ -55,6 +55,7 @@ impl SearchQuery {
                 || self.types.iter().any(|kind| match kind.as_str() {
                     "folder" | "directory" => entry.is_directory(),
                     "file" => !entry.is_directory(),
+                    _ if entry.is_directory() => false,
                     "image" => {
                         !entry.is_directory()
                             && [

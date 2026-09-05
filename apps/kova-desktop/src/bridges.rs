@@ -4,6 +4,7 @@ use kova_ops::worker::{GenerationCounter, WorkerCommand};
 use kova_platform_windows::known_folders::initial_location;
 use kova_platform_windows::path_resolver::{canonicalize_location, resolve_input};
 use kova_platform_windows::shell_ops::ShellOpCommand;
+use kova_platform_windows::transfers::{ShellRequest, TransferQueue};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -18,7 +19,8 @@ pub struct CommandDispatcher {
     generations: Arc<Mutex<GenerationCounter>>,
     /// Explorer-grade file operations (copy/move/delete) that must run off the
     /// UI thread on the dedicated shell-ops thread.
-    ops_tx: Sender<ShellOpCommand>,
+    ops_tx: Sender<ShellRequest>,
+    pub transfers: Arc<TransferQueue>,
 }
 
 impl CommandDispatcher {
@@ -26,13 +28,14 @@ impl CommandDispatcher {
         controller: Arc<Mutex<AppController>>,
         tx: mpsc::UnboundedSender<WorkerCommand>,
         generations: GenerationCounter,
-        ops_tx: Sender<ShellOpCommand>,
+        ops_tx: Sender<ShellRequest>,
     ) -> Self {
         Self {
             controller,
             tx,
             generations: Arc::new(Mutex::new(generations)),
             ops_tx,
+            transfers: Arc::new(TransferQueue::default()),
         }
     }
 
@@ -52,8 +55,16 @@ impl CommandDispatcher {
         }
     }
 
-    fn send_ops(&self, cmd: ShellOpCommand) {
-        let _ = self.ops_tx.send(cmd);
+    fn send_ops(&self, cmd: ShellOpCommand) -> Result<(), String> {
+        let request = self.transfers.enqueue(cmd)?;
+        self.ops_tx.send(request).map_err(|error| {
+            error.0.handle.update(|state| {
+                state.finished = true;
+                state.status = "Failed".into();
+                state.error = "Shell operations worker unavailable".into();
+            });
+            "Shell operations worker unavailable".into()
+        })
     }
 
     fn next_request_id(&self, tab_id: TabId) -> u64 {
@@ -396,7 +407,7 @@ impl CommandDispatcher {
                 dest,
             }
         };
-        self.send_ops(command);
+        self.send_ops(command)?;
         self.set_status_message(format!("Pasting {} item(s)...", count));
         Ok(())
     }
@@ -411,7 +422,7 @@ impl CommandDispatcher {
             return Err("nothing selected".into());
         }
         let count = paths.len();
-        self.send_ops(ShellOpCommand::Delete { sources: paths });
+        self.send_ops(ShellOpCommand::Delete { sources: paths })?;
         self.set_status_message(format!("Deleting {} item(s)...", count));
         Ok(())
     }

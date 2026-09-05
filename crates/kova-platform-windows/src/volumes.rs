@@ -22,12 +22,36 @@ pub struct DriveInfo {
     /// Free bytes; 0 when unknown.
     pub free_bytes: u64,
     pub file_system: String,
+    pub drive_type: String,
 }
 
 /// Enumerate local logical drives as returned by Windows. Only fixed and
 /// removable local drives are returned; CD/DVD/network drives are filtered out
 /// for M0 to keep the UI simple.
 pub fn list_local_drives() -> Vec<DriveInfo> {
+    // Suppress insert-media dialogs only on this background worker. Restore
+    // the original mode so unrelated Shell operations keep Windows behavior.
+    use windows::Win32::System::Diagnostics::Debug::{
+        GetThreadErrorMode, SEM_FAILCRITICALERRORS, SetThreadErrorMode, THREAD_ERROR_MODE,
+    };
+    struct ErrorMode(Option<THREAD_ERROR_MODE>);
+    impl Drop for ErrorMode {
+        fn drop(&mut self) {
+            if let Some(old) = self.0 {
+                unsafe {
+                    let _ = SetThreadErrorMode(old, None);
+                }
+            }
+        }
+    }
+    let _error_mode = unsafe {
+        let old = THREAD_ERROR_MODE(GetThreadErrorMode());
+        ErrorMode(
+            SetThreadErrorMode(old | SEM_FAILCRITICALERRORS, None)
+                .ok()
+                .map(|_| old),
+        )
+    };
     let mut buffer = vec![0u16; (MAX_PATH * 26) as usize];
     // SAFETY: the API receives the full writable slice and its length.
     let count = unsafe { GetLogicalDriveStringsW(Some(&mut buffer)) };
@@ -41,7 +65,8 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
         .filter_map(|wide| {
             let os_string = std::ffi::OsString::from_wide(wide);
             let path = PathBuf::from(&os_string);
-            if is_included_drive_type(&path) {
+            let drive_type = local_drive_type(&path);
+            if let Some(drive_type) = drive_type {
                 let letter = os_string.to_string_lossy().into_owned();
                 let (total_bytes, free_bytes) = drive_capacity(&path);
                 let (name, file_system) = volume_details(&path);
@@ -52,6 +77,7 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
                     path,
                     total_bytes,
                     free_bytes,
+                    drive_type: drive_type.into(),
                 })
             } else {
                 None
@@ -124,14 +150,19 @@ fn drive_capacity(root: &std::path::Path) -> (u64, u64) {
     (total, free)
 }
 
-fn is_included_drive_type(path: &std::path::Path) -> bool {
+fn local_drive_type(path: &std::path::Path) -> Option<&'static str> {
     let wide: Vec<u16> = path
         .as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
     let drive_type = unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) };
-    drive_type == DRIVE_FIXED || drive_type == DRIVE_REMOVABLE || drive_type == DRIVE_RAMDISK
+    match drive_type {
+        DRIVE_FIXED => Some("Local disk"),
+        DRIVE_REMOVABLE => Some("Removable"),
+        DRIVE_RAMDISK => Some("RAM disk"),
+        _ => None,
+    }
 }
 
 /// Convert drive information into a `FileEntry` suitable for the sidebar model.

@@ -104,7 +104,11 @@ impl Library {
             .chain(self.collections.values_mut().flatten())
         {
             if let Ok(suffix) = path.strip_prefix(old) {
-                *path = new.join(suffix);
+                *path = if suffix.as_os_str().is_empty() {
+                    new.to_path_buf()
+                } else {
+                    new.join(suffix)
+                };
                 changed = true;
             }
         }
@@ -120,6 +124,18 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exact_file_rename_does_not_append_a_directory_separator() {
+        let mut library = Library::default();
+        let old = PathBuf::from("C:\\Assets\\old.png");
+        let new = PathBuf::from("C:\\Assets\\new.png");
+        library.add(false, "Assets", [old.clone()]).unwrap();
+        library.relocate(&old, &new);
+        assert_eq!(
+            library.entries("collection:Assets").unwrap()[0].as_os_str(),
+            new.as_os_str()
+        );
+    }
     #[test]
     fn groups_are_deduplicated_references_and_follow_confirmed_renames() {
         let root = std::env::temp_dir().join("kova-library-test");
