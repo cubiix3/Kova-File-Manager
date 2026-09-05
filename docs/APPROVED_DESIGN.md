@@ -3,8 +3,24 @@
 The implemented design follows the user's approved mockup: a standalone K mark,
 tabs beside it, a framed breadcrumb bar, full-width file commands, a graphite
 Places/Drives sidebar and a folder heading above the details table. Primary
-labels are German, sizes use decimal commas and dates use day/month/year order.
+labels are now English, sizes use decimal points and dates use `YYYY-MM-DD` order.
 The existing application functions remain connected to these controls.
+
+## English interface and demo
+
+Kova's own navigation, commands, menus, file-type labels, counts, loading states
+and storage headings now use English consistently. New-folder creation starts
+with `New folder`; existing file names and paths are not translated. Dates are
+shown as `YYYY-MM-DD HH:MM`, and formatted sizes use a decimal point. Native
+Windows menus, provider names and OS error messages retain their own language.
+There is no language selector or automatic locale selection in this version.
+
+The English release-mode build was exercised on Windows 11: Home, a second tab,
+image/GIF/PDF previews, native file context menus, toolbar folder creation and F2
+inline rename. Both file operations produced the expected paths in an isolated
+fixture. A 28-second, 420-frame recording captures real inputs; decoded video
+frames confirm GIF motion. The README screenshots were refreshed from this
+build. The v0.1.0 installer still predates these changes. See [the demo](DEMO.md).
 
 File names use 14px text and 20px icons. Compact rows are 34px and comfortable
 rows 40px. Metadata is quieter than names; alternating backgrounds are subtle.
@@ -40,8 +56,9 @@ Toolbar folder creation and F2 rename changed real fixture paths and retained
 the text file's extension. An EXE fixture opened and found its relative asset.
 PDF preview remained visible and usable with the new table layout.
 The installed release matched the build's SHA-256, opened Home without arguments,
-and resized from 1280×820 to 1330×850 through a real corner drag. README captures
-were taken from that installed release.
+and resized from 1280×820 to 1330×850 through a real corner drag. Those checks
+used the earlier installed release. The current README screenshots and demo
+use the English development build; see [recording details](DEMO.md).
 
 Local checks: fmt, workspace/all-target check, 60 passing tests (3 intentionally
 ignored), Clippy with warnings denied, and an optimized release build.

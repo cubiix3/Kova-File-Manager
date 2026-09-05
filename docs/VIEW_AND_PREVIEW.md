@@ -158,17 +158,19 @@ The five local quality gates passed with 60 tests passing and 3 intentionally ig
 The inspector now has a draggable divider, file type/size metadata and Fit or
 25–400% zoom. Zoom refers to decoded preview pixels, not original-file resolution.
 See [desktop refinement and naming verification](PRODUCT_REFINEMENT.md).
-The later [approved desktop design](APPROVED_DESIGN.md) adds German primary
-labels, draggable table columns and explicit native window-resize input regions.
+The later [approved desktop design](APPROVED_DESIGN.md) adds draggable table
+columns and explicit native window-resize input regions. Kova's own labels are
+now English; native Windows and Shell-extension text follows the system/provider
+language. There is no language selector in this version.
 
 NOT VERIFIED: Windows 10 runtime, reachable UNC shares, password-protected PDFs,
 huge/malformed image and PDF fixtures, EXIF-rotated photos, optional installed
 image codecs, video/Office thumbnail providers and screen-reader behavior.
 These are not reported as runtime passes.
 
-![Home in the installed release](images/home-overview.png)
+![Home in the English development build](images/home-overview.png)
 
-![PDF preview in the release](images/file-preview.png)
+![PDF preview in the English development build](images/file-preview.png)
 
 Microsoft references: [PDF rendering](https://learn.microsoft.com/en-us/uwp/api/windows.data.pdf.pdfdocument.loadfromstreamasync),
 [bitmap transforms](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.imaging.bitmaptransform),

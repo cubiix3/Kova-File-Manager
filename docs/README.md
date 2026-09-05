@@ -5,6 +5,7 @@ Start with the [project overview and download guide](../README.md).
 ## Using Kova
 
 - [Views, previews and storage](VIEW_AND_PREVIEW.md)
+- [Demo recording and build version](DEMO.md)
 - [Folder integration and mouse selection](INTERACTION_INTEGRATION.md)
 - [Windows installation and release packaging](WINDOWS_RELEASE.md)
 - [Current design and runtime verification](APPROVED_DESIGN.md)
