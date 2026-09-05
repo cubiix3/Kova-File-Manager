@@ -165,6 +165,8 @@ pub fn connect(app: &MainWindow) -> slint::Timer {
                         state.set_preview_text(preview.text.into());
                         state.set_preview_pages(preview.pages as i32);
                         if let Some((w, h, bytes)) = preview.pixels {
+                            state.set_preview_pixel_width(w as i32);
+                            state.set_preview_pixel_height(h as i32);
                             let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(w, h);
                             pixels.make_mut_bytes().copy_from_slice(&bytes);
                             state.set_preview_image(slint::Image::from_rgba8(pixels));

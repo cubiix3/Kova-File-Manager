@@ -123,8 +123,13 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                     );
                 }
                 NewFolder { parent, name } => {
-                    match crate::file_ops::new_folder(&parent, &name).await {
-                        Ok(_) => {
+                    match crate::file_ops::new_folder_unique(&parent, &name).await {
+                        Ok(path) => {
+                            let name = path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned();
                             let _ = tx.send(KovaEvent::FolderCreated { parent, name }).await;
                         }
                         Err(error) => {
@@ -154,15 +159,26 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                     }
                 }
                 Open { path } => {
-                    let display = path.display().to_string();
-                    if let Err(error) = crate::file_ops::open_with_default_handler(&path) {
-                        let _ = tx
-                            .send(KovaEvent::OperationError {
-                                context: format!("open {}", display),
-                                error_message: error.to_string(),
-                            })
-                            .await;
-                    }
+                    let path_label = path.display().to_string();
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        tracing::info!("Opening {}", path_label);
+                        let result = tokio::task::spawn_blocking(move || {
+                            crate::file_ops::open_with_default_handler(&path)
+                        })
+                        .await;
+                        let result = result
+                            .map_err(|e| kova_core::error::OperationError::Shell(e.to_string()))
+                            .and_then(|result| result);
+                        if let Err(error) = result {
+                            let _ = tx
+                                .send(KovaEvent::OperationError {
+                                    context: format!("open {}", path_label),
+                                    error_message: error.to_string(),
+                                })
+                                .await;
+                        }
+                    });
                 }
             }
         }
