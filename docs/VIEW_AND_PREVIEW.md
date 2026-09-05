@@ -158,6 +158,8 @@ The five local quality gates passed with 60 tests passing and 3 intentionally ig
 The inspector now has a draggable divider, file type/size metadata and Fit or
 25–400% zoom. Zoom refers to decoded preview pixels, not original-file resolution.
 See [desktop refinement and naming verification](PRODUCT_REFINEMENT.md).
+The later [approved desktop design](APPROVED_DESIGN.md) adds German primary
+labels, draggable table columns and explicit native window-resize input regions.
 
 NOT VERIFIED: Windows 10 runtime, reachable UNC shares, password-protected PDFs,
 huge/malformed image and PDF fixtures, EXIF-rotated photos, optional installed

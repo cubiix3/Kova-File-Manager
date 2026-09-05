@@ -4,7 +4,9 @@
 
 Kova is an open-source desktop file manager for Windows 10/11, built with Rust,
 Slint and native Windows APIs. Browse with tabs, compare drive capacity, preview
-files and use your installed Windows Shell extensions in a compact dark interface.
+files and use your installed Windows Shell extensions in a graphite desktop interface.
+The current design has German navigation labels, readable file rows and draggable
+column separators. See [design and window-resize verification](docs/APPROVED_DESIGN.md).
 
 > **Status:** Pre-1.0, under active development. The current release build has
 > been exercised on Windows 11. See [runtime verification and preview limits](docs/VIEW_AND_PREVIEW.md)
@@ -17,7 +19,7 @@ return to the overview.*
 
 ## File previews
 
-Select a file and press **Space**, or enable **View > Preview pane**, to inspect
+Select a file and press **Space**, or enable **Ansicht > Vorschau**, to inspect
 images, text and PDF pages beside the file list. Preview work runs off the UI thread.
 GIF, animated WebP and APNG play directly in the pane, with a **Pause / Play**
 control. Playback stops when you change the selection or close the pane.
@@ -51,6 +53,7 @@ thumbnail providers. Files without a thumbnail keep their associated type icon.
 - New Folder (`Ctrl+Shift+N`) creates a uniquely named folder and edits its name
   directly in the list. `F2` renames the selection; Enter confirms and Escape
   cancels editing. File extensions are excluded from the initial text selection.
+  In the German interface these commands are **Neuer Ordner** and **Umbenennen**.
 - Programs open through the Windows Shell. Executables start with their parent
   folder as the working directory so portable apps can find relative assets.
 - Optional default folder/drive opening in Kova, with backup and restore in the
