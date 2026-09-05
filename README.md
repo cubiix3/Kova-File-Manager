@@ -20,6 +20,8 @@ native UI.
   address editing, canonical path handling with visible errors.
 - Compact command bar for New Folder, Cut, Copy, Paste, Rename and Delete;
   labeled actions collapse to icons in smaller windows.
+- Optional default folder/drive opening in Kova, with backup and restore in the
+  KOVA menu. See [setup and scope](docs/INTERACTION_INTEGRATION.md).
 - Mouse back/forward (XBUTTON1/XBUTTON2) handled through the normal
   Slint input pipeline — no hooks, no window subclassing.
 - Stale-result protection: per-tab generation/request IDs discard
@@ -38,6 +40,8 @@ native UI.
 - Virtualized details view (name / type / size / modified) with header
   sorting and indicators, single / multi (`Ctrl`) / range (`Shift`)
   selection, hover and pressed states, clean empty and loading states.
+- Mouse selection rectangle with Ctrl/Shift addition, Escape cancellation and
+  automatic scrolling at the list edges.
 - Shell icons resolved asynchronously by a dedicated worker thread with
   caching and generic fallbacks.
 

@@ -96,6 +96,9 @@ export global AppState {
     callback request_range(int);
     callback request_select_all();
     callback request_clear_selection();
+    callback request_marquee(int, int, int, bool);
+    in-out property <bool> integration-busy: false;
+    callback request-default-manager(bool);
     callback request_activate(int);
     callback request_new_folder();
     callback request_rename(int);
@@ -620,6 +623,15 @@ export component MainWindow inherits Window {
             text: "KOVA"; font-size: 12px; font-weight: 700;
             color: Theme.accent; vertical-alignment: center;
         }
+        app-menu := ContextMenuArea {
+            x: 10px; y: 4px; width: 90px; height: 32px;
+            Menu {
+                MenuItem { title: "Use Kova for folders and drives"; enabled: !AppState.integration-busy; activated => { AppState.request-default-manager(true); } }
+                MenuItem { title: "Restore previous folder app"; enabled: !AppState.integration-busy; activated => { AppState.request-default-manager(false); } }
+            }
+            TouchArea { clicked => { app-menu.show({x: 0px, y: 32px}); } }
+            Path { x: 74px; y: 12px; width: 8px; height: 5px; viewbox-width: 8; viewbox-height: 5; fill: transparent; stroke: Theme.text-muted; stroke-width: 1px; commands: "M1 1L4 4L7 1"; }
+        }
 
         tab-scroll := ScrollView {
             x: Metrics.sidebar-width;
@@ -963,7 +975,7 @@ export component MainWindow inherits Window {
                             AppState.request_context_open_in_new_tab(-1);
                             accept
                         } else if event.text == Key.Escape {
-                            AppState.request_clear_selection();
+                            if marquee.armed { marquee.finish(true); } else { AppState.request_clear_selection(); }
                             accept
                         } else if event.text == Key.LeftArrow && event.modifiers.alt {
                             AppState.request_back();
@@ -986,7 +998,7 @@ export component MainWindow inherits Window {
                         }
                     }
 
-                    ListView {
+                    file-viewport := ListView {
                         width: parent.width;
                         height: parent.height;
 
@@ -1005,8 +1017,8 @@ export component MainWindow inherits Window {
                                 border-width: item.selected ? 1px : 0px;
                                 border-color: list-scope.has-focus ? #5485a3 : Theme.border-subtle;
                                 background: item.selected
-                                    ? (row-ta.has-hover ? Theme.selection-strong : Theme.selection)
-                                    : (row-ta.pressed ? Theme.surface-pressed : (row-ta.has-hover ? Theme.surface-hover : transparent));
+                                    ? ((marquee.has-hover && marquee.hover-row == idx) ? Theme.selection-strong : Theme.selection)
+                                    : ((marquee.pressed && marquee.hover-row == idx) ? Theme.surface-pressed : ((marquee.has-hover && marquee.hover-row == idx) ? Theme.surface-hover : transparent));
                             }
 
                             HorizontalLayout {
@@ -1044,37 +1056,89 @@ export component MainWindow inherits Window {
                                 Text { text: item.modified_text; color: item.selected ? Theme.text-secondary : Theme.text-muted; font-size: 12px; width: Metrics.col-modified; vertical-alignment: center; overflow: elide; }
                             }
 
-                            row-ta := TouchArea {
-                                pointer-event(event) => {
-                                    if event.kind == PointerEventKind.down && !AppState.dialog_visible {
-                                        // Keep keyboard focus on the list scope so
-                                        // F2/F5/Enter/Ctrl+A keep working after clicks.
-                                        list-scope.focus();
-                                        if event.button == PointerEventButton.back {
-                                            AppState.request_back();
-                                        } else if event.button == PointerEventButton.forward {
-                                            AppState.request_forward();
-                                        } else if event.button == PointerEventButton.right {
-                                            // Right click selects unselected items;
-                                            // multi-selections are preserved. The
-                                            // native shell menu opens for the
-                                            // (possibly multi-) selection.
-                                            if !item.selected {
-                                                AppState.request_select(idx);
-                                            }
-                                            AppState.request_shell_menu(idx);
-                                        } else if event.modifiers.control {
-                                            AppState.request_toggle(idx);
-                                        } else if event.modifiers.shift {
-                                            AppState.request_range(idx);
-                                        } else {
-                                            AppState.request_select(idx);
-                                        }
-                                    }
-                                }
-                                double-clicked => { AppState.request_activate(idx); }
+                        }
+                    }
+
+                    // One stable input surface keeps the pointer capture alive
+                    // while rows are virtualized or the list scrolls underneath.
+                    marquee := TouchArea {
+                        width: parent.width - 14px; height: parent.height;
+                        enabled: !AppState.dialog_visible;
+                        property <bool> armed: false;
+                        property <bool> dragging: false;
+                        property <bool> additive: false;
+                        property <length> start-x;
+                        property <length> start-y;
+                        property <int> hover-row: Math.floor((self.mouse-y - file-viewport.viewport-y) / Metrics.row-height);
+                        property <string> context: AppState.current-path + "/" + AppState.active_tab + "/" + AppState.sort_column + "/" + (AppState.sort_ascending ? "asc" : "desc") + "/" + (AppState.loading ? "loading" : "ready");
+                        changed context => { self.finish(false); }
+                        function update-band() {
+                            if self.armed && self.dragging {
+                                let end-y = Math.clamp(self.mouse-y, 0px, self.height) - file-viewport.viewport-y;
+                                AppState.request_marquee(1, Math.floor(Math.min(self.start-y, end-y) / Metrics.row-height), Math.ceil(Math.max(self.start-y, end-y) / Metrics.row-height), self.additive);
                             }
                         }
+                        function finish(cancel: bool) {
+                            if self.armed { AppState.request_marquee(cancel ? 3 : 2, 0, 0, false); }
+                            self.armed = false; self.dragging = false;
+                        }
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.down {
+                                list-scope.focus();
+                                if event.button == PointerEventButton.back { AppState.request_back(); }
+                                else if event.button == PointerEventButton.forward { AppState.request_forward(); }
+                                else if event.button == PointerEventButton.right {
+                                    if self.hover-row >= 0 && self.hover-row < AppState.files.length {
+                                        if !AppState.files[self.hover-row].selected { AppState.request_select(self.hover-row); }
+                                        AppState.request_shell_menu(self.hover-row);
+                                    } else { empty-area-menu.show({ x: self.mouse-x, y: self.mouse-y }); }
+                                } else if event.button == PointerEventButton.left && !AppState.loading {
+                                    self.armed = true; self.dragging = false;
+                                    self.start-x = self.mouse-x;
+                                    self.start-y = self.mouse-y - file-viewport.viewport-y;
+                                    self.additive = event.modifiers.control || event.modifiers.shift;
+                                    AppState.request_marquee(0, 0, 0, self.additive);
+                                    if self.hover-row >= 0 && self.hover-row < AppState.files.length {
+                                        if event.modifiers.control { AppState.request_toggle(self.hover-row); }
+                                        else if event.modifiers.shift { AppState.request_range(self.hover-row); }
+                                        else { AppState.request_select(self.hover-row); }
+                                    } else if !self.additive { AppState.request_clear_selection(); }
+                                }
+                            } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                                self.finish(false);
+                            } else if event.kind == PointerEventKind.cancel { self.finish(true); }
+                        }
+                        moved => {
+                            if self.armed && self.pressed {
+                                if Math.abs(self.mouse-x - self.start-x) > 4px || Math.abs(self.mouse-y - file-viewport.viewport-y - self.start-y) > 4px { self.dragging = true; }
+                                self.update-band();
+                            }
+                        }
+                        double-clicked => {
+                            if self.hover-row >= 0 && self.hover-row < AppState.files.length { AppState.request_activate(self.hover-row); }
+                        }
+                        scroll-event(event) => {
+                            file-viewport.viewport-y = Math.clamp(file-viewport.viewport-y + event.delta-y, Math.min(0px, file-viewport.height - file-viewport.viewport-height), 0px);
+                            self.update-band();
+                            accept
+                        }
+                    }
+                    Timer {
+                        interval: 40ms;
+                        running: marquee.armed && marquee.dragging && (marquee.mouse-y < 24px || marquee.mouse-y > marquee.height - 24px);
+                        triggered => {
+                            file-viewport.viewport-y = Math.clamp(file-viewport.viewport-y + (marquee.mouse-y < 24px ? Metrics.row-height : -Metrics.row-height), Math.min(0px, file-viewport.height - file-viewport.viewport-height), 0px);
+                            marquee.update-band();
+                        }
+                    }
+                    Rectangle {
+                        visible: marquee.dragging;
+                        x: Math.clamp(Math.min(marquee.start-x, marquee.mouse-x), 0px, marquee.width);
+                        y: Math.clamp(Math.min(marquee.start-y + file-viewport.viewport-y, marquee.mouse-y), 0px, marquee.height);
+                        width: Math.max(1px, Math.clamp(Math.max(marquee.start-x, marquee.mouse-x), 0px, marquee.width) - self.x);
+                        height: Math.max(1px, Math.clamp(Math.max(marquee.start-y + file-viewport.viewport-y, marquee.mouse-y), 0px, marquee.height) - self.y);
+                        background: Theme.accent.with-alpha(0.14);
+                        border-width: 1px; border-color: Theme.accent;
                     }
 
                     // Empty and loading states, centered in the content area.

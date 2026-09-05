@@ -95,6 +95,28 @@ impl SelectionState {
         self.last_focus = None;
     }
 
+    /// Recompute a rubber-band selection from its mouse-down baseline. Using
+    /// the baseline (not the previous frame) lets the band shrink cleanly.
+    pub fn marquee(
+        &mut self,
+        baseline: &Self,
+        range: std::ops::Range<usize>,
+        additive: bool,
+        len: usize,
+    ) {
+        self.selected.clear();
+        if additive {
+            self.selected
+                .extend(baseline.selected.iter().copied().filter(|&i| i < len));
+        }
+        self.selected
+            .extend(range.start.min(len)..range.end.min(len));
+        self.selected.sort_unstable();
+        self.selected.dedup();
+        self.anchor = self.selected.first().copied();
+        self.last_focus = self.selected.last().copied();
+    }
+
     /// Preserve file identity, anchor and focus when a snapshot is reordered.
     pub fn remap(&mut self, mut index: impl FnMut(usize) -> Option<usize>) {
         self.selected = self.selected.iter().filter_map(|&i| index(i)).collect();
@@ -130,6 +152,32 @@ impl SelectionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marquee_shrinks_and_clears_without_leaving_old_rows_selected() {
+        let baseline = SelectionState::empty();
+        let mut s = baseline.clone();
+        s.marquee(&baseline, 1..8, false, 10);
+        s.marquee(&baseline, 3..5, false, 10);
+        assert_eq!(s.selected(), &[3, 4]);
+        s.marquee(&baseline, 12..15, false, 10);
+        assert!(s.is_empty());
+        assert_eq!(s.primary(), None);
+    }
+
+    #[test]
+    fn additive_marquee_preserves_baseline_and_clamps_directory_bounds() {
+        let mut baseline = SelectionState::empty();
+        baseline.select_single(1);
+        baseline.toggle(4);
+        let mut s = baseline.clone();
+        s.marquee(&baseline, 3..20, true, 6);
+        assert_eq!(s.selected(), &[1, 3, 4, 5]);
+        s.marquee(&baseline, 4..5, true, 6);
+        assert_eq!(s.selected(), &[1, 4]);
+        s.marquee(&baseline, 0..10, true, 0);
+        assert!(s.is_empty());
+    }
 
     #[test]
     fn single_select_then_toggle_multi() {

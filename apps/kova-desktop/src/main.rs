@@ -2,6 +2,7 @@
 
 mod app_state;
 mod bridges;
+mod default_manager;
 mod window_chrome;
 
 use app_state::AppController;
@@ -161,7 +162,19 @@ async fn main() {
         )
         .init();
 
-    let initial = kova_platform_windows::known_folders::initial_location();
+    let mut launch_args = std::env::args_os().skip(1);
+    let first = launch_args.next();
+    let requested = if first.as_deref() == Some(std::ffi::OsStr::new("--open")) {
+        launch_args.next()
+    } else {
+        first
+    };
+    let initial = requested
+        .and_then(|path| {
+            kova_platform_windows::path_resolver::canonicalize_location(std::path::Path::new(&path))
+                .ok()
+        })
+        .unwrap_or_else(kova_platform_windows::known_folders::initial_location);
     tracing::info!("Kova starting at {}", initial.display());
 
     // The UI thread hosts shell COM objects (native context menus, drag
@@ -220,6 +233,7 @@ async fn main() {
         .expect("initialize desktop window backend");
     let app = MainWindow::new().unwrap();
     window_chrome::connect(&app);
+    default_manager::connect(&app);
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -787,6 +801,50 @@ fn wire_callbacks(
 
     // Selection and sorting are pure view-model operations: they change
     // controller state that must be pushed back into the UI model.
+    let d = dispatcher.clone();
+    let ui_marquee = ui.clone();
+    let models_marquee = Rc::clone(&models);
+    let gesture = RefCell::new(None);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_marquee(move |phase, first, end, additive| {
+            let controller = d.controller();
+            let mut ctrl = controller.lock().unwrap();
+            let key = (ctrl.active_tab_id(), ctrl.snapshot().map(|s| s.request_id));
+            let mut gesture = gesture.borrow_mut();
+            if phase == 0 {
+                *gesture = ctrl.selection_mut().map(|s| (key, s.clone(), None));
+                return;
+            }
+            let Some((saved_key, baseline, last_range)) = gesture.as_mut() else {
+                return;
+            };
+            if *saved_key != key || ctrl.is_loading() {
+                *gesture = None;
+                return;
+            }
+            let range = (first.max(0) as usize, end.max(0) as usize, additive);
+            if phase == 1 && *last_range == Some(range) {
+                return;
+            }
+            let len = ctrl.item_count();
+            if let Some(selection) = ctrl.selection_mut() {
+                if phase == 1 {
+                    selection.marquee(baseline, range.0..range.1, additive, len);
+                    *last_range = Some(range);
+                } else if phase == 3 {
+                    *selection = baseline.clone();
+                }
+            }
+            if phase != 1 {
+                *gesture = None;
+            }
+            drop(gesture);
+            drop(ctrl);
+            if let Some(u) = ui_marquee.upgrade() {
+                sync_selection(&u, &d, &models_marquee);
+            }
+        });
     let d = dispatcher.clone();
     let ui_sel = ui.clone();
 
