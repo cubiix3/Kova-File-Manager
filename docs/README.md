@@ -4,6 +4,9 @@ Start with the [project overview and download guide](../README.md).
 
 ## Using Kova
 
+- [Gallery, search, transfers, tags and collections](NEXTGEN.md)
+- [Next-generation verification](NEXTGEN_VERIFICATION.md)
+
 - [Views, previews and storage](VIEW_AND_PREVIEW.md)
 - [Demo recording and build version](DEMO.md)
 - [Folder integration and mouse selection](INTERACTION_INTEGRATION.md)

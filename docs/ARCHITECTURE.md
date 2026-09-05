@@ -120,3 +120,26 @@ start a dedicated VS developer shell.
 - Explicit permanent-delete UI
 - Preview pane, split view, Git integration, cloud paths
 - Plugins, auto updater, telemetry
+
+
+## Snapshot views and local organization
+
+Details and Gallery consume one indexed Slint model. View changes do not enumerate
+again. SearchQuery is a core-only parser/matcher; the controller filters cached
+entries and remaps selection by path. Gallery rows are virtualized, and thumbnail
+requests cover the visible range with a bounded cache and stale-result generation.
+The inspector and storage scanner each own background workers. Storage reports
+periodic partial results and skips observed reparse/offline entries.
+
+Library stores pins and named reference groups, serialized by a dedicated worker
+to a temporary file and atomically replaced. Collections/tags are virtual locations,
+with no filesystem destination; the enumeration worker resolves their references.
+Confirmed Kova moves/renames relocate matching references. External moves require
+repair by the user; unavailable references stay visible.
+
+TransferQueue is shared plain Rust state. Only the Shell STA worker holds COM
+interfaces. File-to-file conflicts are prepared on that worker and wait on a
+bounded decision channel. IFileOperation still performs the operations. Its
+progress sink reports progress, completed file bytes and cancellation. An Advise
+guard always calls Unadvise before the operation is released. No COM interface is
+made Send or carried into the UI thread. Folder conflicts retain native handling.
