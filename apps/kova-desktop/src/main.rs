@@ -553,7 +553,7 @@ fn op_was_cancelled(code: i32) -> bool {
 fn format_bytes(bytes: u64) -> String {
     const GB: u64 = 1024 * 1024 * 1024;
     const MB: u64 = 1024 * 1024;
-    if bytes >= 1024 * GB {
+    let formatted = if bytes >= 1024 * GB {
         format!("{:.1} TB", bytes as f64 / (1024 * GB) as f64)
     } else if bytes >= GB {
         format!("{:.1} GB", bytes as f64 / GB as f64)
@@ -563,7 +563,8 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
         format!("{bytes} B")
-    }
+    };
+    formatted.replace('.', ",")
 }
 
 /// Send icon requests for snapshot entries that do not have an icon yet.
@@ -866,6 +867,32 @@ fn sync_preview_path(ui: &MainWindow, ctrl: &AppController) {
         String::new()
     };
     state.set_preview_info(info.into());
+    let selection_info = if ctrl.selected_count() == 1 {
+        ctrl.primary_selection()
+            .and_then(|i| ctrl.snapshot()?.entries.get(i))
+            .and_then(|entry| {
+                if entry.is_directory() {
+                    ctrl.folder_sizes
+                        .get(&entry.path)
+                        .and_then(|(bytes, label)| {
+                            bytes.map(|bytes| (bytes, label.starts_with('≥')))
+                        })
+                } else {
+                    entry.metadata.size.map(|bytes| (bytes, false))
+                }
+            })
+            .map(|(bytes, partial)| {
+                format!(
+                    "{}{} ({bytes} Bytes)",
+                    if partial { "Mindestens " } else { "" },
+                    format_bytes(bytes)
+                )
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    state.set_selection_info(selection_info.into());
     let path = if !ctrl.is_loading() && ctrl.selected_count() == 1 {
         ctrl.primary_selection()
             .and_then(|i| ctrl.snapshot()?.entries.get(i))
@@ -1280,7 +1307,7 @@ fn wire_callbacks(
             drop(ctrl);
             state.set_inline_visible(false);
             state.set_creating_folder(true);
-            d.dispatch_new_folder_named("New folder");
+            d.dispatch_new_folder_named("Neuer Ordner");
         });
 
     let d = dispatcher.clone();
@@ -1391,12 +1418,30 @@ fn update_ui(
     // Only touch the address bar when the navigation state actually changed;
     // otherwise a background refresh would clobber text being typed.
     let address = controller.address_path();
+    let mut crumbs = breadcrumb_items(&address);
+    for crumb in &mut crumbs {
+        crumb.label = location_label(ui, crumb.path.as_str(), crumb.label.as_str()).into();
+    }
+    if crumbs.len() == 1 && address != "Home" {
+        crumbs.insert(
+            0,
+            Breadcrumb {
+                label: "Dieser PC".into(),
+                path: "Home".into(),
+            },
+        );
+    }
+    let current = ui.global::<AppState>().get_breadcrumbs();
+    if current.row_count() != crumbs.len()
+        || current.iter().zip(&crumbs).any(|(old, new)| old != *new)
+    {
+        ui.global::<AppState>()
+            .set_breadcrumbs(ModelRc::new(VecModel::from(crumbs)));
+    }
     {
         let mut last = last_address.lock().unwrap();
         if *last != address {
             *last = address.clone();
-            ui.global::<AppState>()
-                .set_breadcrumbs(ModelRc::new(VecModel::from(breadcrumb_items(&address))));
             ui.global::<AppState>().set_address_path(address.into());
         }
     }
@@ -1454,7 +1499,7 @@ fn update_ui(
     let tabs: Vec<SharedString> = controller
         .tab_labels()
         .into_iter()
-        .map(SharedString::from)
+        .map(|label| SharedString::from(location_label(ui, &label, &label)))
         .collect();
     if models.tabs.row_count() != tabs.len() {
         models.tabs.set_vec(tabs);
@@ -1466,6 +1511,15 @@ fn update_ui(
         }
     }
     state.set_active_tab(controller.active_tab_index() as i32);
+}
+
+fn location_label(ui: &MainWindow, path: &str, fallback: &str) -> String {
+    ui.global::<AppState>()
+        .get_drives()
+        .iter()
+        .find(|drive| drive.path.as_str().eq_ignore_ascii_case(path))
+        .map(|drive| drive.name.to_string())
+        .unwrap_or_else(|| fallback.to_owned())
 }
 
 #[cfg(test)]

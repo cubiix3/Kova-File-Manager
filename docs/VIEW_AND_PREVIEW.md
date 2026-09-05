@@ -120,7 +120,7 @@ Real release mouse/keyboard verification on Windows 11:
   animation to text displayed the text correctly; a broken GIF showed an error,
   and a still PNG showed its image without playback controls. Closing/reopening
   the pane, Home/Back, F5 and 780 × 600 resize were exercised with the animation.
-  [Release playback recording](images/animated-preview.gif).
+  [Release playback recording](images/preview-playback.gif).
 - Actual Hidden/System attribute fixtures appeared when their View switches were
   enabled (5 to 6 to 7 visible items); hiding extensions changed labels only.
 - Preview remained usable at 1140 × 780 and 780 × 600 without overlapping controls.
@@ -158,15 +158,17 @@ The five local quality gates passed with 60 tests passing and 3 intentionally ig
 The inspector now has a draggable divider, file type/size metadata and Fit or
 25–400% zoom. Zoom refers to decoded preview pixels, not original-file resolution.
 See [desktop refinement and naming verification](PRODUCT_REFINEMENT.md).
+The later [approved desktop design](APPROVED_DESIGN.md) adds German primary
+labels, draggable table columns and explicit native window-resize input regions.
 
 NOT VERIFIED: Windows 10 runtime, reachable UNC shares, password-protected PDFs,
 huge/malformed image and PDF fixtures, EXIF-rotated photos, optional installed
 image codecs, video/Office thumbnail providers and screen-reader behavior.
 These are not reported as runtime passes.
 
-![Home in the installed release](images/storage-overview.png)
+![Home in the installed release](images/home-overview.png)
 
-![PDF preview in the release](images/pdf-preview.png)
+![PDF preview in the release](images/file-preview.png)
 
 Microsoft references: [PDF rendering](https://learn.microsoft.com/en-us/uwp/api/windows.data.pdf.pdfdocument.loadfromstreamasync),
 [bitmap transforms](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.imaging.bitmaptransform),

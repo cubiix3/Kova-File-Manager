@@ -498,34 +498,30 @@ fn generic_icon_id(entry: &FileEntry) -> i32 {
 
 fn kind_text(entry: &FileEntry) -> String {
     if entry.is_directory() {
-        "Folder".into()
+        "Ordner".into()
     } else {
         let ext = entry.extension_lower();
         if ext.is_empty() {
-            "File".into()
+            "Datei".into()
         } else {
-            format!("{} file", ext.to_uppercase())
+            format!("{}-Datei", ext.to_uppercase())
         }
     }
 }
 
 fn size_text(entry: &FileEntry) -> String {
-    match entry.metadata.size {
-        Some(bytes) if bytes < 1024 => format!("{} B", bytes),
-        Some(bytes) if bytes < 1024 * 1024 => format!("{:.1} KB", bytes as f64 / 1024.0),
-        Some(bytes) if bytes < 1024 * 1024 * 1024 => {
-            format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-        }
-        Some(bytes) => format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0)),
-        None => String::new(),
-    }
+    entry
+        .metadata
+        .size
+        .map(crate::format_bytes)
+        .unwrap_or_default()
 }
 
 fn modified_text(entry: &FileEntry) -> String {
     entry
         .metadata
         .modified
-        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
         .unwrap_or_default()
 }
 
