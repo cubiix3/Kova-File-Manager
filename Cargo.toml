@@ -25,7 +25,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 # Windows bindings
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Foundation",
     "Storage",
     "Storage_Streams",
