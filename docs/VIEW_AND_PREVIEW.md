@@ -34,8 +34,7 @@ file names beside the preview. This is a preview pane, not a second file pane.
 ## Storage and folder sizes
 
 **Home** is the start page when Kova launches without a folder argument and when
-creating a new tab. Click Home, **Overview** beside Devices & Drives, or
-**View > Drives and storage** to return to it.
+creating a new tab. Click **Home** or **View > Drives and storage** to return to it.
 The storage overview shows Windows volume labels, file system, free/total bytes
 and usage percentages. Its usage bars animate into place, unless animations are
 disabled. Double-click opens a drive; Back/Forward traverse Home and folders in
@@ -43,6 +42,12 @@ each tab's own history. Home is a virtual location with no filesystem target;
 file creation and paste are disabled there. Explicit folder launches bypass Home.
 Drive capacity is read on startup and refreshed with F5 on Home, off the UI thread.
 Arrow keys select a drive and Enter opens it.
+
+The sidebar groups navigation into **Places** and **Storage**. Section labels,
+icons and item names share consistent left anchors; Home uses a house glyph.
+Selected links use a slim accent marker and a muted surface. Drive capacity bars
+sit below the name, with free/total space beneath them. The full-width Home table
+provides the larger capacity comparison.
 
 **View > Calculate folder sizes** enables a separate worker for local fixed disks.
 The Size column fills with logical file-byte totals, including nested entries.
@@ -82,6 +87,9 @@ Real release mouse/keyboard verification on Windows 11:
 - The installed executable's hash matched the final release. Windows Shell Open
   launched it directly at the fixture folder; a separate no-argument launch
   opened Home. Folder registration status reported complete.
+- The refined sidebar was checked at both window sizes. Clicking Desktop and
+  the C: sidebar entry opened their real targets, and Back returned to Home.
+  Scrolling at 780 × 600 exposed the last drive's complete capacity line.
 - Folder fixtures displayed 0 B (empty), 3.0 KB (nested files), 2.0 MB (larger file)
   and ≥ 0 B for a directory containing a junction back to the fixture root.
   Size sorting placed the 3 KiB folder before the 2 MiB folder.

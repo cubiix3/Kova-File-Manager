@@ -9,9 +9,9 @@ export global Theme {
     out property <color> surface-alt: #353a42;
     out property <color> surface-hover: #3b414a;
     out property <color> surface-pressed: #454d57;
-    // Sidebar is one step above the content background so the shell reads as
-    // "navigation chrome" vs. "document area" (Files/Explorer pattern).
-    out property <color> sidebar-bg: #202328;
+    out property <color> sidebar-bg: #1d2025;
+    out property <color> sidebar-selected: #2d3740;
+    out property <color> sidebar-hover: #292e35;
     out property <color> selection: #3a4955;
     out property <color> selection-strong: #435969;
     out property <color> border: #3a3a42;
@@ -155,6 +155,8 @@ export global Metrics {
     out property <length> toolbar-height: 56px;
     out property <length> statusbar-height: 24px;
     out property <length> sidebar-width: 224px;
+    out property <length> sidebar-item-height: 36px;
+    out property <length> sidebar-drive-height: 58px;
     out property <length> actions-height: 48px;
     out property <length> panel-gap: 8px;
     out property <length> header-height: 32px;
@@ -358,29 +360,40 @@ component InputField inherits Rectangle {
     @children
 }
 
+component IconHome inherits Path {
+    in property <color> tint: Theme.text-secondary;
+    width: 18px; height: 18px;
+    viewbox-width: 20; viewbox-height: 20;
+    fill: transparent; stroke: root.tint; stroke-width: 1.5px;
+    commands: "M 2 9 L 10 2.5 L 18 9 M 4 7.5 L 4 17 L 8 17 L 8 11 L 12 11 L 12 17 L 16 17 L 16 7.5";
+}
+
 component SidebarButton inherits Rectangle {
     in property <string> text;
     in property <image> icon;
     in property <string> target: "";
     in property <bool> selected: false;
+    in property <bool> home: false;
 
-    height: 34px;
-    border-radius: Metrics.radius-sm;
-    background: selected ? Theme.selection : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.surface-hover : transparent));
+    height: Metrics.sidebar-item-height;
+    border-radius: Metrics.radius-md;
+    background: selected ? Theme.sidebar-selected : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.sidebar-hover : transparent));
 
-    Rectangle { x: 2px; y: 9px; width: 3px; height: 16px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
+    Rectangle { x: 0; y: 10px; width: 3px; height: 16px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
 
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 7px;
+        padding-left: 12px;
+        padding-right: 10px;
         spacing: Metrics.space-sm;
 
         VerticalLayout {
+            width: 18px;
             alignment: center;
-            Image {
+            if root.home: IconHome { tint: root.selected ? Theme.accent : Theme.text-secondary; }
+            if !root.home: Image {
                 source: root.icon;
-                width: Metrics.icon-size-sm;
-                height: Metrics.icon-size-sm;
+                width: 18px;
+                height: 18px;
                 image-rendering: smooth;
             }
         }
@@ -400,70 +413,39 @@ component SidebarButton inherits Rectangle {
     }
 }
 
-// Drive entry: icon + name/free-space line over a full-width usage bar. The
-// detail text keeps its preferred width (the name elides first) so free-space
-// information is not cut off early, and the bar aligns with the text column.
+// Fixed icon/text anchors keep drive names aligned with the Places links.
 component DriveRow inherits Rectangle {
     in property <DriveItem> drive;
+    property <bool> selected: AppState.current-path == drive.path;
 
-    height: 60px;
+    height: Metrics.sidebar-drive-height;
     border-radius: Metrics.radius-md;
-    background: AppState.current-path == drive.path ? Theme.selection : (drive-ta.pressed ? Theme.surface-pressed : (drive-ta.has-hover ? Theme.surface-hover : transparent));
+    background: selected ? Theme.sidebar-selected : (drive-ta.pressed ? Theme.surface-pressed : (drive-ta.has-hover ? Theme.sidebar-hover : transparent));
 
-    HorizontalLayout {
-        padding-left: 9px;
-        padding-right: 10px;
-        spacing: 10px;
-
-        VerticalLayout {
-            alignment: center;
-            Image {
-                source: drive.icon;
-                width: 20px;
-                height: 20px;
-                image-rendering: smooth;
-            }
+    Rectangle { x: 0; y: 10px; width: 3px; height: 16px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
+    Image { x: 12px; y: 8px; source: drive.icon; width: 18px; height: 18px; image-rendering: smooth; }
+    Text {
+        x: 38px; y: 6px; width: parent.width - 46px; height: 20px;
+        text: drive.name; color: root.selected ? Theme.text-primary : Theme.text-secondary;
+        font-size: 12px; vertical-alignment: center; overflow: elide;
+    }
+    Rectangle {
+        x: 38px; y: 29px; width: parent.width - 48px; height: 5px;
+        border-radius: 2px; background: Theme.surface-hover;
+        visible: drive.capacity-known;
+        Rectangle {
+            x: 0; y: 0;
+            height: parent.height;
+            width: parent.width * Math.clamp(drive.usage, 0, 1);
+            border-radius: 2px;
+            background: drive.usage > 0.9 ? Theme.danger : Theme.accent;
+            animate width { duration: AppState.animations ? 240ms : 0ms; easing: ease-out; }
         }
-
-        VerticalLayout {
-            spacing: 4px;
-            padding-top: 7px;
-            padding-bottom: 7px;
-            horizontal-stretch: 1;
-
-                Text {
-                    text: drive.name;
-                    color: Theme.text-primary;
-                    font-size: 12px;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    horizontal-stretch: 1;
-                }
-
-                Text {
-                    text: drive.detail;
-                    color: Theme.text-muted;
-                    font-size: 11px;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    visible: drive.detail != "";
-                }
-            Rectangle {
-                height: 5px;
-                border-radius: 2px;
-                background: Theme.surface-pressed;
-                visible: drive.detail != "";
-
-                Rectangle {
-                    x: 0;
-                    y: 0;
-                    height: parent.height;
-                    width: parent.width * Math.clamp(drive.usage, 0, 1);
-                    border-radius: 2px;
-                    background: drive.usage > 0.9 ? Theme.danger : Theme.accent;
-                }
-            }
-        }
+    }
+    Text {
+        x: 38px; y: 37px; width: parent.width - 46px; height: 15px;
+        text: drive.detail; color: Theme.text-muted;
+        font-size: 10px; vertical-alignment: center; overflow: elide;
     }
 
     drive-ta := NavTouchArea {
@@ -471,12 +453,12 @@ component DriveRow inherits Rectangle {
     }
 }
 
-component SectionLabel inherits Text {
-    height: 20px;
-    color: Theme.text-muted;
-    font-size: 11px;
-    font-weight: 600;
-    vertical-alignment: center;
+component SectionLabel inherits Rectangle {
+    in property <string> text;
+    in property <string> detail;
+    height: 28px;
+    Text { x: 12px; height: parent.height; text: root.text; color: Theme.text-muted; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+    Text { x: parent.width - 64px; width: 52px; height: parent.height; text: root.detail; color: Theme.text-disabled; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
 }
 
 component HeaderCell inherits Rectangle {
@@ -841,32 +823,25 @@ export component MainWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 viewport-width: self.width;
-                viewport-height: Math.max(self.height, 238px + AppState.drives.length * 61px);
+                viewport-height: Math.max(self.height, 264px + AppState.drives.length * (Metrics.sidebar-drive-height + 2px));
             VerticalLayout {
                 x: 0;
                 y: 0;
                 width: parent.width;
                 height: sidebar-scroll.viewport-height;
-                padding: Metrics.space-sm;
-                padding-top: 10px;
-                spacing: 1px;
+                padding: Metrics.space-md;
+                spacing: 2px;
                 alignment: start;
 
-                SidebarButton { text: "Home"; icon: AppState.home_icon; target: "Home"; selected: AppState.drive-overview; }
-                Rectangle { height: 12px; }
-                SectionLabel { text: "Quick access"; }
+                SidebarButton { text: "Home"; home: true; target: "Home"; selected: AppState.drive-overview; }
+                Rectangle { height: Metrics.space-md; }
+                SectionLabel { text: "Places"; }
                 SidebarButton { text: "Desktop"; icon: AppState.desktop_icon; target: AppState.desktop_path; selected: AppState.current-path == AppState.desktop_path; }
                 SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; selected: AppState.current-path == AppState.documents_path; }
                 SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; selected: AppState.current-path == AppState.downloads_path; }
 
-                Rectangle { height: 10px; }
-
-                Rectangle {
-                    height: 20px;
-                    SectionLabel { text: "Devices & drives"; }
-                    Text { x: parent.width - 56px; width: 56px; height: parent.height; text: "Overview"; color: storage-link.has-hover ? Theme.text-primary : Theme.accent; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
-                    storage-link := TouchArea { clicked => { AppState.request_navigate("Home"); } }
-                }
+                Rectangle { height: Metrics.space-md; }
+                SectionLabel { text: "Storage"; detail: AppState.drives.length + " drives"; }
                 for drive in AppState.drives: DriveRow { drive: drive; }
             }
 
