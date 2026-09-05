@@ -21,6 +21,7 @@ pub struct DriveInfo {
     pub total_bytes: u64,
     /// Free bytes; 0 when unknown.
     pub free_bytes: u64,
+    pub file_system: String,
 }
 
 /// Enumerate local logical drives as returned by Windows. Only fixed and
@@ -43,8 +44,10 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
             if is_included_drive_type(&path) {
                 let letter = os_string.to_string_lossy().into_owned();
                 let (total_bytes, free_bytes) = drive_capacity(&path);
+                let (name, file_system) = volume_details(&path);
                 Some(DriveInfo {
-                    name: drive_name(&path),
+                    name,
+                    file_system,
                     letter,
                     path,
                     total_bytes,
@@ -59,9 +62,10 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
     drives
 }
 
-fn drive_name(root: &std::path::Path) -> String {
+fn volume_details(root: &std::path::Path) -> (String, String) {
     let wide: Vec<u16> = root.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut label = [0u16; 261];
+    let mut file_system = [0u16; 64];
     // SAFETY: the root is NUL-terminated and label is a writable buffer;
     // unused output pointers are null. This runs on the sidebar worker.
     let result = unsafe {
@@ -71,7 +75,7 @@ fn drive_name(root: &std::path::Path) -> String {
             None,
             None,
             None,
-            None,
+            Some(&mut file_system),
         )
     };
     let letter = root
@@ -80,11 +84,23 @@ fn drive_name(root: &std::path::Path) -> String {
         .trim_end_matches('\\')
         .to_string();
     let len = label.iter().position(|&c| c == 0).unwrap_or(label.len());
-    if result.is_ok() && len > 0 {
+    let name = if result.is_ok() && len > 0 {
         format!("{} ({letter})", String::from_utf16_lossy(&label[..len]))
     } else {
         format!("Local drive ({letter})")
-    }
+    };
+    let fs_len = file_system
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(file_system.len());
+    (
+        name,
+        if result.is_ok() {
+            String::from_utf16_lossy(&file_system[..fs_len])
+        } else {
+            String::new()
+        },
+    )
 }
 
 /// Capacity of a drive root in (total, free) bytes; (0, 0) when unavailable.

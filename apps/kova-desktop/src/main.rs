@@ -2,6 +2,12 @@
 
 mod app_state;
 mod bridges;
+mod default_manager;
+mod folder_sizes;
+mod preferences;
+mod preview;
+mod thumbnails;
+mod window_chrome;
 
 use app_state::AppController;
 use bridges::CommandDispatcher;
@@ -150,6 +156,7 @@ fn system_drive_root() -> std::path::PathBuf {
 struct UiModels {
     files: Rc<VecModel<FileListItem>>,
     tabs: Rc<VecModel<SharedString>>,
+    thumbnails: RefCell<thumbnails::Cache>,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -160,7 +167,19 @@ async fn main() {
         )
         .init();
 
-    let initial = kova_platform_windows::known_folders::initial_location();
+    let mut launch_args = std::env::args_os().skip(1);
+    let first = launch_args.next();
+    let requested = if first.as_deref() == Some(std::ffi::OsStr::new("--open")) {
+        launch_args.next()
+    } else {
+        first
+    };
+    let initial = requested
+        .and_then(|path| {
+            kova_platform_windows::path_resolver::canonicalize_location(std::path::Path::new(&path))
+                .ok()
+        })
+        .unwrap_or_else(kova_core::domain::Location::home);
     tracing::info!("Kova starting at {}", initial.display());
 
     // The UI thread hosts shell COM objects (native context menus, drag
@@ -212,7 +231,16 @@ async fn main() {
         ops_tx,
     );
 
+    let _menu_theme = kova_platform_windows::window_theme::initialize_dark_menus();
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .select()
+        .expect("initialize desktop window backend");
     let app = MainWindow::new().unwrap();
+    preferences::restore(&app, &mut app_controller.lock().unwrap());
+    window_chrome::connect(&app);
+    default_manager::connect(&app, dispatcher.clone());
+    let _preview_timer = preview::connect(&app);
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -226,7 +254,9 @@ async fn main() {
     let ui_models = Rc::new(UiModels {
         files: files_model.clone(),
         tabs: tabs_model,
+        thumbnails: RefCell::new(thumbnails::Cache::default()),
     });
+    let _thumbnail_timer = thumbnails::connect(&app, app_controller.clone(), ui_models.clone());
 
     let icon_store = Rc::new(RefCell::new(IconStore::new(Rc::clone(&icons_model))));
     {
@@ -238,6 +268,12 @@ async fn main() {
 
     let pending_dialog = Arc::new(Mutex::new(None::<PendingDialog>));
     let last_address: LastAddress = Arc::new(Mutex::new(String::new()));
+    let _folder_size_timer = folder_sizes::connect(
+        &app,
+        Arc::clone(&app_controller),
+        Arc::clone(&last_address),
+        Rc::clone(&ui_models),
+    );
 
     // Wire UI callbacks.
     wire_callbacks(
@@ -246,6 +282,8 @@ async fn main() {
         Arc::clone(&pending_dialog),
         Arc::clone(&last_address),
         Rc::clone(&ui_models),
+        Rc::clone(&icon_store),
+        icon_req_tx.clone(),
     );
 
     // Populate sidebar targets and icons.
@@ -434,6 +472,7 @@ async fn main() {
     }
 
     app.run().unwrap();
+    preferences::save(&app);
 }
 
 /// HRESULT codes the shell reports when the user aborted a file operation in
@@ -452,10 +491,14 @@ fn op_was_cancelled(code: i32) -> bool {
 fn format_bytes(bytes: u64) -> String {
     const GB: u64 = 1024 * 1024 * 1024;
     const MB: u64 = 1024 * 1024;
-    if bytes >= GB {
-        format!("{} GB", (bytes + GB / 2) / GB)
+    if bytes >= 1024 * GB {
+        format!("{:.1} TB", bytes as f64 / (1024 * GB) as f64)
+    } else if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
     } else if bytes >= MB {
-        format!("{} MB", (bytes + MB / 2) / MB)
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
         format!("{bytes} B")
     }
@@ -547,6 +590,7 @@ fn load_sidebar() -> SidebarData {
 
 fn apply_sidebar(ui: &MainWindow, data: SidebarData) {
     let state = ui.global::<AppState>();
+    state.set_drives_loading(false);
     for (folder, location, bitmap) in data.folders {
         let path = location.display().into();
         let icon = bitmap.as_ref().map(image_from_bitmap).unwrap_or_default();
@@ -593,11 +637,47 @@ fn apply_sidebar(ui: &MainWindow, data: SidebarData) {
                 icon: bitmap.as_ref().map(image_from_bitmap).unwrap_or_default(),
                 usage,
                 detail: detail.into(),
+                file_system: drive.file_system.into(),
+                total_text: if drive.total_bytes == 0 {
+                    "Unavailable".into()
+                } else {
+                    format_bytes(drive.total_bytes).into()
+                },
+                free_text: if drive.total_bytes == 0 {
+                    "—".into()
+                } else {
+                    format_bytes(drive.free_bytes).into()
+                },
+                used_text: if drive.total_bytes == 0 {
+                    "—".into()
+                } else {
+                    format!("{:.1}%", usage * 100.0).into()
+                },
+                capacity_known: drive.total_bytes > 0,
             }
         })
         .collect();
     state.set_drives(ModelRc::new(VecModel::from(drives)));
 }
+fn refresh_drive_info(ui: &MainWindow) {
+    if ui.global::<AppState>().get_drives_loading() {
+        return;
+    }
+    ui.global::<AppState>().set_drives_loading(true);
+    let weak = ui.as_weak();
+    if std::thread::Builder::new()
+        .name("kova-drive-refresh".into())
+        .spawn(move || {
+            let data = load_sidebar();
+            let _ = weak.upgrade_in_event_loop(move |ui| apply_sidebar(&ui, data));
+        })
+        .is_err()
+    {
+        ui.global::<AppState>().set_drives_loading(false);
+        show_error_dialog(ui, "Could not start drive refresh");
+    }
+}
+
 fn show_dialog(
     ui: &MainWindow,
     title: &str,
@@ -647,6 +727,7 @@ fn sync_selection(ui: &MainWindow, dispatcher: &CommandDispatcher, models: &UiMo
     let controller = dispatcher.controller();
     let ctrl = controller.lock().unwrap();
     let selected = ctrl.selected_indices();
+    sync_preview_path(ui, &ctrl);
     ui.global::<AppState>()
         .set_selected_count(selected.len() as i32);
     for i in 0..models.files.row_count() {
@@ -658,6 +739,26 @@ fn sync_selection(ui: &MainWindow, dispatcher: &CommandDispatcher, models: &UiMo
             }
         }
     }
+}
+
+fn sync_preview_path(ui: &MainWindow, ctrl: &AppController) {
+    let state = ui.global::<AppState>();
+    let path = if !ctrl.is_loading() && ctrl.selected_count() == 1 {
+        ctrl.primary_selection()
+            .and_then(|i| ctrl.snapshot()?.entries.get(i))
+            .filter(|e| !e.is_directory())
+            .map(|e| e.path.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    if state.get_preview_path() != path {
+        state.set_preview_page(0);
+        state.set_preview_path(path.into());
+        state.set_preview_has_image(false);
+        state.set_preview_text("Select one file to preview".into());
+    }
+    state.set_preview_revision(ctrl.snapshot().map(|s| s.request_id as i32).unwrap_or(0));
 }
 
 /// Show a user-visible error for a failed user action and re-sync the UI.
@@ -680,7 +781,39 @@ fn wire_callbacks(
     pending_dialog: Arc<Mutex<Option<PendingDialog>>>,
     last_address: LastAddress,
     models: Rc<UiModels>,
+    icon_store: Rc<RefCell<IconStore>>,
+    icon_requests: std::sync::mpsc::Sender<IconRequest>,
 ) {
+    let d = dispatcher.clone();
+    let ui_view = ui.clone();
+    let last_view = Arc::clone(&last_address);
+    let models_view = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_view_option(move |option| {
+            let Some(ui) = ui_view.upgrade() else { return };
+            let state = ui.global::<AppState>();
+            match option {
+                0 => state.set_show_hidden(!state.get_show_hidden()),
+                1 => state.set_show_system(!state.get_show_system()),
+                2 => state.set_show_extensions(!state.get_show_extensions()),
+                3 => state.set_preview_visible(!state.get_preview_visible()),
+                4 => state.set_compact_rows(!state.get_compact_rows()),
+                5 => state.set_alternating_rows(!state.get_alternating_rows()),
+                6 => state.set_animations(!state.get_animations()),
+                7 => state.set_folder_sizes(!state.get_folder_sizes()),
+                _ => return,
+            }
+            let controller = d.controller();
+            let mut ctrl = controller.lock().unwrap();
+            if option <= 1 {
+                ctrl.set_visibility(state.get_show_hidden(), state.get_show_system());
+                queue_icon_requests(&icon_store, &icon_requests, &mut ctrl);
+            }
+            ctrl.show_extensions = state.get_show_extensions();
+            ctrl.folder_sizes_enabled = state.get_folder_sizes();
+            update_ui(&ui, &ctrl, &last_view, &models_view);
+        });
     let d = dispatcher.clone();
     let ui_nav = ui.clone();
     let last_nav = Arc::clone(&last_address);
@@ -732,6 +865,11 @@ fn wire_callbacks(
     ui.unwrap()
         .global::<AppState>()
         .on_request_refresh(move || {
+            if let Some(ui) = ui_refresh.upgrade() {
+                if ui.global::<AppState>().get_drive_overview() {
+                    refresh_drive_info(&ui);
+                }
+            }
             if let Err(e) = d.dispatch_refresh() {
                 show_action_error(&ui_refresh, &d, &last_refresh, &models_refresh, &e);
             }
@@ -747,6 +885,21 @@ fn wire_callbacks(
             d.dispatch_new_tab();
             if let Some(ui) = ui_new.upgrade() {
                 sync_ui(&ui, &d, &last_new, &models_new);
+            }
+        });
+
+    let d = dispatcher.clone();
+    let ui_duplicate = ui.clone();
+    let last_duplicate = Arc::clone(&last_address);
+    let models_duplicate = Rc::clone(&models);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_duplicate_location(move || {
+            if let Err(e) = d.dispatch_duplicate_location() {
+                show_action_error(&ui_duplicate, &d, &last_duplicate, &models_duplicate, &e);
+            }
+            if let Some(ui) = ui_duplicate.upgrade() {
+                sync_ui(&ui, &d, &last_duplicate, &models_duplicate);
             }
         });
 
@@ -780,6 +933,50 @@ fn wire_callbacks(
 
     // Selection and sorting are pure view-model operations: they change
     // controller state that must be pushed back into the UI model.
+    let d = dispatcher.clone();
+    let ui_marquee = ui.clone();
+    let models_marquee = Rc::clone(&models);
+    let gesture = RefCell::new(None);
+    ui.unwrap()
+        .global::<AppState>()
+        .on_request_marquee(move |phase, first, end, additive| {
+            let controller = d.controller();
+            let mut ctrl = controller.lock().unwrap();
+            let key = (ctrl.active_tab_id(), ctrl.snapshot().map(|s| s.request_id));
+            let mut gesture = gesture.borrow_mut();
+            if phase == 0 {
+                *gesture = ctrl.selection_mut().map(|s| (key, s.clone(), None));
+                return;
+            }
+            let Some((saved_key, baseline, last_range)) = gesture.as_mut() else {
+                return;
+            };
+            if *saved_key != key || ctrl.is_loading() {
+                *gesture = None;
+                return;
+            }
+            let range = (first.max(0) as usize, end.max(0) as usize, additive);
+            if phase == 1 && *last_range == Some(range) {
+                return;
+            }
+            let len = ctrl.item_count();
+            if let Some(selection) = ctrl.selection_mut() {
+                if phase == 1 {
+                    selection.marquee(baseline, range.0..range.1, additive, len);
+                    *last_range = Some(range);
+                } else if phase == 3 {
+                    *selection = baseline.clone();
+                }
+            }
+            if phase != 1 {
+                *gesture = None;
+            }
+            drop(gesture);
+            drop(ctrl);
+            if let Some(u) = ui_marquee.upgrade() {
+                sync_selection(&u, &d, &models_marquee);
+            }
+        });
     let d = dispatcher.clone();
     let ui_sel = ui.clone();
 
@@ -1023,12 +1220,33 @@ fn wire_callbacks(
         });
 }
 
+// Keep only the closest ancestors visible; Ctrl+L exposes the full editable path.
+// Path traversal here is lexical and never queries a drive or network share.
+fn breadcrumb_items(address: &str) -> Vec<Breadcrumb> {
+    let mut items: Vec<_> = std::path::Path::new(address)
+        .ancestors()
+        .take(3)
+        .map(|path| Breadcrumb {
+            label: path
+                .file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .as_ref()
+                .into(),
+            path: path.to_string_lossy().as_ref().into(),
+        })
+        .collect();
+    items.reverse();
+    items
+}
+
 fn update_ui(
     ui: &MainWindow,
     controller: &AppController,
     last_address: &LastAddress,
     models: &UiModels,
 ) {
+    sync_preview_path(ui, controller);
     // Only touch the address bar when the navigation state actually changed;
     // otherwise a background refresh would clobber text being typed.
     let address = controller.address_path();
@@ -1036,14 +1254,22 @@ fn update_ui(
         let mut last = last_address.lock().unwrap();
         if *last != address {
             *last = address.clone();
+            ui.global::<AppState>()
+                .set_breadcrumbs(ModelRc::new(VecModel::from(breadcrumb_items(&address))));
             ui.global::<AppState>().set_address_path(address.into());
         }
     }
 
     let state = ui.global::<AppState>();
     state.set_current_path(controller.address_path().into());
+    state.set_drive_overview(
+        controller
+            .current_location()
+            .is_some_and(|location| location.is_home()),
+    );
     state.set_status_text(controller.status_text().into());
     state.set_item_count(controller.item_count() as i32);
+    state.set_filtered_count(controller.filtered_count() as i32);
     state.set_selected_count(controller.selected_count() as i32);
     state.set_loading(controller.is_loading());
     state.set_directory_error(controller.directory_error().into());
@@ -1058,14 +1284,20 @@ fn update_ui(
     let items: Vec<FileListItem> = controller
         .file_list_items()
         .into_iter()
-        .map(|item| FileListItem {
-            name: item.name.into(),
-            type_name: item.type_name.into(),
-            size_text: item.size_text.into(),
-            modified_text: item.modified_text.into(),
-            icon_id: item.icon_id,
-            is_dir: item.is_dir,
-            selected: item.selected,
+        .enumerate()
+        .map(|(index, item)| {
+            let thumbnail = thumbnails::image_for_row(&state, controller, models, index);
+            FileListItem {
+                has_thumbnail: thumbnail.is_some(),
+                thumbnail: thumbnail.unwrap_or_default(),
+                name: item.name.into(),
+                type_name: item.type_name.into(),
+                size_text: item.size_text.into(),
+                modified_text: item.modified_text.into(),
+                icon_id: item.icon_id,
+                is_dir: item.is_dir,
+                selected: item.selected,
+            }
         })
         .collect();
     if models.files.row_count() != items.len() {
@@ -1093,4 +1325,26 @@ fn update_ui(
         }
     }
     state.set_active_tab(controller.active_tab_index() as i32);
+}
+
+#[cfg(test)]
+mod breadcrumb_tests {
+    use super::breadcrumb_items;
+
+    #[test]
+    fn breadcrumbs_keep_full_navigation_targets_when_deep_paths_are_shortened() {
+        let items = breadcrumb_items(r"G:\one\two\three\four");
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].label, "two");
+        assert_eq!(items[0].path, r"G:\one\two");
+        assert_eq!(items[2].path, r"G:\one\two\three\four");
+    }
+
+    #[test]
+    fn share_root_is_one_breadcrumb_not_a_server_navigation_target() {
+        let items = breadcrumb_items(r"\\server\share\folder");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].path, r"\\server\share\");
+        assert_eq!(items[1].label, "folder");
+    }
 }

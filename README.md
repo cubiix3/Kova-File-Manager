@@ -1,21 +1,53 @@
 # Kova
 
-Kova is a fast, native-first file manager for Windows 10/11 — built with Rust,
-Slint, and the official Windows APIs (`windows-rs`). No webviews, no Electron,
-no runtime emulation: a real Win32/Shell integration with a GPU-rendered
-native UI.
+<img src="apps/kova-desktop/assets/kova.svg" width="80" height="80" alt="Kova logo">
 
-> **Status:** Pre-1.0 — native desktop file manager with product-audit fixes and
-> refined UI. See [verification and remaining limits](docs/PRODUCT_AUDIT.md).
+Kova is an open-source desktop file manager for Windows 10/11, built with Rust,
+Slint and native Windows APIs. Browse with tabs, compare drive capacity, preview
+files and use your installed Windows Shell extensions in a compact dark interface.
+
+> **Status:** Pre-1.0, under active development. The current release build has
+> been exercised on Windows 11. See [runtime verification and preview limits](docs/VIEW_AND_PREVIEW.md)
+> and [folder integration scope](docs/INTERACTION_INTEGRATION.md).
+
+![Kova Home with drive capacities, usage bars and the Places and Storage sidebar](docs/images/storage-overview.png)
+
+*Home is the start page. Double-click a drive to browse it, then use Back to
+return to the overview.*
+
+## File previews
+
+Select a file and press **Space**, or enable **View > Preview pane**, to inspect
+images, text and PDF pages beside the file list. Preview work runs off the UI thread.
+GIF, animated WebP and APNG play directly in the pane, with a **Pause / Play**
+control. Playback stops when you change the selection or close the pane.
+Small thumbnails also appear beside file names: common image formats and PDF
+first pages are decoded directly, while other types use available Windows
+thumbnail providers. Files without a thumbnail keep their associated type icon.
+
+![Kova details view with a PDF page rendered in the preview pane](docs/images/pdf-preview.png)
+
+*Screenshots show the real Windows release application. The PDF is a test fixture.*
+
+<details>
+<summary>Animated preview in action (release app recording)</summary>
+
+![GIF playback inside Kova's preview pane](docs/images/animated-preview.gif)
+
+</details>
 
 ## Features
 
 **Navigation & tabs**
 
-- Pill-style tabs with close buttons and independent per-tab state
+- Integrated title-bar tabs with close buttons and independent per-tab state
   (history, selection, sorting).
-- Back / Forward / Parent / Refresh, address bar with `Ctrl+L`
-  focus + select-all, canonical path handling with visible errors.
+- Back / Forward / Parent / Refresh, clickable path breadcrumbs and `Ctrl+L`
+  address editing, canonical path handling with visible errors.
+- Compact command bar for New Folder, Cut, Copy, Paste, Rename and Delete;
+  labeled actions collapse to icons in smaller windows.
+- Optional default folder/drive opening in Kova, with backup and restore in the
+  logo menu. See [setup and scope](docs/INTERACTION_INTEGRATION.md).
 - Mouse back/forward (XBUTTON1/XBUTTON2) handled through the normal
   Slint input pipeline — no hooks, no window subclassing.
 - Stale-result protection: per-tab generation/request IDs discard
@@ -23,19 +55,33 @@ native UI.
 
 **Sidebar & drives**
 
-- Quick Access (Home, Desktop, Documents, Downloads) via
+- Home opens the storage overview on startup and in new tabs, with independent
+  Back/Forward history. Explicit folder launches still open their target directly.
+- Places shortcuts (Desktop, Documents, Downloads) via
   `SHGetKnownFolderPath`, with real shell icons.
 - Drive discovery at startup (`GetLogicalDriveStringsW` / `GetDriveTypeW`)
-  with usage bars and "X GB free of Y GB" details (danger color above 90 %
+  with aligned Storage entries, usage bars and "X GB free of Y GB" details (danger color above 90 %
   usage).
+- Storage overview with file system, free/total capacity and animated
+  usage percentages; double-click a drive to open it.
 
 **File list**
 
 - Virtualized details view (name / type / size / modified) with header
   sorting and indicators, single / multi (`Ctrl`) / range (`Shift`)
   selection, hover and pressed states, clean empty and loading states.
+- Mouse selection rectangle with Ctrl/Shift addition, Escape cancellation and
+  automatic scrolling at the list edges.
 - Shell icons resolved asynchronously by a dedicated worker thread with
   caching and generic fallbacks.
+- File thumbnails loaded for visible rows on local fixed disks, with a bounded
+  cache and stale-result protection. Transparent images retain their transparency.
+- View menu for hidden/system files, file extensions, row density and alternating
+  row colors. Visibility changes preserve selection by path and use cached entries.
+- Optional bounded background folder-size calculations on local fixed disks,
+  with incomplete totals explicitly marked.
+- Optional image, text and paginated PDF preview pane, decoded off the UI thread.
+  See [view options and preview limits](docs/VIEW_AND_PREVIEW.md).
 
 **Native Windows integration**
 
@@ -43,7 +89,8 @@ native UI.
   `IContextMenu2`/`IContextMenu3` message forwarding) for files and
   folders, including installed shell extensions (7-Zip, Git, "Open with",
   Properties). Multi-selection behaves like Explorer.
-- A small Kova context menu on empty space (New Folder, Paste, Refresh).
+- Background context menu with New Folder, Paste, current folder in a new tab,
+  sort column/direction, Refresh, Select All and Clear Selection.
 - Copy / Cut / Paste / Delete through `IFileOperation` on a dedicated COM
   thread: Recycle-Bin deletes, native progress and conflict dialogs, the
   UI thread is never blocked.
@@ -55,6 +102,7 @@ native UI.
 - `F5` refresh, `F2` rename, `Del` delete, `Ctrl+C`/`Ctrl+X`/`Ctrl+V`
   clipboard, `Ctrl+A` select all, `Enter` open, `Alt+←/→/↑`
   back/forward/parent, `Ctrl+L` address bar.
+- `Ctrl+H` toggles hidden files; `Space` toggles the preview pane from the file list.
 
 ## Architecture
 
@@ -82,13 +130,26 @@ Slint's Skia renderer is enabled for Windows rendering. The first build may
 download Skia's prebuilt libraries. MSVC builds reserve an 8 MiB main-thread
 stack for Slint's generated UI, including debug builds.
 
-`scripts/cargo-msvc.ps1` locates Visual Studio, imports the MSVC
-environment and runs the requested cargo command:
+Clone the repository, then build and launch the release application.
+`scripts/cargo-msvc.ps1` locates Visual Studio and imports the MSVC environment:
 
 ```powershell
-.\scripts\cargo-msvc.ps1 cargo build --workspace --release
-.\scripts\cargo-msvc.ps1 cargo run --bin kova-desktop
+git clone https://github.com/cubiix3/Kova-File-Manager.git
+cd Kova-File-Manager
+.\scripts\cargo-msvc.ps1 -CargoArgs @('build', '--workspace', '--release')
+.\target\release\kova-desktop.exe
 ```
+
+Launching without arguments opens Home. To open a folder directly:
+
+```powershell
+.\target\release\kova-desktop.exe --open 'C:\Windows'
+```
+
+The logo menu offers optional per-user default folder/drive registration and
+restoration. This does not intercept Win+E, file pickers, virtual Shell locations
+or programs that explicitly invoke Explorer. Read the
+[setup and restoration guide](docs/INTERACTION_INTEGRATION.md) before enabling it.
 
 Quality gates (enforced by CI):
 
@@ -101,17 +162,23 @@ Quality gates (enforced by CI):
 
 ## Roadmap
 
-Implemented: M0 (runtime foundation), M1 (shell icons, context menus, mouse
-navigation), M2 (native shell menus, copy/cut/paste/delete), M3 (visual
-polish: sidebar, tabs, toolbar, rows, drives, empty states).
+The current build includes tabbed navigation, native Shell menus and file
+operations, mouse rectangle selection, a storage Home page, view preferences,
+file previews and optional background folder-size calculation.
 
-Not started yet: global search, preview pane, drag & drop, undo, resizable
-columns, "This PC" overview, cloud/network-specific handling. See
+Not started yet: global search, drag & drop, undo, resizable
+columns and cloud/network-specific handling. See
 [`docs/PRODUCT.md`](docs/PRODUCT.md).
 
 ## Documentation
 
-- [`docs/PRODUCT_AUDIT.md`](docs/PRODUCT_AUDIT.md) — current audit and verification
+- [`docs/VIEW_AND_PREVIEW.md`](docs/VIEW_AND_PREVIEW.md) — Home, view options,
+  previews, folder-size limits and latest runtime verification
+- [`docs/INTERACTION_INTEGRATION.md`](docs/INTERACTION_INTEGRATION.md) — mouse
+  selection and reversible default folder registration
+- [`docs/VISUAL_POLISH.md`](docs/VISUAL_POLISH.md) — desktop chrome, branding and
+  native menu verification
+- [`docs/PRODUCT_AUDIT.md`](docs/PRODUCT_AUDIT.md) — product audit and findings
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — workspace layout, crate
   responsibilities, concurrency model
 - [`docs/PRODUCT.md`](docs/PRODUCT.md) — product goals and scope
@@ -137,5 +204,6 @@ additional terms or conditions.
 - [files-community/Files](https://github.com/files-community/Files) (MIT) —
   studied as a UX/interaction reference (pointer states, tab switching,
   selection model, error surfacing). Kova is an independent implementation;
-  no code was copied. See
+  selected MIT-licensed icon geometry is adapted with attribution in
+  [`ui/third-party`](apps/kova-desktop/ui/third-party/README.md). See
   [`docs/research/FILES_REFERENCE.md`](docs/research/FILES_REFERENCE.md).

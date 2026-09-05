@@ -10,14 +10,16 @@ rust-version.workspace = true
 kova-core = { workspace = true }
 kova-platform-windows = { workspace = true }
 kova-ops = { workspace = true }
-slint = { workspace = true }
+slint = { workspace = true, features = ["unstable-winit-030"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
+raw-window-handle = "0.6"
 
 [build-dependencies]
 slint-build = "1.13"
+winresource = "0.1.31"
 
 [[bin]]
 name = "kova-desktop"

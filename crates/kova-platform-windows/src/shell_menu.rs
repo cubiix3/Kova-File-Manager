@@ -156,6 +156,7 @@ fn ensure_host() -> Option<HWND> {
             None,
         )
         .ok()?;
+        crate::window_theme::allow_dark_menu_host(hwnd);
         MENU_HOST.with(|h| *h.borrow_mut() = Some(hwnd));
         Some(hwnd)
     }

@@ -65,6 +65,17 @@ impl CommandDispatcher {
         {
             let mut ctrl = self.controller.lock().unwrap();
             ctrl.record_request(tab_id, request_id);
+            if location.is_home() {
+                ctrl.apply_snapshot(
+                    tab_id,
+                    kova_core::domain::DirectorySnapshot {
+                        location,
+                        request_id,
+                        entries: Vec::new(),
+                    },
+                );
+                return;
+            }
             ctrl.set_status(format!("Loading {}...", location.display()));
         }
         self.send(WorkerCommand::Enumerate {
@@ -84,12 +95,16 @@ impl CommandDispatcher {
     pub fn dispatch_navigate(&self, input: LocationInput) -> Result<(), String> {
         let ctrl = self.controller.lock().unwrap();
         let base = ctrl
-            .current_location()
+            .current_directory()
             .cloned()
             .unwrap_or_else(initial_location);
         drop(ctrl);
 
-        let location = resolve_input(&input, &base).map_err(|e| e.to_string())?;
+        let location = if input.raw.trim().eq_ignore_ascii_case("home") {
+            Location::home()
+        } else {
+            resolve_input(&input, &base).map_err(|e| e.to_string())?
+        };
         {
             let mut ctrl = self.controller.lock().unwrap();
             ctrl.navigate(location.clone());
@@ -145,12 +160,25 @@ impl CommandDispatcher {
     }
 
     pub fn dispatch_new_tab(&self) {
-        let initial = initial_location();
+        let initial = Location::home();
         let id = {
             let mut ctrl = self.controller.lock().unwrap();
             ctrl.new_tab(initial.clone())
         };
         self.request_enumeration(id, initial);
+    }
+
+    pub fn dispatch_duplicate_location(&self) -> Result<(), String> {
+        let (id, location) = {
+            let mut ctrl = self.controller.lock().unwrap();
+            let location = ctrl
+                .current_location()
+                .cloned()
+                .ok_or("no current location")?;
+            (ctrl.new_tab(location.clone()), location)
+        };
+        self.request_enumeration(id, location);
+        Ok(())
     }
 
     /// Open the entry at `index` in a brand-new tab. Only directories are
@@ -280,7 +308,7 @@ impl CommandDispatcher {
         if name.is_empty() {
             return;
         }
-        let parent = match self.controller.lock().unwrap().current_location().cloned() {
+        let parent = match self.controller.lock().unwrap().current_directory().cloned() {
             Some(l) => l,
             None => return,
         };
@@ -329,7 +357,7 @@ impl CommandDispatcher {
             .ok_or("the clipboard does not contain any files")?;
         let dest = {
             let ctrl = self.controller.lock().unwrap();
-            ctrl.current_location()
+            ctrl.current_directory()
                 .cloned()
                 .ok_or("no current location")?
                 .path
@@ -437,4 +465,22 @@ fn resolve_index(ctrl: &AppController, index: usize) -> Option<&kova_core::domai
         index
     };
     snapshot.entries.get(idx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn home_does_not_enqueue_filesystem_reads_or_folder_creation() {
+        let controller = Arc::new(Mutex::new(AppController::new(Location::home())));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (ops_tx, _ops_rx) = std::sync::mpsc::channel();
+        let dispatcher = CommandDispatcher::new(controller.clone(), tx, Default::default(), ops_tx);
+        let id = controller.lock().unwrap().active_tab_id();
+        dispatcher.request_enumeration(id, Location::home());
+        dispatcher.dispatch_new_folder_named("must-not-be-created");
+        assert!(rx.try_recv().is_err());
+        assert!(!controller.lock().unwrap().is_loading());
+        assert_eq!(controller.lock().unwrap().item_count(), 0);
+    }
 }

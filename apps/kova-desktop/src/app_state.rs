@@ -25,6 +25,12 @@ pub struct FileListItem {
 pub struct AppController {
     tabs: TabCollection,
     snapshots: HashMap<TabId, DirectorySnapshot>,
+    excluded: HashMap<TabId, Vec<FileEntry>>,
+    pub show_hidden: bool,
+    pub show_system: bool,
+    pub show_extensions: bool,
+    pub folder_sizes_enabled: bool,
+    pub folder_sizes: HashMap<std::path::PathBuf, (Option<u64>, String)>,
     request_ids: HashMap<TabId, u64>,
     status_text: String,
     pending: HashSet<TabId>,
@@ -36,6 +42,12 @@ impl AppController {
         Self {
             tabs: TabCollection::new(initial),
             snapshots: HashMap::new(),
+            excluded: HashMap::new(),
+            show_hidden: false,
+            show_system: false,
+            show_extensions: true,
+            folder_sizes_enabled: false,
+            folder_sizes: HashMap::new(),
             request_ids: HashMap::new(),
             status_text: "Ready".into(),
             pending: HashSet::new(),
@@ -58,6 +70,11 @@ impl AppController {
 
     pub fn current_location(&self) -> Option<&Location> {
         self.tabs.active().and_then(|t| t.history.current())
+    }
+
+    pub fn current_directory(&self) -> Option<&Location> {
+        self.current_location()
+            .filter(|location| !location.is_home())
     }
 
     pub fn tab_locations(&self) -> Vec<(TabId, Location)> {
@@ -124,6 +141,7 @@ impl AppController {
         }
         self.pending.remove(&tab_id);
         self.snapshots.remove(&tab_id);
+        self.excluded.remove(&tab_id);
         if let Some(tab) = self.tabs.get_mut(tab_id) {
             tab.selection.clear();
         }
@@ -137,6 +155,9 @@ impl AppController {
             .map(|t| {
                 t.current_location()
                     .map(|l| {
+                        if l.is_home() {
+                            return "Home".into();
+                        }
                         l.path
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
@@ -150,6 +171,10 @@ impl AppController {
     /// Number of entries in the active tab's snapshot.
     pub fn item_count(&self) -> usize {
         self.snapshot().map(|s| s.entries.len()).unwrap_or(0)
+    }
+
+    pub fn filtered_count(&self) -> usize {
+        self.excluded.get(&self.active_tab_id()).map_or(0, Vec::len)
     }
 
     /// Number of selected rows in the active tab.
@@ -185,7 +210,9 @@ impl AppController {
             .get(&tab_id)
             .map(|s| s.entries.iter().map(|e| e.path.clone()).collect())
             .unwrap_or_default();
-        let mut entries = snapshot.entries;
+        let (mut entries, excluded) =
+            partition_visible(snapshot.entries, self.show_hidden, self.show_system);
+        self.excluded.insert(tab_id, excluded);
         kova_core::domain::sort_entries(&mut entries, tab.sort);
         let new_indices: HashMap<_, _> = entries
             .iter()
@@ -223,6 +250,7 @@ impl AppController {
             self.tabs.get(tab_id).and_then(|t| t.current_location()) != Some(&s.location)
         }) {
             self.snapshots.remove(&tab_id);
+            self.excluded.remove(&tab_id);
         }
     }
 
@@ -271,6 +299,7 @@ impl AppController {
         let id = self.tabs.tabs().get(index)?.id;
         let active = self.tabs.close(id)?;
         self.snapshots.remove(&id);
+        self.excluded.remove(&id);
         self.request_ids.remove(&id);
         self.pending.remove(&id);
         self.errors.remove(&id);
@@ -345,9 +374,24 @@ impl AppController {
             .iter()
             .enumerate()
             .map(|(idx, e)| FileListItem {
-                name: e.name.clone(),
+                name: if self.show_extensions || e.is_directory() {
+                    e.name.clone()
+                } else {
+                    std::path::Path::new(&e.name)
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                },
                 type_name: kind_text(e),
-                size_text: size_text(e),
+                size_text: if e.is_directory() && self.folder_sizes_enabled {
+                    self.folder_sizes
+                        .get(&e.path)
+                        .map(|(_, label)| label.clone())
+                        .unwrap_or_else(|| "…".into())
+                } else {
+                    size_text(e)
+                },
                 modified_text: modified_text(e),
                 icon_id: effective_icon_id(e),
                 is_dir: e.is_directory(),
@@ -371,6 +415,22 @@ impl AppController {
         if let Some(snap) = self.snapshots.get_mut(&id) {
             let old_paths: Vec<_> = snap.entries.iter().map(|e| e.path.clone()).collect();
             kova_core::domain::sort_entries(&mut snap.entries, tab.sort);
+            if self.folder_sizes_enabled && column == SortColumn::Size {
+                let folders = snap.entries.iter().take_while(|e| e.is_directory()).count();
+                snap.entries[..folders].sort_by(|a, b| {
+                    let size = |e: &FileEntry| {
+                        self.folder_sizes.get(&e.path).and_then(|(bytes, _)| *bytes)
+                    };
+                    let order = size(a)
+                        .cmp(&size(b))
+                        .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                    if tab.sort.direction == SortDirection::Ascending {
+                        order
+                    } else {
+                        order.reverse()
+                    }
+                });
+            }
             let indices: HashMap<_, _> = snap
                 .entries
                 .iter()
@@ -381,6 +441,42 @@ impl AppController {
                 .remap(|i| old_paths.get(i).and_then(|p| indices.get(p).copied()));
         }
     }
+
+    /// Refilter cached entries and remap selection by path, so hidden items
+    /// cannot accidentally become targets of a later file operation.
+    pub fn set_visibility(&mut self, hidden: bool, system: bool) {
+        self.show_hidden = hidden;
+        self.show_system = system;
+        for (id, snapshot) in &mut self.snapshots {
+            let Some(tab) = self.tabs.get_mut(*id) else {
+                continue;
+            };
+            let old_paths: Vec<_> = snapshot.entries.iter().map(|e| e.path.clone()).collect();
+            let mut all = std::mem::take(&mut snapshot.entries);
+            all.extend(self.excluded.remove(id).unwrap_or_default());
+            let (mut visible, excluded) = partition_visible(all, hidden, system);
+            kova_core::domain::sort_entries(&mut visible, tab.sort);
+            let indices: HashMap<_, _> = visible
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (e.path.clone(), i))
+                .collect();
+            tab.selection
+                .remap(|i| old_paths.get(i).and_then(|p| indices.get(p).copied()));
+            snapshot.entries = visible;
+            self.excluded.insert(*id, excluded);
+        }
+    }
+}
+
+fn partition_visible(
+    entries: Vec<FileEntry>,
+    hidden: bool,
+    system: bool,
+) -> (Vec<FileEntry>, Vec<FileEntry>) {
+    entries
+        .into_iter()
+        .partition(|e| (!e.metadata.is_hidden || hidden) && (!e.metadata.is_system || system))
 }
 
 /// Icon id for a row: the resolved shell icon when present, otherwise the
@@ -457,6 +553,71 @@ fn dummy_snapshot(request_id: u64, name: &str) -> DirectorySnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_is_a_history_location_without_a_filesystem_target() {
+        let mut ctrl = AppController::new(Location::home());
+        assert_eq!(ctrl.tab_labels(), ["Home"]);
+        assert!(ctrl.current_directory().is_none());
+        assert!(!ctrl.can_go_parent());
+        ctrl.navigate(Location::new("C:\\dummy".into()));
+        assert!(ctrl.current_directory().is_some());
+        assert!(ctrl.back().unwrap().is_home());
+        assert!(ctrl.current_directory().is_none());
+        assert_eq!(
+            ctrl.forward().unwrap().path,
+            std::path::PathBuf::from("C:\\dummy")
+        );
+    }
+
+    #[test]
+    fn visibility_remaps_selection_and_keeps_hidden_entries_available() {
+        let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+        let id = ctrl.active_tab_id();
+        let mut snap = dummy_snapshot(1, "visible");
+        let mut hidden = dummy_snapshot(1, "hidden").entries.remove(0);
+        hidden.metadata.is_hidden = true;
+        let mut system = dummy_snapshot(1, "system").entries.remove(0);
+        system.metadata.is_system = true;
+        snap.entries.extend([hidden, system]);
+        ctrl.record_request(id, 1);
+        ctrl.apply_snapshot(id, snap);
+        assert_eq!(ctrl.item_count(), 1);
+        ctrl.selection_mut().unwrap().select_single(0);
+        let selected = ctrl.selected_paths();
+        ctrl.set_visibility(true, true);
+        assert_eq!(ctrl.item_count(), 3);
+        assert_eq!(ctrl.selected_paths(), selected);
+        ctrl.selection_mut().unwrap().select_all(3);
+        ctrl.set_visibility(false, false);
+        assert_eq!(ctrl.selected_paths(), selected);
+        assert_eq!(ctrl.selected_count(), 1);
+        ctrl.set_visibility(true, false);
+        assert_eq!(ctrl.item_count(), 2);
+        assert!(
+            ctrl.snapshot()
+                .unwrap()
+                .entries
+                .iter()
+                .all(|e| !e.metadata.is_system)
+        );
+    }
+
+    #[test]
+    fn hiding_extensions_does_not_change_operation_paths_or_folder_names() {
+        let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+        let id = ctrl.active_tab_id();
+        let mut snap = dummy_snapshot(1, "archive.txt");
+        snap.entries[0].kind = FileKind::File;
+        snap.entries
+            .extend(dummy_snapshot(1, "folder.name").entries);
+        ctrl.record_request(id, 1);
+        ctrl.apply_snapshot(id, snap);
+        ctrl.show_extensions = false;
+        assert_eq!(ctrl.file_list_items()[0].name, "folder.name");
+        assert_eq!(ctrl.file_list_items()[1].name, "archive");
+        assert!(ctrl.path_at(1).unwrap().ends_with("archive.txt"));
+    }
 
     #[test]
     fn sort_and_refresh_preserve_selected_file_identity() {
