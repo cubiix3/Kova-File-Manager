@@ -12,7 +12,7 @@
   <a href="https://github.com/cubiix3/Kova-File-Manager/issues">Report an issue</a>
 </p>
 
-[![Watch the Kova product teaser](docs/images/product-teaser.png)](docs/media/Kova-Product-Teaser.mp4?raw=true)
+[![Kova: your files, in full focus](docs/images/product-overview.png)](docs/images/current-details.png)
 
 Kova combines tabbed browsing, a thumbnail gallery, native Windows context menus
 and an inspector in a compact desktop interface. Built with **Rust, Slint and Win32/Shell APIs** for
@@ -48,7 +48,7 @@ replace Win+E, Windows file pickers or every explicit Explorer invocation.
 
 | Feature | Included |
 | --- | --- |
-| **Browse** | Tabs with independent history, breadcrumbs, familiar shortcuts and mouse Back/Forward |
+| **Browse** | Tabs with independent history, breadcrumbs, automatic folder updates, familiar shortcuts and mouse Back/Forward |
 | **Manage files** | Native copy, move and Recycle Bin deletion; transfer history, progress and cancellation; explicit Replace / Skip / Keep Both conflicts |
 | **See more** | Details and three gallery sizes; image, text and PDF inspector; animated GIF, WebP and APNG; media metadata and Shell thumbnails |
 | **Stay organized** | Local tags and collections, pinned folders with reordering; sortable columns and rectangular multi-selection |
@@ -59,39 +59,33 @@ replace Win+E, Windows file pickers or every explicit Explorer invocation.
 
 ## A closer look
 
-### Start with your drives
-
-Home opens at startup. Compare capacity and free space, then double-click a drive
-to browse it. Explicit folder launches open the requested folder directly.
-
-![Kova Home showing drives, free space and usage bars](docs/images/home-overview.png)
-
-### Browse visually
+### See more. Stay in flow.
 
 Switch between Details and Gallery without changing the folder or selection.
 Choose small, medium or large tiles, then inspect a file alongside the gallery.
 
-![Kova Gallery with the file inspector](docs/images/nextgen-gallery.png)
-
-### Preview without leaving the folder
+[![Gallery and inspector in the current Kova build](docs/images/product-gallery.png)](docs/images/current-gallery.png)
 
 Select a file and press **Space**. Read text, inspect images or page through a PDF
-alongside your file list. Resize the pane and use Fit or zoom for a closer look.
+alongside your files. GIF, animated WebP and APNG support Play/Pause.
 
-![A PDF displayed alongside Kova's file list](docs/images/file-preview.png)
+### Feels new. Works native.
 
-<details>
-<summary>Watch an animated preview</summary>
+Use your installed Shell extensions, associated applications and familiar
+Windows commands directly from Kova's native context menu.
 
-![A GIF playing inside Kova's preview pane](docs/images/preview-playback.gif)
+[![Kova with the native Windows context menu](docs/images/product-native.png)](docs/images/current-native.png)
 
-GIF, animated WebP and APNG support Play/Pause. Playback stops when the selection
-changes or the pane closes.
+### Every drive. One place.
 
-</details>
+Compare capacity and free space in Home, then open a drive or analyze a folder's
+storage. Keep your regular destinations close with pinned folders.
 
-The screenshots are real application captures using demonstration files.
-See [the current feature guide](docs/NEXTGEN.md) for controls and limitations.
+[![Kova Home with drive capacity and Quick access](docs/images/product-storage.png)](docs/images/current-home.png)
+
+These product images use real captures of the current release build with
+demonstration files. Click an image for the original screenshot.
+[About the images](docs/DEMO.md) · [Feature guide and limitations](docs/NEXTGEN.md).
 
 ### Stay in control of transfers
 
