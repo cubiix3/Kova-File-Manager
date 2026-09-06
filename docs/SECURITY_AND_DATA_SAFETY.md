@@ -4,7 +4,10 @@ File identity and data integrity take priority over visual changes. Mutating tes
 use unique temporary directories or a designated ignored runtime sandbox.
 
 Copy, Move and Delete run on a dedicated COM thread through Windows
-IFileOperation, with native conflict/progress UI and undo/Recycle Bin support.
+IFileOperation, with Kova transfer progress and undo/Recycle Bin support.
+Regular-file conflicts require Replace, Skip or Keep Both; directory merges and
+unusual Shell objects retain native Windows handling. Confirmation suppression
+is limited to explicitly approved replacement groups.
 Windows controls whether a destination supports recycling; Kova does not silently
 substitute a recursive permanent-delete implementation. Cancellation may mean
 partial completion, so all open directory views are reconciled afterwards.

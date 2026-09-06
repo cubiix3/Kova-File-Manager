@@ -9,7 +9,7 @@
 //! The heavy work happens on a dedicated worker thread; the UI only touches
 //! the produced buffers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -93,9 +93,31 @@ impl IconBitmap {
 /// instrumentation for the icon pipeline.
 #[derive(Default)]
 pub struct IconCache {
-    entries: Mutex<HashMap<IconKey, Option<IconBitmap>>>,
+    entries: Mutex<CacheEntries>,
     hits: std::sync::atomic::AtomicU64,
     misses: std::sync::atomic::AtomicU64,
+}
+
+const CACHE_LIMIT: usize = 1024;
+
+#[derive(Default)]
+struct CacheEntries {
+    values: HashMap<IconKey, Option<IconBitmap>>,
+    order: VecDeque<IconKey>,
+}
+
+impl CacheEntries {
+    fn insert(&mut self, key: IconKey, value: Option<IconBitmap>) {
+        if !self.values.contains_key(&key) {
+            while self.values.len() >= CACHE_LIMIT {
+                if let Some(oldest) = self.order.pop_front() {
+                    self.values.remove(&oldest);
+                }
+            }
+            self.order.push_back(key.clone());
+        }
+        self.values.insert(key, value);
+    }
 }
 
 impl IconCache {
@@ -108,7 +130,7 @@ impl IconCache {
     /// not retried for every repaint request.
     pub fn get_or_resolve(&self, key: &IconKey) -> Option<IconBitmap> {
         let mut entries = self.entries.lock().unwrap();
-        if let Some(cached) = entries.get(key) {
+        if let Some(cached) = entries.values.get(key) {
             self.hits.fetch_add(1, Ordering::Relaxed);
             return cached.clone();
         }
@@ -299,6 +321,37 @@ impl Drop for IconGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_evicts_old_pixels_and_negative_keys() {
+        let mut entries = CacheEntries::default();
+        for id in 0..10_000 {
+            entries.insert(
+                IconKey::Path(PathBuf::from(format!("{id}.exe"))),
+                if id % 2 == 0 {
+                    Some(IconBitmap {
+                        width: 32,
+                        height: 32,
+                        rgba: vec![0; 4096],
+                    })
+                } else {
+                    None
+                },
+            );
+        }
+        assert_eq!(entries.values.len(), CACHE_LIMIT);
+        assert_eq!(entries.order.len(), CACHE_LIMIT);
+        assert!(
+            !entries
+                .values
+                .contains_key(&IconKey::Path(PathBuf::from("0.exe")))
+        );
+        assert!(
+            entries
+                .values
+                .contains_key(&IconKey::Path(PathBuf::from("9999.exe")))
+        );
+    }
 
     #[test]
     fn icon_key_for_maps_directories_and_types() {

@@ -36,6 +36,7 @@ pub struct AppController {
     request_ids: HashMap<TabId, u64>,
     status_text: String,
     pending: HashSet<TabId>,
+    background_pending: HashSet<TabId>,
     errors: HashMap<TabId, String>,
 }
 
@@ -55,6 +56,7 @@ impl AppController {
             request_ids: HashMap::new(),
             status_text: "Ready".into(),
             pending: HashSet::new(),
+            background_pending: HashSet::new(),
             errors: HashMap::new(),
         }
     }
@@ -130,6 +132,20 @@ impl AppController {
     /// True while an enumeration for the active tab is in flight.
     pub fn is_loading(&self) -> bool {
         self.pending.contains(&self.active_tab_id())
+            && !self.background_pending.contains(&self.active_tab_id())
+    }
+
+    pub fn request_in_flight(&self, tab: TabId) -> bool {
+        self.pending.contains(&tab)
+    }
+
+    pub fn background_in_flight(&self, tab: TabId) -> bool {
+        self.background_pending.contains(&tab)
+    }
+
+    pub fn record_background_request(&mut self, tab: TabId, request: u64) {
+        self.record_request(tab, request);
+        self.background_pending.insert(tab);
     }
 
     pub fn directory_error(&self) -> String {
@@ -144,6 +160,7 @@ impl AppController {
             return;
         }
         self.pending.remove(&tab_id);
+        self.background_pending.remove(&tab_id);
         self.snapshots.remove(&tab_id);
         self.excluded.remove(&tab_id);
         if let Some(tab) = self.tabs.get_mut(tab_id) {
@@ -247,6 +264,7 @@ impl AppController {
         };
         self.snapshots.insert(tab_id, snap);
         self.pending.remove(&tab_id);
+        self.background_pending.remove(&tab_id);
         self.errors.remove(&tab_id);
         if tab_id == self.active_tab_id() {
             self.status_text = "Ready".into();
@@ -261,6 +279,7 @@ impl AppController {
     }
 
     pub fn record_request(&mut self, tab_id: TabId, request_id: u64) {
+        self.background_pending.remove(&tab_id);
         self.request_ids.insert(tab_id, request_id);
         self.pending.insert(tab_id);
         self.errors.remove(&tab_id);
@@ -324,6 +343,7 @@ impl AppController {
         self.excluded.remove(&id);
         self.request_ids.remove(&id);
         self.pending.remove(&id);
+        self.background_pending.remove(&id);
         self.errors.remove(&id);
         Some(active)
     }
@@ -367,8 +387,22 @@ impl AppController {
         self.snapshots.get(&self.tabs.active_id())
     }
 
+    #[cfg(test)]
     pub fn snapshots_mut(&mut self) -> impl Iterator<Item = &mut DirectorySnapshot> {
         self.snapshots.values_mut()
+    }
+
+    /// Include filtered-out rows: their icon slots must remain valid when a
+    /// search or visibility filter is cleared without another disk read.
+    pub fn all_entries_mut(&mut self) -> impl Iterator<Item = &mut FileEntry> {
+        self.snapshots
+            .values_mut()
+            .flat_map(|s| s.entries.iter_mut())
+            .chain(
+                self.excluded
+                    .values_mut()
+                    .flat_map(|entries| entries.iter_mut()),
+            )
     }
 
     pub fn sort_descriptor(&self) -> SortDescriptor {
@@ -724,6 +758,36 @@ mod tests {
         snap.entries.extend(dummy_snapshot(2, "c").entries);
         ctrl.record_request(tab, 2);
         ctrl.apply_snapshot(tab, snap);
+        assert_eq!(ctrl.selected_paths(), selected);
+    }
+
+    #[test]
+    fn background_refresh_preserves_selection_filter_and_interactive_state() {
+        let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+        let tab = ctrl.active_tab_id();
+        ctrl.record_request(tab, 1);
+        ctrl.apply_snapshot(tab, dummy_snapshot(1, "program.exe"));
+        ctrl.set_search("program".into());
+        ctrl.selection_mut().unwrap().select_single(0);
+        let selected = ctrl.selected_paths();
+        ctrl.record_background_request(tab, 2);
+        assert!(ctrl.request_in_flight(tab));
+        assert!(!ctrl.is_loading());
+        assert_eq!(ctrl.item_count(), 1);
+        let mut changed = dummy_snapshot(2, "program.exe");
+        changed.entries[0].metadata.size = Some(2048);
+        ctrl.apply_snapshot(tab, changed);
+        assert!(!ctrl.request_in_flight(tab));
+        assert_eq!(ctrl.selected_paths(), selected);
+        assert_eq!(ctrl.search_text(), "program");
+        assert_eq!(
+            ctrl.snapshot().unwrap().entries[0].metadata.size,
+            Some(2048)
+        );
+        ctrl.record_background_request(tab, 3);
+        ctrl.record_request(tab, 4);
+        assert!(ctrl.is_loading(), "navigation supersedes silent refresh");
+        ctrl.apply_snapshot(tab, dummy_snapshot(3, "stale"));
         assert_eq!(ctrl.selected_paths(), selected);
     }
 

@@ -20,32 +20,22 @@ impl TestSandbox {
 
     /// Return true if `path` is inside the sandbox root.
     pub fn contains(&self, path: &Path) -> bool {
-        let Ok(canonical_root) = std::fs::canonicalize(&self.root) else {
-            return false;
-        };
-        let canonical_target = match path.is_absolute() {
-            true => path.to_path_buf(),
-            false => {
-                let mut combined = canonical_root.clone();
-                combined.push(path);
-                combined
-            }
-        };
-
-        let Ok(canonical_target) = std::fs::canonicalize(&canonical_target)
-            .or_else(|_| Ok::<_, std::io::Error>(canonical_target.clone()))
-        else {
-            return false;
-        };
-
-        canonical_target.starts_with(&canonical_root)
+        self.require_inside(path).is_ok()
     }
 
     /// Validate that `path` is inside the sandbox root. Returns the absolute
     /// path on success.
     pub fn require_inside(&self, path: &Path) -> Result<PathBuf, std::io::Error> {
-        if self.contains(path) {
-            Ok(path.to_path_buf())
+        let root = std::fs::canonicalize(&self.root)?;
+        // Fail closed for unresolved targets; this helper authorizes existing
+        // test fixtures only. It is not a production filesystem sandbox.
+        let target = std::fs::canonicalize(if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            root.join(path)
+        })?;
+        if target.starts_with(&root) {
+            Ok(target)
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -85,6 +75,14 @@ mod tests {
         let child = root.join("child");
         fs::create_dir_all(&child).unwrap();
         assert!(sandbox.contains(&child));
+        assert!(
+            sandbox
+                .require_inside(Path::new("child"))
+                .unwrap()
+                .is_absolute()
+        );
+        assert!(!sandbox.contains(Path::new("../missing/outside")));
+        assert!(!sandbox.contains(Path::new("missing")));
         assert!(!sandbox.contains(Path::new("C:\\Windows")));
         fs::remove_dir_all(&root).ok();
     }
