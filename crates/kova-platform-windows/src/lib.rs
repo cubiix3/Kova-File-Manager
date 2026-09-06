@@ -3,6 +3,7 @@
 pub mod clipboard;
 mod com;
 mod conflicts;
+pub mod directory_watch;
 pub mod folder_size;
 pub mod inspector;
 pub mod known_folders;

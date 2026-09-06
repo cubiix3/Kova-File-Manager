@@ -26,6 +26,10 @@ impl Clone for GenerationCounter {
 }
 
 impl GenerationCounter {
+    pub fn remove(&self, tab_id: TabId) {
+        self.current.lock().unwrap().remove(&tab_id);
+    }
+
     pub fn next(&self, tab_id: TabId) -> u64 {
         let mut inner = self.current.lock().unwrap();
         let counter = inner.entry(tab_id).or_insert_with(|| AtomicU64::new(0));
@@ -44,6 +48,9 @@ impl GenerationCounter {
 /// Worker command type used internally by the ops runtime.
 #[derive(Debug)]
 pub enum WorkerCommand {
+    CancelEnumeration {
+        tab_id: TabId,
+    },
     EnumerateReferences {
         tab_id: TabId,
         location: Location,
@@ -54,6 +61,7 @@ pub enum WorkerCommand {
         tab_id: TabId,
         location: Location,
         request_id: u64,
+        background: bool,
     },
     NewFolder {
         parent: Location,
@@ -79,6 +87,11 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
             enumerations.retain(|_, task| !task.is_finished());
             use WorkerCommand::*;
             match cmd {
+                CancelEnumeration { tab_id } => {
+                    if let Some(task) = enumerations.remove(&tab_id) {
+                        task.abort();
+                    }
+                }
                 EnumerateReferences {
                     tab_id,
                     location,
@@ -105,6 +118,7 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                     tab_id,
                     location,
                     request_id,
+                    background,
                 } => {
                     if let Some(previous) = enumerations.remove(&tab_id) {
                         previous.abort();
@@ -113,12 +127,14 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                     enumerations.insert(
                         tab_id,
                         tokio::spawn(async move {
-                            tracing::info!(
-                                "worker: enumerate tab={:?} loc={} request={}",
-                                tab_id,
-                                location.display(),
-                                request_id
-                            );
+                            if !background {
+                                tracing::info!(
+                                    "worker: enumerate tab={:?} loc={} request={}",
+                                    tab_id,
+                                    location.display(),
+                                    request_id
+                                );
+                            }
                             match crate::enumerate::enumerate_directory(
                                 location.clone(),
                                 request_id,
@@ -126,12 +142,14 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                             .await
                             {
                                 Ok(snapshot) => {
-                                    tracing::info!(
-                                        "worker: loaded tab={:?} request={} entries={}",
-                                        tab_id,
-                                        request_id,
-                                        snapshot.entries.len()
-                                    );
+                                    if !background {
+                                        tracing::info!(
+                                            "worker: loaded tab={:?} request={} entries={}",
+                                            tab_id,
+                                            request_id,
+                                            snapshot.entries.len()
+                                        );
+                                    }
                                     let _ = tx
                                         .send(KovaEvent::DirectoryLoaded { tab_id, snapshot })
                                         .await;
@@ -210,5 +228,24 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                 }
             }
         }
+        for task in enumerations.into_values() {
+            task.abort();
+        }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn closed_tabs_do_not_retain_generations() {
+        let generations = GenerationCounter::default();
+        generations.next(TabId(1));
+        for id in 2..10_002 {
+            generations.next(TabId(id));
+            generations.remove(TabId(id));
+        }
+        assert_eq!(generations.current.lock().unwrap().len(), 1);
+        assert_eq!(generations.next(TabId(1)), 2);
+    }
 }

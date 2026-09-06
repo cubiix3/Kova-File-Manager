@@ -8,18 +8,60 @@ use std::{
     sync::mpsc,
 };
 
-fn save(path: &Path, library: &Library) -> Result<(), String> {
+fn read_bytes(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn save(path: &Path, library: &Library, expected: &mut Option<Vec<u8>>) -> Result<(), String> {
     let parent = path.parent().ok_or("Library has no parent directory")?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    // Serialize check-and-replace across Kova processes. Windows releases the
+    // exclusive handle even if a process crashes; no stale lock-file deletion.
+    use std::os::windows::fs::OpenOptionsExt;
+    let lock_path = path.with_extension("lock");
+    let mut lock = None;
+    for _ in 0..40 {
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(&lock_path)
+        {
+            Ok(file) => {
+                lock = Some(file);
+                break;
+            }
+            Err(error) if error.raw_os_error() == Some(32) => {
+                std::thread::sleep(std::time::Duration::from_millis(25))
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    let _lock =
+        lock.ok_or("Another Kova window is saving the library. Retry after it finishes.")?;
+    if read_bytes(path)? != *expected {
+        return Err("The library changed in another Kova window. Its changes were preserved. Restart Kova before editing tags, collections or pins again.".into());
+    }
     let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
     let bytes = serde_json::to_vec_pretty(library).map_err(|e| e.to_string())?;
+    if expected.as_ref() == Some(&bytes) {
+        return Ok(());
+    }
     use std::io::Write;
     let mut file = std::fs::File::create(&temporary).map_err(|e| e.to_string())?;
     file.write_all(&bytes)
         .and_then(|()| file.sync_all())
         .map_err(|e| e.to_string())?;
     drop(file);
-    std::fs::rename(&temporary, path).map_err(|e| e.to_string())
+    std::fs::rename(&temporary, path).map_err(|e| e.to_string())?;
+    *expected = Some(bytes);
+    Ok(())
 }
 
 pub struct LibraryRuntime {
@@ -28,6 +70,7 @@ pub struct LibraryRuntime {
     worker: Option<std::thread::JoinHandle<()>>,
     controller: std::sync::Arc<std::sync::Mutex<crate::app_state::AppController>>,
     writable: bool,
+    initial_revision: u64,
 }
 impl Drop for LibraryRuntime {
     fn drop(&mut self) {
@@ -37,7 +80,9 @@ impl Drop for LibraryRuntime {
         if let Some(sender) = self.sender.take() {
             if self.writable {
                 if let Ok(ctrl) = self.controller.lock() {
-                    let _ = sender.send(ctrl.library.clone());
+                    if ctrl.library.revision != self.initial_revision {
+                        let _ = sender.send(ctrl.library.clone());
+                    }
                 }
             }
             drop(sender);
@@ -51,15 +96,18 @@ impl Drop for LibraryRuntime {
 pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> LibraryRuntime {
     let state = app.global::<AppState>();
     let path = std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("Kova/library.json"));
-    let restored = path
+    let original = path
         .as_ref()
         .ok_or("LOCALAPPDATA is unavailable".into())
-        .and_then(|path| match std::fs::read(path) {
-            Ok(bytes) => serde_json::from_slice::<Library>(&bytes).map_err(|e| {
+        .and_then(|path| read_bytes(path));
+    let restored = original
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|bytes| match bytes {
+            Some(bytes) => serde_json::from_slice::<Library>(bytes).map_err(|e| {
                 format!("Could not read library: {e}. The original file has been preserved.")
             }),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Library::default()),
-            Err(error) => Err(error.to_string()),
+            None => Ok(Library::default()),
         });
     let writable = restored.is_ok();
     match restored {
@@ -67,16 +115,18 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> LibraryRuntim
         Err(error) => state.set_library_error(error.into()),
     }
     state.set_library_writable(writable);
+    let initial_revision = dispatcher.controller().lock().unwrap().library.revision;
     let (save_tx, save_rx) = mpsc::sync_channel::<Library>(1);
     let (result_tx, result_rx) = mpsc::channel();
     let worker = std::thread::Builder::new()
         .name("kova-library".into())
         .spawn(move || {
+            let mut expected = original.unwrap_or_default();
             while let Ok(library) = save_rx.recv() {
                 let result = path
                     .as_ref()
                     .ok_or("Library location unavailable".into())
-                    .and_then(|path| save(path, &library));
+                    .and_then(|path| save(path, &library, &mut expected));
                 if let Err(error) = &result {
                     tracing::warn!("Library save failed: {error}");
                 }
@@ -168,13 +218,14 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> LibraryRuntim
             let state = ui.global::<AppState>();
             for result in result_rx.try_iter() {
                 if let Err(error) = result {
+                    state.set_library_writable(false);
                     state.set_library_error(format!("Changes could not be saved: {error}").into());
                 }
             }
             let controller = dispatcher.controller();
             let ctrl = controller.lock().unwrap();
             if shown_revision != Some(ctrl.library.revision) {
-                let changed = shown_revision.is_some();
+                let changed = shown_revision.is_some() || ctrl.library.revision != initial_revision;
                 shown_revision = Some(ctrl.library.revision);
                 let pins = ctrl
                     .library
@@ -250,6 +301,7 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> LibraryRuntim
         worker: worker.ok(),
         controller,
         writable,
+        initial_revision,
     }
 }
 
@@ -258,14 +310,24 @@ mod tests {
     use super::*;
     #[test]
     fn atomic_save_replaces_existing_library_and_roundtrips_references() {
-        let root = std::env::temp_dir().join(format!("kova-library-save-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "kova-library-save-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let path = root.join("library.json");
         let mut library = Library::default();
-        save(&path, &library).unwrap();
+        let mut expected = None;
+        save(&path, &library, &mut expected).unwrap();
+        let mut stale = expected.clone();
         library
             .add(false, "Assets", [root.join("file.png")])
             .unwrap();
-        save(&path, &library).unwrap();
+        save(&path, &library, &mut expected).unwrap();
+        assert!(save(&path, &Library::default(), &mut stale).is_err());
         let restored: Library = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(restored.collections, library.collections);
         std::fs::remove_dir_all(root).unwrap();

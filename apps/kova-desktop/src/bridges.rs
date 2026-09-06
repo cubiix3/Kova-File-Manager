@@ -72,10 +72,28 @@ impl CommandDispatcher {
     }
 
     pub fn request_enumeration(&self, tab_id: TabId, location: Location) {
+        self.enumerate(tab_id, location, false);
+    }
+
+    /// Keep the current view interactive while reconciling a native notification.
+    /// A second change waits for the in-flight result instead of cancelling it.
+    pub fn refresh_background(&self, tab_id: TabId, location: Location) -> bool {
+        if self.controller.lock().unwrap().request_in_flight(tab_id) {
+            return false;
+        }
+        self.enumerate(tab_id, location, true);
+        true
+    }
+
+    fn enumerate(&self, tab_id: TabId, location: Location, background: bool) {
         let request_id = self.next_request_id(tab_id);
         {
             let mut ctrl = self.controller.lock().unwrap();
-            ctrl.record_request(tab_id, request_id);
+            if background {
+                ctrl.record_background_request(tab_id, request_id);
+            } else {
+                ctrl.record_request(tab_id, request_id);
+            }
             if location.is_home() {
                 ctrl.apply_snapshot(
                     tab_id,
@@ -85,9 +103,13 @@ impl CommandDispatcher {
                         entries: Vec::new(),
                     },
                 );
+                drop(ctrl);
+                self.send(WorkerCommand::CancelEnumeration { tab_id });
                 return;
             }
-            ctrl.set_status(format!("Loading {}...", location.display()));
+            if !background {
+                ctrl.set_status(format!("Loading {}...", location.display()));
+            }
             if let Some(key) = location.virtual_key() {
                 let paths = ctrl.library.entries(key).unwrap_or_default().to_vec();
                 drop(ctrl);
@@ -104,6 +126,7 @@ impl CommandDispatcher {
             tab_id,
             location,
             request_id,
+            background,
         });
     }
 
@@ -225,10 +248,13 @@ impl CommandDispatcher {
         Ok(())
     }
     pub fn dispatch_close_tab(&self, index: usize) -> Result<(), String> {
-        let new_active = {
+        let (closed, new_active) = {
             let mut ctrl = self.controller.lock().unwrap();
-            ctrl.close_tab(index).ok_or("cannot close tab")?
+            let closed = ctrl.tab_locations().get(index).ok_or("cannot close tab")?.0;
+            (closed, ctrl.close_tab(index).ok_or("cannot close tab")?)
         };
+        self.send(WorkerCommand::CancelEnumeration { tab_id: closed });
+        self.generations.lock().unwrap().remove(closed);
         let location = {
             let ctrl = self.controller.lock().unwrap();
             ctrl.current_location()
@@ -535,6 +561,9 @@ mod tests {
         let id = controller.lock().unwrap().active_tab_id();
         dispatcher.request_enumeration(id, Location::home());
         dispatcher.dispatch_new_folder_named("must-not-be-created");
+        assert!(
+            matches!(rx.try_recv().unwrap(), WorkerCommand::CancelEnumeration { tab_id } if tab_id == id)
+        );
         assert!(rx.try_recv().is_err());
         assert!(!controller.lock().unwrap().is_loading());
         assert_eq!(controller.lock().unwrap().item_count(), 0);

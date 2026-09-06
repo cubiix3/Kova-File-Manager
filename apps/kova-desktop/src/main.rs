@@ -3,6 +3,7 @@
 mod app_state;
 mod bridges;
 mod default_manager;
+mod directory_watch;
 mod folder_sizes;
 mod library;
 mod operations;
@@ -24,7 +25,7 @@ use slint::{
     ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel, Weak,
 };
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -68,14 +69,20 @@ struct IconStore {
     model: Rc<VecModel<slint::Image>>,
     ids: HashMap<IconKey, u32>,
     pending: HashSet<IconKey>,
+    queued: VecDeque<IconKey>,
+    free: Vec<u32>,
+    wanted: Arc<Mutex<HashSet<IconKey>>>,
 }
 
 impl IconStore {
-    fn new(model: Rc<VecModel<slint::Image>>) -> Self {
+    fn new(model: Rc<VecModel<slint::Image>>, wanted: Arc<Mutex<HashSet<IconKey>>>) -> Self {
         Self {
             model,
             ids: HashMap::new(),
             pending: HashSet::new(),
+            queued: VecDeque::new(),
+            free: Vec::new(),
+            wanted,
         }
     }
 
@@ -93,18 +100,66 @@ impl IconStore {
             self.ids.insert(key.clone(), 1);
             return Some(1);
         };
-        // The id doubles as the index into the Slint icon model, so
-        // derive it from the model itself: pre-seeded slots occupy
-        // 0..N and every intern appends exactly one row.
-        let id = self.model.row_count() as u32;
-        self.model.push(image_from_bitmap(bitmap));
+        let image = image_from_bitmap(bitmap);
+        let id = if let Some(id) = self.free.pop() {
+            self.model.set_row_data(id as usize, image);
+            id
+        } else {
+            let id = self.model.row_count() as u32;
+            self.model.push(image);
+            id
+        };
         self.ids.insert(key.clone(), id);
         Some(id)
     }
 
     /// Register a pre-seeded id for a generic key (no bitmap push).
     fn register_preseeded(&mut self, key: IconKey, id: u32) {
+        self.wanted.lock().unwrap().insert(key.clone());
         self.ids.insert(key, id);
+    }
+
+    fn retain_live(&mut self, mut live: HashSet<IconKey>) {
+        // Generic slots remain stable; negative results also use slot 1 but
+        // their arbitrary keys must still be reclaimed.
+        live.extend([
+            IconKey::Folder,
+            IconKey::File,
+            IconKey::Symlink,
+            IconKey::Drive(system_drive_root()),
+            IconKey::UnknownType,
+        ]);
+        self.ids.retain(|key, id| {
+            if live.contains(key) {
+                return true;
+            }
+            if *id >= 5 {
+                self.model
+                    .set_row_data(*id as usize, slint::Image::default());
+                self.free.push(*id);
+            }
+            false
+        });
+        self.pending.retain(|key| live.contains(key));
+        self.queued.retain(|key| live.contains(key));
+        *self.wanted.lock().unwrap() = live;
+    }
+
+    fn flush(&mut self, requests: &std::sync::mpsc::SyncSender<IconRequest>) {
+        while let Some(key) = self.queued.pop_front() {
+            match requests.try_send(IconRequest { key }) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(request)) => {
+                    self.queued.push_front(request.key);
+                    break;
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    self.queued.clear();
+                    self.pending.clear();
+                    break;
+                }
+            }
+        }
     }
 
     fn mark_pending(&mut self, key: IconKey) {
@@ -130,7 +185,7 @@ fn image_from_bitmap(bitmap: &IconBitmap) -> slint::Image {
 fn preseed_icon_store(
     store: &mut IconStore,
     icons_model: &Rc<VecModel<slint::Image>>,
-    requests: &std::sync::mpsc::Sender<IconRequest>,
+    requests: &std::sync::mpsc::SyncSender<IconRequest>,
 ) {
     let generics: [(IconKey, u32); 5] = [
         (IconKey::Folder, 0),
@@ -201,8 +256,9 @@ async fn main() {
     // Worker events are forwarded into a plain channel and drained by a Slint
     // timer, because Slint properties must only be touched from the UI thread.
     let (ui_evt_tx, ui_evt_rx) = std::sync::mpsc::channel::<KovaEvent>();
-    let (icon_req_tx, icon_req_rx) = std::sync::mpsc::channel::<IconRequest>();
-    let (icon_res_tx, icon_res_rx) = std::sync::mpsc::channel::<IconResolved>();
+    let (icon_req_tx, icon_req_rx) = std::sync::mpsc::sync_channel::<IconRequest>(256);
+    let (icon_res_tx, icon_res_rx) = std::sync::mpsc::sync_channel::<IconResolved>(64);
+    let wanted_icons = Arc::new(Mutex::new(HashSet::<IconKey>::new()));
 
     spawn_worker(cmd_rx, evt_tx);
 
@@ -211,16 +267,28 @@ async fn main() {
     // directory enumeration, so it lives outside the Tokio runtime.
     {
         let res_tx = icon_res_tx.clone();
+        let wanted = wanted_icons.clone();
         std::thread::Builder::new()
             .name("kova-icons".into())
             .spawn(move || {
                 let cache = IconCache::new();
                 while let Ok(request) = icon_req_rx.recv() {
+                    if !wanted.lock().unwrap().contains(&request.key) {
+                        continue;
+                    }
                     let bitmap = cache.get_or_resolve(&request.key);
-                    let _ = res_tx.send(IconResolved {
-                        key: request.key,
-                        bitmap,
-                    });
+                    if !wanted.lock().unwrap().contains(&request.key) {
+                        continue;
+                    }
+                    if res_tx
+                        .send(IconResolved {
+                            key: request.key,
+                            bitmap,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
             })
             .expect("icon worker thread");
@@ -254,6 +322,7 @@ async fn main() {
     let _storage_timer = storage::connect(&app, dispatcher.clone());
     let _library_timer = library::connect(&app, dispatcher.clone());
     let _operations_timer = operations::connect(&app, dispatcher.clone());
+    let _directory_watch_timer = directory_watch::connect(&app, dispatcher.clone());
 
     let files_model = Rc::new(VecModel::from(Vec::new()));
     let tabs_model = Rc::new(VecModel::from(Vec::new()));
@@ -271,7 +340,10 @@ async fn main() {
     });
     let _thumbnail_timer = thumbnails::connect(&app, app_controller.clone(), ui_models.clone());
 
-    let icon_store = Rc::new(RefCell::new(IconStore::new(Rc::clone(&icons_model))));
+    let icon_store = Rc::new(RefCell::new(IconStore::new(
+        Rc::clone(&icons_model),
+        wanted_icons,
+    )));
     {
         let mut store = icon_store.borrow_mut();
         preseed_icon_store(&mut store, &icons_model, &icon_req_tx);
@@ -337,6 +409,7 @@ async fn main() {
     let icon_req_for_pump = icon_req_tx.clone();
     let pending_for_pump = Arc::clone(&pending_dialog);
     let mut reveal: Option<(kova_core::domain::TabId, std::path::PathBuf, bool)> = None;
+    let mut deferred_events = std::collections::VecDeque::new();
     let pump_timer = slint::Timer::default();
     pump_timer.start(
         slint::TimerMode::Repeated,
@@ -356,9 +429,22 @@ async fn main() {
                 }
             }
 
-            while let Ok(event) = ui_evt_rx.try_recv() {
+            deferred_events.extend(ui_evt_rx.try_iter());
+            for _ in 0..deferred_events.len() {
+                let Some(event) = deferred_events.pop_front() else {
+                    break;
+                };
                 let Some(ui) = ui_ref.upgrade() else { return };
                 let mut ctrl = ctrl_ref.lock().unwrap();
+                if matches!(&event, KovaEvent::DirectoryLoaded { tab_id, snapshot }
+                    if *tab_id == ctrl.active_tab_id()
+                        && ctrl.is_current_request(*tab_id, snapshot.request_id)
+                        && ctrl.background_in_flight(*tab_id))
+                    && ui.global::<AppState>().get_inline_visible()
+                {
+                    deferred_events.push_back(event);
+                    continue;
+                }
                 match event {
                     KovaEvent::DirectoryLoaded { tab_id, snapshot }
                         if ctrl.is_current_request(tab_id, snapshot.request_id) =>
@@ -508,13 +594,11 @@ async fn main() {
             }
             if !resolved_icons.is_empty() {
                 let mut ctrl = ctrl_ref.lock().unwrap();
-                for snapshot in ctrl.snapshots_mut() {
-                    for entry in &mut snapshot.entries {
-                        if entry.icon_handle.is_none() {
-                            entry.icon_handle = resolved_icons
-                                .get(&icon_key_for(&entry.path, entry.is_directory()))
-                                .copied();
-                        }
+                for entry in ctrl.all_entries_mut() {
+                    if entry.icon_handle.is_none() {
+                        entry.icon_handle = resolved_icons
+                            .get(&icon_key_for(&entry.path, entry.is_directory()))
+                            .copied();
                     }
                 }
             }
@@ -535,6 +619,7 @@ async fn main() {
                     update_ui(&ui, &ctrl, &last_address_ref, &models_ref);
                 }
             }
+            store_ref.borrow_mut().flush(&icon_req_ref);
         },
     );
 
@@ -585,23 +670,20 @@ fn format_bytes(bytes: u64) -> String {
 /// Must be called while the controller is already locked.
 fn queue_icon_requests(
     store: &Rc<RefCell<IconStore>>,
-    icon_req_tx: &std::sync::mpsc::Sender<IconRequest>,
+    icon_req_tx: &std::sync::mpsc::SyncSender<IconRequest>,
     ctrl: &mut AppController,
 ) {
-    let keys: HashSet<IconKey> = ctrl
-        .snapshots_mut()
-        .flat_map(|snap| {
-            snap.entries
-                .iter()
-                .filter(|e| e.icon_handle.is_none())
-                .map(|e| icon_key_for(&e.path, e.is_directory()))
-        })
+    let live = ctrl
+        .all_entries_mut()
+        .map(|e| icon_key_for(&e.path, e.is_directory()))
         .collect();
-    if keys.is_empty() {
-        return;
-    }
-
     let mut store = store.borrow_mut();
+    store.retain_live(live);
+    let keys: HashSet<_> = ctrl
+        .all_entries_mut()
+        .filter(|e| e.icon_handle.is_none())
+        .map(|e| icon_key_for(&e.path, e.is_directory()))
+        .collect();
     let mut hits: HashMap<IconKey, u32> = HashMap::new();
     for key in keys {
         if let Some(id) = store.id_for(&key) {
@@ -612,23 +694,22 @@ fn queue_icon_requests(
             continue;
         }
         store.mark_pending(key.clone());
-        let _ = icon_req_tx.send(IconRequest { key: key.clone() });
+        store.queued.push_back(key);
     }
 
     // Cache hits resolve synchronously: stamp the known id onto the rows.
     if !hits.is_empty() {
-        for snapshot in ctrl.snapshots_mut() {
-            for entry in snapshot.entries.iter_mut() {
-                if entry.icon_handle.is_some() {
-                    continue;
-                }
-                let key = icon_key_for(&entry.path, entry.is_directory());
-                if let Some(id) = hits.get(&key) {
-                    entry.icon_handle = Some(IconHandle(*id));
-                }
+        for entry in ctrl.all_entries_mut() {
+            if entry.icon_handle.is_some() {
+                continue;
+            }
+            let key = icon_key_for(&entry.path, entry.is_directory());
+            if let Some(id) = hits.get(&key) {
+                entry.icon_handle = Some(IconHandle(*id));
             }
         }
     }
+    store.flush(icon_req_tx);
 }
 
 struct SidebarData {
@@ -945,7 +1026,7 @@ fn wire_callbacks(
     last_address: LastAddress,
     models: Rc<UiModels>,
     icon_store: Rc<RefCell<IconStore>>,
-    icon_requests: std::sync::mpsc::Sender<IconRequest>,
+    icon_requests: std::sync::mpsc::SyncSender<IconRequest>,
 ) {
     let d = dispatcher.clone();
     let ui_view = ui.clone();
@@ -1565,6 +1646,52 @@ fn location_label(ui: &MainWindow, path: &str, fallback: &str) -> String {
         .find(|drive| drive.path.as_str().eq_ignore_ascii_case(path))
         .map(|drive| drive.name.to_string())
         .unwrap_or_else(|| fallback.to_owned())
+}
+
+#[cfg(test)]
+mod icon_lifecycle_tests {
+    use super::*;
+    #[test]
+    fn navigation_reclaims_images_and_reuses_slots() {
+        let model = Rc::new(VecModel::from(vec![slint::Image::default(); 5]));
+        let mut store = IconStore::new(model.clone(), Arc::default());
+        let bitmap = IconBitmap {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        };
+        for cycle in 0..200 {
+            let keys: HashSet<_> = (0..20)
+                .map(|i| IconKey::Path(format!("{cycle}-{i}.exe").into()))
+                .collect();
+            store.retain_live(keys.clone());
+            for key in &keys {
+                store.intern(key, Some(&bitmap));
+            }
+            assert_eq!(model.row_count(), 25);
+            assert_eq!(store.ids.len(), 20);
+        }
+        store.retain_live(HashSet::new());
+        assert!(store.ids.is_empty());
+        assert!((5..25).all(|i| model.row_data(i).unwrap().size().width == 0));
+    }
+    #[test]
+    fn bounded_icon_delivery_retries_and_discards_obsolete_work() {
+        let mut store = IconStore::new(Rc::new(VecModel::default()), Arc::default());
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let a = IconKey::Extension("a".into());
+        let b = IconKey::Extension("b".into());
+        store.pending.extend([a.clone(), b.clone()]);
+        store.queued.extend([a.clone(), b.clone()]);
+        store.flush(&tx);
+        assert_eq!(store.queued.len(), 1);
+        assert_eq!(rx.try_recv().unwrap().key, a);
+        store.flush(&tx);
+        assert_eq!(rx.try_recv().unwrap().key, b);
+        store.retain_live(HashSet::new());
+        assert!(!store.take_pending(&b));
+        assert!(store.queued.is_empty());
+    }
 }
 
 #[cfg(test)]

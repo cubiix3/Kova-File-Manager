@@ -181,8 +181,8 @@ mod tests {
     #[ignore = "slow performance baseline"]
     async fn enumerate_directory_performance_baseline() {
         use std::time::Instant;
-        let root = std::env::temp_dir().join("kova-perf");
-        let _ = tokio::fs::remove_dir_all(&root).await;
+        let root = std::env::temp_dir().join(format!("kova-perf-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir(&root).await.unwrap();
 
         let sizes = vec![100usize, 1_000, 10_000];
         let runs = 5usize;

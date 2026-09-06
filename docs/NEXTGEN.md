@@ -102,3 +102,19 @@ Pin the current/selected folder from Organize or View. Right-click a pin to remo
 it or move it up/down. Pins, tags and collections are stored atomically in
 `%LOCALAPPDATA%\Kova\library.json`. Corrupt/unreadable storage is left intact and
 organization becomes read-only with an error. No account or network service is used.
+
+Concurrent Kova windows cannot silently overwrite each other's library changes:
+saving checks the loaded version under an exclusive file lock. If another window
+has changed the library, its saved data is preserved and the stale window asks
+you to restart before editing organization again. An unchanged window does not
+save its old library snapshot on exit.
+
+## Automatic updates
+
+Open folders listen for native Windows file notifications, including changes
+made by other applications. Short bursts are coalesced before a background
+refresh; selection and search remain attached to file paths. Refresh is deferred
+while an inline name is being edited. Recursive notifications also reconcile
+changes inside displayed folders. Unsupported or temporarily unavailable paths
+are retried in the background. This is not a hard real-time guarantee for network
+providers or an automatic device-discovery service; Home still has manual refresh.
