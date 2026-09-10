@@ -18,24 +18,22 @@ Kova combines tabbed browsing, a thumbnail gallery, native Windows context menus
 and an inspector in a compact desktop interface. Built with **Rust, Slint and Win32/Shell APIs** for
 Windows 10/11 x64. No Electron or WebView.
 
-> **0.2 release candidate:** The current source includes the daily-driver changes below.
-> The published v0.1.0 installer predates these changes. Get the 0.2.0 Setup
-> and ZIP from the [candidate workflow artifacts](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34487070491)
-> (GitHub sign-in required). No new public release has been published.
+> **0.2.0 preview:** Download the current Windows build from
+> [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.0).
+> Setup and portable ZIP include the features shown here. No build tools or GitHub sign-in are required.
 > See [verification and limits](docs/DAILY_DRIVER_VERIFICATION.md) and the [changelog](CHANGELOG.md).
 
 ## Download & install
 
-Choose the build you want:
-
-- **0.2.0 candidate shown here:** open the [candidate package run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34487070491),
-  after its checks pass, sign in to GitHub and download **kova-windows-x64** under **Artifacts**. Extract
-  that download, then run `Kova-Setup-0.2.0-x64.exe`.
-- **Published preview:** open [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases)
-  and download the Setup EXE from **Assets**. The currently published v0.1.0
-  predates the features and screenshots on this page.
+- **[Download Setup for Windows x64](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.0/Kova-Setup-0.2.0-x64.exe)** — recommended; includes Start menu integration and an uninstaller.
+- **[Download portable ZIP](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.0/Kova-0.2.0-x64.zip)** — extract all files and run **Kova.exe**.
+- **[Release notes and checksums](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.0)**.
 
 After Setup, launch Kova from the Start menu. A desktop shortcut is optional.
+
+**Updating:** close Kova, then run the newer Setup over your existing installation.
+Your preferences are preserved. Updates are installed manually; use
+GitHub **Watch → Custom → Releases** to receive release notifications.
 
 The installer includes the required Visual C++ runtime files and installs for
 your Windows account. Rust and Visual Studio are not required. To remove Kova,
