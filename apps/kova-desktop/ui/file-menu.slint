@@ -47,10 +47,15 @@ component CommandRow inherits Rectangle {
         Rectangle {
             border-radius: 5px;
             background: root.current ? Theme.sidebar-selected : transparent;
+            animate background { duration: 90ms; easing: ease-out; }
             CommandGlyph { x: 10px; y: 8px; command: root.index; tint: root.current ? Theme.accent : Theme.text-secondary; }
             Text { x: 40px; width: parent.width - 140px; height: parent.height; text: root.command.title; color: Theme.text-primary; font-size: 13px; vertical-alignment: center; overflow: elide; }
             Text { x: parent.width - 98px; width: 86px; height: parent.height; text: root.command.shortcut; color: Theme.text-muted; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; }
-            TouchArea { moved => { root.hovered(root.index); } clicked => { root.chosen(root.index); } }
+            TouchArea {
+                changed has-hover => { if self.has-hover { root.hovered(root.index); } }
+                pointer-event(event) => { if event.kind == PointerEventKind.move { root.hovered(root.index); } }
+                clicked => { root.chosen(root.index); }
+            }
         }
     }
     accessible-role: button;
