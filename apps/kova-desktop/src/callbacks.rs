@@ -49,6 +49,26 @@ pub(crate) fn wire_callbacks(
             actions_copy.set_status_message("Copied to clipboard".into());
         }
     });
+    let paths_copy = dispatcher.clone();
+    let paths_ui = ui.clone();
+    ui.unwrap()
+        .global::<AppState>()
+        .on_copy_selected_paths(move || {
+            let text = paths_copy
+                .controller()
+                .lock()
+                .unwrap()
+                .selected_paths()
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("\r\n");
+            if !text.is_empty() {
+                if let Some(ui) = paths_ui.upgrade() {
+                    ui.global::<AppState>().invoke_copy_text(text.into());
+                }
+            }
+        });
     let actions = dispatcher.clone();
     ui.unwrap()
         .global::<AppState>()
@@ -439,7 +459,7 @@ pub(crate) fn wire_callbacks(
         }
     });
 
-    // Right click on a row: native Explorer shell context menu.
+    // More Windows options / Shift+F10: retain the native Explorer extension menu.
     let d = dispatcher.clone();
     let ui_menu = ui.clone();
     let last_menu = Arc::clone(&last_address);

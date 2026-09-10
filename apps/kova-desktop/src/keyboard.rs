@@ -13,6 +13,7 @@ impl Shortcuts {
     pub fn handle(&mut self, app: &MainWindow, event: &WindowEvent) -> bool {
         if matches!(event, WindowEvent::Focused(false)) {
             self.modifiers = ModifiersState::default();
+            app.global::<AppState>().set_file_menu_visible(false);
         }
         if let WindowEvent::ModifiersChanged(modifiers) = event {
             self.modifiers = modifiers.state();
@@ -24,7 +25,8 @@ impl Shortcuts {
             return false;
         }
         let state = app.global::<AppState>();
-        if state.get_inline_visible()
+        if state.get_file_menu_visible()
+            || state.get_inline_visible()
             || state.get_dialog_visible()
             || state.get_conflict_visible()
             || state.get_undo_visible()

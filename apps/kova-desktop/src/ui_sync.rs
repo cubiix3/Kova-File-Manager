@@ -101,6 +101,8 @@ pub(crate) fn update_ui(
         controller.folder_sizes_enabled,
     );
     if models.render_key.get() != render_key {
+        // A row index from an open menu must never outlive its snapshot.
+        state.set_file_menu_visible(false);
         models.files.replace(
             controller.snapshot_shared(),
             controller.show_extensions,

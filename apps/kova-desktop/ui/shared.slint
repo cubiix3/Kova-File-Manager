@@ -72,6 +72,8 @@ export global AppState {
     in-out property <string> undo-description;
     in-out property <string> undo-label: "";
     callback copy-text(string);
+    callback copy-selected-paths();
+    in-out property <bool> file-menu-visible: false;
     in-out property <string> tooltip: "";
     in-out property <length> tooltip-x: 0px;
     in-out property <length> tooltip-y: 0px;
