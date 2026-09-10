@@ -213,6 +213,14 @@ impl IFileOperationProgressSink_Impl for ProgressSink_Impl {
         result: HRESULT,
         new: Ref<'_, IShellItem>,
     ) -> windows::core::Result<()> {
+        #[cfg(test)]
+        eprintln!(
+            "recycle callback: original={:?}, result={result:?}, new={}, new_path={:?}, roots={:?}",
+            item_path(item.as_ref()),
+            new.as_ref().is_some(),
+            item_path(new.as_ref()),
+            self.roots
+        );
         if result.is_ok() && result != COPYENGINE_S_USER_IGNORED {
             if let (Some(path), Some(new)) = (item_path(item.as_ref()), new.as_ref()) {
                 let root = self.roots.lock().is_ok_and(|roots| roots.contains(&path));
