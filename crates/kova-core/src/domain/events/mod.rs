@@ -42,6 +42,9 @@ pub enum KovaEvent {
         new_path: std::path::PathBuf,
     },
 
+    /// Reconcile a whole restore batch once, rather than reloading per file.
+    ItemsRestored { paths: Vec<std::path::PathBuf> },
+
     /// A user-facing operation failed.
     OperationError {
         context: String,

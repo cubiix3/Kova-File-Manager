@@ -97,11 +97,19 @@ pub fn spawn_worker(
             match cmd {
                 Undo { id } => {
                     let history = undo.clone();
+                    let recycled = history.is_recycle(id);
                     let result = tokio::task::spawn_blocking(move || history.apply(id))
                         .await
                         .map_err(|e| e.to_string())
                         .and_then(|result| result);
                     match result {
+                        Ok(items) if recycled => {
+                            let _ = tx
+                                .send(KovaEvent::ItemsRestored {
+                                    paths: items.into_iter().map(|(_, path)| path).collect(),
+                                })
+                                .await;
+                        }
                         Ok(items) => {
                             for (old_path, new_path) in items {
                                 let _ =
@@ -109,6 +117,13 @@ pub fn spawn_worker(
                             }
                         }
                         Err(error_message) => {
+                            if recycled {
+                                // A batch may have restored some items before a
+                                // conflict. Reconcile that partial result too.
+                                let _ = tx
+                                    .send(KovaEvent::ItemsRestored { paths: Vec::new() })
+                                    .await;
+                            }
                             let _ = tx
                                 .send(KovaEvent::OperationError {
                                     context: "undo".into(),

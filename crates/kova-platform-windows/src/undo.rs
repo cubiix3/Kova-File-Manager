@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 use windows::Win32::{Foundation::HANDLE, Storage::FileSystem::*};
@@ -148,6 +148,7 @@ impl Recycled {
 pub struct History {
     entries: Mutex<Vec<Action>>,
     next: AtomicU64,
+    applying: AtomicBool,
 }
 impl History {
     /// Only call after a confirmed non-replacing rename or completed native move.
@@ -215,6 +216,9 @@ impl History {
         self.entries.lock().is_ok_and(|entries| matches!(entries.last(), Some(Action::Recycle { id: next, .. }) if *next == id))
     }
     pub fn next(&self) -> Option<(u64, String)> {
+        if self.applying.load(Ordering::Acquire) {
+            return None;
+        }
         self.entries
             .lock()
             .ok()?
@@ -222,6 +226,16 @@ impl History {
             .map(|e| (e.id(), e.label().to_owned()))
     }
     pub fn apply(&self, id: u64) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+        if self.applying.swap(true, Ordering::AcqRel) {
+            return Err("An Undo operation is already running".into());
+        }
+        struct Applying<'a>(&'a AtomicBool);
+        impl Drop for Applying<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+        let _applying = Applying(&self.applying);
         let entry = {
             let entries = self
                 .entries
