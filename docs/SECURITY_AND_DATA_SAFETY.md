@@ -5,12 +5,21 @@ use unique temporary directories or a designated ignored runtime sandbox.
 
 Copy, Move and Delete run on a dedicated COM thread through Windows
 IFileOperation, with Kova transfer progress and native Recycle Bin handling.
-Application Undo is limited to verified, non-replacing renames and same-volume
+Application Undo supports verified, non-replacing renames and same-volume
 file moves; it checks identity and current metadata through an open handle.
-Copies, deletions and untracked Shell/Explorer operations are not offered as Undo.
+For recycled selections, it stores the exact Shell PIDLs reported by
+[PostDeleteItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifileoperationprogresssink-postdeleteitem),
+plus original paths and recycled-file identities. Restoration runs through
+IFileOperation on a worker apartment; no COM interface crosses threads and no
+private Recycle Bin metadata is edited. Short and long paths are matched using
+the Shell's own representation. Partial batches retain only pending items.
+Copies, permanent deletions and untracked Shell/Explorer operations are not
+offered as Undo. History is bounded to 32 operations and lasts for this process.
 Regular-file conflicts require Replace, Skip or Keep Both; directory merges and
 unusual Shell objects retain native Windows handling. Confirmation suppression
-is limited to explicitly approved replacement groups.
+is limited to explicitly approved replacement groups and recycled-item restores.
+Restoration first refuses occupied original paths; its rename-on-collision flag
+prevents silent replacement if a destination appears after that check.
 Windows controls whether a destination supports recycling; Kova does not silently
 substitute a recursive permanent-delete implementation. Cancellation may mean
 partial completion, so all open directory views are reconciled afterwards.
