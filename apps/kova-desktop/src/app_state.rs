@@ -23,16 +23,24 @@ pub struct FileListItem {
 /// domain. All mutation happens on the main thread; filesystem I/O is
 /// delegated to the worker.
 pub struct AppController {
+    sources: HashMap<TabId, std::sync::Arc<DirectorySnapshot>>,
+    view_generations: HashMap<TabId, std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    view_worker: Option<crate::search::Worker>,
+    view_pending: HashSet<TabId>,
+    pub revision: u64,
     pub library: kova_core::domain::Library,
-    tabs: TabCollection,
-    snapshots: HashMap<TabId, DirectorySnapshot>,
+    pub(crate) tabs: TabCollection,
+    snapshots: HashMap<TabId, std::sync::Arc<DirectorySnapshot>>,
     excluded: HashMap<TabId, Vec<FileEntry>>,
-    searches: HashMap<TabId, String>,
+    pub(crate) searches: HashMap<TabId, String>,
+    pub recent_folders: Vec<std::path::PathBuf>,
+    pub filters: HashMap<TabId, [usize; 3]>,
+    pub recursive_tabs: HashSet<TabId>,
     pub show_hidden: bool,
     pub show_system: bool,
     pub show_extensions: bool,
     pub folder_sizes_enabled: bool,
-    pub folder_sizes: HashMap<std::path::PathBuf, (Option<u64>, String)>,
+    pub folder_sizes: kova_core::domain::FolderSizes,
     request_ids: HashMap<TabId, u64>,
     status_text: String,
     pending: HashSet<TabId>,
@@ -43,11 +51,19 @@ pub struct AppController {
 impl AppController {
     pub fn new(initial: Location) -> Self {
         Self {
+            sources: HashMap::new(),
+            view_generations: HashMap::new(),
+            view_worker: None,
+            view_pending: HashSet::new(),
+            revision: 0,
             library: kova_core::domain::Library::default(),
             tabs: TabCollection::new(initial),
             snapshots: HashMap::new(),
             excluded: HashMap::new(),
             searches: HashMap::new(),
+            recent_folders: Vec::new(),
+            filters: HashMap::new(),
+            recursive_tabs: HashSet::new(),
             show_hidden: false,
             show_system: false,
             show_extensions: true,
@@ -131,8 +147,9 @@ impl AppController {
 
     /// True while an enumeration for the active tab is in flight.
     pub fn is_loading(&self) -> bool {
-        self.pending.contains(&self.active_tab_id())
-            && !self.background_pending.contains(&self.active_tab_id())
+        (self.pending.contains(&self.active_tab_id())
+            && !self.background_pending.contains(&self.active_tab_id()))
+            || (self.view_pending.contains(&self.active_tab_id()) && self.snapshot().is_none())
     }
 
     pub fn request_in_flight(&self, tab: TabId) -> bool {
@@ -159,6 +176,9 @@ impl AppController {
         if !self.is_current_request(tab_id, request_id) {
             return;
         }
+        self.cancel_view(tab_id);
+        self.sources.remove(&tab_id);
+        self.revision = self.revision.wrapping_add(1);
         self.pending.remove(&tab_id);
         self.background_pending.remove(&tab_id);
         self.snapshots.remove(&tab_id);
@@ -228,6 +248,16 @@ impl AppController {
             return;
         }
 
+        self.revision = self.revision.wrapping_add(1);
+        self.cancel_view(tab_id);
+        if snapshot.entries.len() >= crate::search::BACKGROUND_THRESHOLD {
+            self.sources.insert(tab_id, std::sync::Arc::new(snapshot));
+            self.schedule_view(tab_id);
+            return;
+        }
+        self.sources.remove(&tab_id);
+
+        let query_text = self.query_text(tab_id);
         let tab = match self.tabs.get_mut(tab_id) {
             Some(t) => t,
             None => return,
@@ -238,17 +268,20 @@ impl AppController {
             .get(&tab_id)
             .map(|s| s.entries.iter().map(|e| e.path.clone()).collect())
             .unwrap_or_default();
-        let query = kova_core::domain::SearchQuery::parse(
-            self.searches
-                .get(&tab_id)
-                .map(String::as_str)
-                .unwrap_or_default(),
-            chrono::Local::now(),
+        let query = kova_core::domain::SearchQuery::parse(&query_text, chrono::Local::now());
+        let (mut entries, excluded) = partition_query(
+            snapshot.entries,
+            self.show_hidden,
+            self.show_system,
+            &query,
+            &self.folder_sizes,
+            self.folder_sizes_enabled,
         );
-        let (mut entries, excluded) =
-            partition_query(snapshot.entries, self.show_hidden, self.show_system, &query);
         self.excluded.insert(tab_id, excluded);
-        kova_core::domain::sort_entries(&mut entries, tab.sort);
+        kova_core::domain::sort_entries_by_size(&mut entries, tab.sort, |e| {
+            kova_core::domain::effective_size(e, &self.folder_sizes, self.folder_sizes_enabled)
+                .map(|s| s.bytes)
+        });
         let new_indices: HashMap<_, _> = entries
             .iter()
             .enumerate()
@@ -262,7 +295,7 @@ impl AppController {
             request_id: snapshot.request_id,
             entries,
         };
-        self.snapshots.insert(tab_id, snap);
+        self.snapshots.insert(tab_id, std::sync::Arc::new(snap));
         self.pending.remove(&tab_id);
         self.background_pending.remove(&tab_id);
         self.errors.remove(&tab_id);
@@ -279,6 +312,10 @@ impl AppController {
     }
 
     pub fn record_request(&mut self, tab_id: TabId, request_id: u64) {
+        crate::diagnostics::begin(tab_id, "directory");
+        self.revision = self.revision.wrapping_add(1);
+        self.cancel_view(tab_id);
+        self.sources.remove(&tab_id);
         self.background_pending.remove(&tab_id);
         self.request_ids.insert(tab_id, request_id);
         self.pending.insert(tab_id);
@@ -292,6 +329,13 @@ impl AppController {
     }
 
     pub fn navigate(&mut self, location: Location) {
+        if !location.is_virtual() {
+            self.recent_folders.retain(|path| path != &location.path);
+            self.recent_folders.insert(0, location.path.clone());
+            self.recent_folders.truncate(12);
+        }
+
+        self.filters.remove(&self.active_tab_id());
         self.searches.remove(&self.active_tab_id());
         if let Some(tab) = self.tabs.active_mut() {
             tab.history.navigate(location);
@@ -302,6 +346,7 @@ impl AppController {
     }
 
     pub fn back(&mut self) -> Option<Location> {
+        self.filters.remove(&self.active_tab_id());
         self.searches.remove(&self.active_tab_id());
         let tab = self.tabs.active_mut()?;
         let location = tab.history.back();
@@ -312,6 +357,7 @@ impl AppController {
     }
 
     pub fn forward(&mut self) -> Option<Location> {
+        self.filters.remove(&self.active_tab_id());
         self.searches.remove(&self.active_tab_id());
         let tab = self.tabs.active_mut()?;
         let location = tab.history.forward();
@@ -338,6 +384,9 @@ impl AppController {
     pub fn close_tab(&mut self, index: usize) -> Option<TabId> {
         let id = self.tabs.tabs().get(index)?.id;
         let active = self.tabs.close(id)?;
+        self.cancel_view(id);
+        self.sources.remove(&id);
+        self.view_generations.remove(&id);
         self.snapshots.remove(&id);
         self.searches.remove(&id);
         self.excluded.remove(&id);
@@ -384,25 +433,39 @@ impl AppController {
     }
 
     pub fn snapshot(&self) -> Option<&DirectorySnapshot> {
-        self.snapshots.get(&self.tabs.active_id())
+        self.snapshots
+            .get(&self.tabs.active_id())
+            .map(AsRef::as_ref)
+    }
+
+    pub fn snapshot_shared(&self) -> Option<std::sync::Arc<DirectorySnapshot>> {
+        self.snapshots.get(&self.tabs.active_id()).cloned()
     }
 
     #[cfg(test)]
     pub fn snapshots_mut(&mut self) -> impl Iterator<Item = &mut DirectorySnapshot> {
-        self.snapshots.values_mut()
+        self.snapshots.values_mut().map(std::sync::Arc::make_mut)
     }
 
     /// Include filtered-out rows: their icon slots must remain valid when a
     /// search or visibility filter is cleared without another disk read.
-    pub fn all_entries_mut(&mut self) -> impl Iterator<Item = &mut FileEntry> {
-        self.snapshots
-            .values_mut()
-            .flat_map(|s| s.entries.iter_mut())
-            .chain(
-                self.excluded
-                    .values_mut()
-                    .flat_map(|entries| entries.iter_mut()),
-            )
+    pub fn folder_size_paths(&self) -> Vec<std::path::PathBuf> {
+        let id = self.active_tab_id();
+        if let Some(source) = self.sources.get(&id) {
+            return source
+                .entries
+                .iter()
+                .filter(|e| e.is_directory())
+                .map(|e| e.path.clone())
+                .collect();
+        }
+        self.snapshot()
+            .into_iter()
+            .flat_map(|s| &s.entries)
+            .chain(self.excluded.get(&id).into_iter().flatten())
+            .filter(|e| e.is_directory())
+            .map(|e| e.path.clone())
+            .collect()
     }
 
     pub fn sort_descriptor(&self) -> SortDescriptor {
@@ -416,47 +479,27 @@ impl AppController {
         self.tabs.active().and_then(|t| t.selection.primary())
     }
 
+    #[cfg(test)]
     pub fn file_list_items(&self) -> Vec<FileListItem> {
-        let Some(snapshot) = self.snapshots.get(&self.tabs.active_id()) else {
-            return Vec::new();
-        };
-        let selection: HashSet<usize> = match self.tabs.active() {
-            Some(t) => t.selection.selected().iter().copied().collect(),
-            None => return Vec::new(),
-        };
-
-        snapshot
-            .entries
-            .iter()
+        self.snapshot()
+            .into_iter()
+            .flat_map(|s| s.entries.iter())
             .enumerate()
-            .map(|(idx, e)| FileListItem {
-                name: if self.show_extensions || e.is_directory() {
-                    e.name.clone()
-                } else {
-                    std::path::Path::new(&e.name)
-                        .file_stem()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned()
-                },
-                type_name: kind_text(e),
-                size_text: if e.is_directory() && self.folder_sizes_enabled {
-                    self.folder_sizes
-                        .get(&e.path)
-                        .map(|(_, label)| label.clone())
-                        .unwrap_or_else(|| "…".into())
-                } else {
-                    size_text(e)
-                },
-                modified_text: modified_text(e),
-                icon_id: effective_icon_id(e),
-                is_dir: e.is_directory(),
-                selected: selection.contains(&idx),
+            .map(|(idx, e)| {
+                display_row(
+                    e,
+                    self.show_extensions,
+                    self.folder_sizes_enabled,
+                    &self.folder_sizes,
+                    self.selected_indices().contains(&idx),
+                )
             })
             .collect()
     }
 
     pub fn set_sort(&mut self, column: SortColumn) {
+        crate::diagnostics::begin(self.active_tab_id(), "sort");
+        self.revision = self.revision.wrapping_add(1);
         let Some(tab) = self.tabs.active_mut() else {
             return;
         };
@@ -468,25 +511,17 @@ impl AppController {
 
         // Re-sort the currently cached snapshot.
         let id = tab.id;
+        if self.sources.contains_key(&id) {
+            self.schedule_view(id);
+            return;
+        }
         if let Some(snap) = self.snapshots.get_mut(&id) {
+            let snap = std::sync::Arc::make_mut(snap);
             let old_paths: Vec<_> = snap.entries.iter().map(|e| e.path.clone()).collect();
-            kova_core::domain::sort_entries(&mut snap.entries, tab.sort);
-            if self.folder_sizes_enabled && column == SortColumn::Size {
-                let folders = snap.entries.iter().take_while(|e| e.is_directory()).count();
-                snap.entries[..folders].sort_by(|a, b| {
-                    let size = |e: &FileEntry| {
-                        self.folder_sizes.get(&e.path).and_then(|(bytes, _)| *bytes)
-                    };
-                    let order = size(a)
-                        .cmp(&size(b))
-                        .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-                    if tab.sort.direction == SortDirection::Ascending {
-                        order
-                    } else {
-                        order.reverse()
-                    }
-                });
-            }
+            kova_core::domain::sort_entries_by_size(&mut snap.entries, tab.sort, |e| {
+                kova_core::domain::effective_size(e, &self.folder_sizes, self.folder_sizes_enabled)
+                    .map(|s| s.bytes)
+            });
             let indices: HashMap<_, _> = snap
                 .entries
                 .iter()
@@ -506,27 +541,47 @@ impl AppController {
         self.refilter(None);
     }
 
-    fn refilter(&mut self, only_tab: Option<TabId>) {
+    pub fn refilter(&mut self, only_tab: Option<TabId>) {
+        self.revision = self.revision.wrapping_add(1);
         let (hidden, system) = (self.show_hidden, self.show_system);
+        let large: Vec<_> = self
+            .sources
+            .keys()
+            .copied()
+            .filter(|id| only_tab.is_none_or(|tab| tab == *id))
+            .collect();
+        for id in large {
+            self.schedule_view(id);
+        }
+        let queries: HashMap<_, _> = self
+            .snapshots
+            .keys()
+            .map(|id| (*id, self.query_text(*id)))
+            .collect();
         for (id, snapshot) in &mut self.snapshots {
-            if only_tab.is_some_and(|tab| tab != *id) {
+            if self.sources.contains_key(id) || only_tab.is_some_and(|tab| tab != *id) {
                 continue;
             }
             let Some(tab) = self.tabs.get_mut(*id) else {
                 continue;
             };
+            let snapshot = std::sync::Arc::make_mut(snapshot);
             let old_paths: Vec<_> = snapshot.entries.iter().map(|e| e.path.clone()).collect();
             let mut all = std::mem::take(&mut snapshot.entries);
             all.extend(self.excluded.remove(id).unwrap_or_default());
-            let query = kova_core::domain::SearchQuery::parse(
-                self.searches
-                    .get(id)
-                    .map(String::as_str)
-                    .unwrap_or_default(),
-                chrono::Local::now(),
+            let query = kova_core::domain::SearchQuery::parse(&queries[id], chrono::Local::now());
+            let (mut visible, excluded) = partition_query(
+                all,
+                hidden,
+                system,
+                &query,
+                &self.folder_sizes,
+                self.folder_sizes_enabled,
             );
-            let (mut visible, excluded) = partition_query(all, hidden, system, &query);
-            kova_core::domain::sort_entries(&mut visible, tab.sort);
+            kova_core::domain::sort_entries_by_size(&mut visible, tab.sort, |e| {
+                kova_core::domain::effective_size(e, &self.folder_sizes, self.folder_sizes_enabled)
+                    .map(|s| s.bytes)
+            });
             let indices: HashMap<_, _> = visible
                 .iter()
                 .enumerate()
@@ -539,11 +594,136 @@ impl AppController {
         }
     }
 
+    pub fn query_text(&self, id: TabId) -> String {
+        let filters = self.filters.get(&id).copied().unwrap_or_default();
+        let kind = [
+            "",
+            "type:image",
+            "type:document",
+            "type:video",
+            "type:audio",
+            "type:folder",
+            "type:archive",
+        ]
+        .get(filters[0])
+        .copied()
+        .unwrap_or_default();
+        let size = ["", "size:<1MiB", "size:>100MiB", "size:>1GiB"]
+            .get(filters[1])
+            .copied()
+            .unwrap_or_default();
+        let date = [
+            "",
+            "modified:today",
+            "modified:this-week",
+            "modified:this-month",
+        ]
+        .get(filters[2])
+        .copied()
+        .unwrap_or_default();
+        format!(
+            "{} {kind} {size} {date}",
+            self.searches
+                .get(&id)
+                .map(String::as_str)
+                .unwrap_or_default()
+        )
+    }
+
     pub fn search_text(&self) -> &str {
         self.searches
             .get(&self.active_tab_id())
             .map(String::as_str)
             .unwrap_or_default()
+    }
+
+    pub fn view_in_flight(&self) -> bool {
+        self.view_pending.contains(&self.active_tab_id())
+    }
+
+    fn cancel_view(&mut self, id: TabId) {
+        if let Some(generation) = self.view_generations.get(&id) {
+            generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.view_pending.remove(&id);
+    }
+
+    fn schedule_view(&mut self, id: TabId) {
+        let Some(source) = self.sources.get(&id).cloned() else {
+            return;
+        };
+        let Some(tab) = self.tabs.get(id) else { return };
+        if self.view_worker.is_none() {
+            match crate::search::Worker::new() {
+                Ok(worker) => self.view_worker = Some(worker),
+                Err(error) => {
+                    self.errors
+                        .insert(id, format!("Search worker unavailable: {error}"));
+                    self.pending.remove(&id);
+                    return;
+                }
+            }
+        }
+        let latest = self.view_generations.entry(id).or_default().clone();
+        let generation = latest.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let job = crate::search::Job {
+            tab: id,
+            generation,
+            latest,
+            source,
+            query: self.query_text(id),
+            hidden: self.show_hidden,
+            system: self.show_system,
+            sizes: self.folder_sizes.clone(),
+            sizes_enabled: self.folder_sizes_enabled,
+            sort: tab.sort,
+        };
+        if self.view_worker.as_ref().unwrap().sender.send(job).is_ok() {
+            self.view_pending.insert(id);
+        }
+    }
+
+    pub fn poll_views(&mut self) -> bool {
+        let results: Vec<_> = self
+            .view_worker
+            .as_ref()
+            .map(|w| w.results.try_iter().collect())
+            .unwrap_or_default();
+        let mut dirty = false;
+        for result in results {
+            if !self.is_current_request(result.tab, result.snapshot.request_id)
+                || self.view_generations.get(&result.tab).is_none_or(|g| {
+                    g.load(std::sync::atomic::Ordering::Relaxed) != result.generation
+                })
+            {
+                continue;
+            }
+            let Some(tab) = self.tabs.get_mut(result.tab) else {
+                continue;
+            };
+            if let Some(old) = self.snapshots.get(&result.tab) {
+                tab.selection.remap(|i| {
+                    old.entries
+                        .get(i)
+                        .and_then(|e| result.indices.get(&e.path).copied())
+                });
+            } else {
+                tab.selection.clear();
+            }
+            self.revision = self.revision.wrapping_add(1);
+            self.snapshots
+                .insert(result.tab, std::sync::Arc::new(result.snapshot));
+            self.excluded.insert(result.tab, result.excluded);
+            self.view_pending.remove(&result.tab);
+            self.pending.remove(&result.tab);
+            self.background_pending.remove(&result.tab);
+            self.errors.remove(&result.tab);
+            if result.tab == self.active_tab_id() {
+                self.status_text = "Ready".into();
+            }
+            dirty |= result.tab == self.active_tab_id();
+        }
+        dirty
     }
 
     pub fn set_search(&mut self, text: String) {
@@ -555,14 +735,63 @@ impl AppController {
     }
 }
 
+pub(crate) fn display_row(
+    e: &FileEntry,
+    show_extensions: bool,
+    folder_sizes_enabled: bool,
+    folder_sizes: &kova_core::domain::FolderSizes,
+    selected: bool,
+) -> FileListItem {
+    FileListItem {
+        name: if show_extensions || e.is_directory() {
+            e.name.clone()
+        } else {
+            std::path::Path::new(&e.name)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        },
+        type_name: kind_text(e),
+        size_text: if e.is_directory() && folder_sizes_enabled {
+            folder_sizes
+                .get(&e.path)
+                .map(|size| {
+                    size.map(|size| {
+                        format!(
+                            "{}{}",
+                            if size.complete { "" } else { "≥ " },
+                            crate::format_bytes(size.bytes)
+                        )
+                    })
+                    .unwrap_or_else(|| "Unavailable".into())
+                })
+                .unwrap_or_else(|| "…".into())
+        } else {
+            size_text(e)
+        },
+        modified_text: modified_text(e),
+        icon_id: effective_icon_id(e),
+        is_dir: e.is_directory(),
+        selected,
+    }
+}
+
 fn partition_query(
     entries: Vec<FileEntry>,
     hidden: bool,
     system: bool,
     query: &kova_core::domain::SearchQuery,
+    sizes: &kova_core::domain::FolderSizes,
+    sizes_enabled: bool,
 ) -> (Vec<FileEntry>, Vec<FileEntry>) {
     entries.into_iter().partition(|e| {
-        (!e.metadata.is_hidden || hidden) && (!e.metadata.is_system || system) && query.matches(e)
+        (!e.metadata.is_hidden || hidden)
+            && (!e.metadata.is_system || system)
+            && query.matches_with_size(
+                e,
+                kova_core::domain::effective_size(e, sizes, sizes_enabled),
+            )
     })
 }
 
@@ -611,7 +840,7 @@ fn modified_text(entry: &FileEntry) -> String {
     entry
         .metadata
         .modified
-        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .map(|dt| kova_platform_windows::formatting::date(dt, false))
         .unwrap_or_default()
 }
 
@@ -641,6 +870,101 @@ mod tests {
     use super::*;
 
     #[test]
+    fn computed_folder_sizes_drive_display_filter_and_sort_after_queries() {
+        use kova_core::domain::EffectiveSize;
+        for count in [3, 2500] {
+            let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+            let id = ctrl.active_tab_id();
+            let mut snapshot = dummy_snapshot(1, "Folder 0");
+            snapshot.entries = (0..count)
+                .map(|i| {
+                    let entry = dummy_snapshot(1, &format!("Folder {i}")).entries.remove(0);
+                    ctrl.folder_sizes.insert(
+                        entry.path.clone(),
+                        Some(EffectiveSize {
+                            bytes: (count - i) as u64 * 1024,
+                            complete: true,
+                        }),
+                    );
+                    entry
+                })
+                .collect();
+            ctrl.folder_sizes_enabled = true;
+            ctrl.record_request(id, 1);
+            ctrl.apply_snapshot(id, snapshot);
+            settle(&mut ctrl);
+            ctrl.set_sort(SortColumn::Size);
+            settle(&mut ctrl);
+            assert!(
+                ctrl.path_at(0)
+                    .unwrap()
+                    .ends_with(format!("Folder {}", count - 1))
+            );
+            ctrl.set_search("size:>1KiB".into());
+            settle(&mut ctrl);
+            assert_eq!(ctrl.item_count(), count - 1);
+            assert!(
+                ctrl.path_at(0)
+                    .unwrap()
+                    .ends_with(format!("Folder {}", count - 2))
+            );
+            assert_eq!(
+                ctrl.file_list_items()[0].size_text,
+                crate::format_bytes(2048)
+            );
+            ctrl.set_search(String::new());
+            settle(&mut ctrl);
+            assert!(
+                ctrl.path_at(0)
+                    .unwrap()
+                    .ends_with(format!("Folder {}", count - 1))
+            );
+        }
+    }
+
+    #[test]
+    fn rapid_background_searches_cannot_replace_newer_navigation() {
+        let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+        let id = ctrl.active_tab_id();
+        let mut snapshot = dummy_snapshot(1, "old");
+        snapshot.entries = (0..10000)
+            .map(|i| dummy_snapshot(1, &format!("Folder {i}")).entries.remove(0))
+            .collect();
+        ctrl.record_request(id, 1);
+        ctrl.apply_snapshot(id, snapshot);
+        ctrl.set_search("123".into());
+        ctrl.set_search("999".into());
+        settle(&mut ctrl);
+        assert!(
+            ctrl.snapshot()
+                .unwrap()
+                .entries
+                .iter()
+                .all(|e| e.name.contains("999"))
+        );
+        ctrl.set_search(String::new());
+        ctrl.record_request(id, 2);
+        ctrl.apply_snapshot(id, dummy_snapshot(2, "New destination"));
+        for _ in 0..20 {
+            ctrl.poll_views();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(ctrl.snapshot().unwrap().entries[0].name, "New destination");
+        assert_eq!(ctrl.item_count(), 1);
+    }
+    fn settle(ctrl: &mut AppController) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !ctrl.view_pending.is_empty() {
+            ctrl.poll_views();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "view worker timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    #[test]
     fn search_refilters_ten_thousand_cached_entries_without_new_requests() {
         let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
         let id = ctrl.active_tab_id();
@@ -662,17 +986,21 @@ mod tests {
             .collect();
         ctrl.record_request(id, 1);
         ctrl.apply_snapshot(id, snapshot);
+        settle(&mut ctrl);
         ctrl.selection_mut().unwrap().select_single(9999);
         let selection = ctrl.selected_paths();
         ctrl.set_search("type:image size:>9MB".into());
+        settle(&mut ctrl);
         assert_eq!(ctrl.item_count(), 783);
         assert_eq!(ctrl.selected_paths(), selection);
         assert_eq!(ctrl.snapshot().unwrap().request_id, 1);
         assert!(!ctrl.is_loading());
         ctrl.set_search(String::new());
+        settle(&mut ctrl);
         assert_eq!(ctrl.item_count(), 10_000);
         assert_eq!(ctrl.selected_paths(), selection);
         ctrl.set_search("nothing-matches".into());
+        settle(&mut ctrl);
         assert_eq!(ctrl.selected_count(), 0);
         assert!(ctrl.selected_paths().is_empty());
     }

@@ -229,9 +229,14 @@ fn execute_group(
             .iter()
             .map(|(path, _)| path.clone())
             .collect::<Vec<_>>();
-        let sink: IFileOperationProgressSink =
-            crate::transfer_progress::ProgressSink::new(handle.clone(), &sources, base, weight)
-                .into();
+        let sink: IFileOperationProgressSink = crate::transfer_progress::ProgressSink::new(
+            handle.clone(),
+            &sources,
+            base,
+            weight,
+            !replace,
+        )
+        .into();
         let cookie = operation.Advise(&sink).map_err(OpFailure::com)?;
         struct Advice {
             operation: IFileOperation,

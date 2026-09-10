@@ -11,6 +11,12 @@ const DRIVE_FIXED: u32 = 3;
 const DRIVE_REMOVABLE: u32 = 2;
 const DRIVE_RAMDISK: u32 = 6;
 
+/// A cheap OS-maintained bitmask; no volume or filesystem query on the UI thread.
+pub fn logical_drive_mask() -> u32 {
+    // SAFETY: GetLogicalDrives takes no pointers and returns the process-visible drive map.
+    unsafe { windows::Win32::Storage::FileSystem::GetLogicalDrives() }
+}
+
 /// A logical drive entry shown in the sidebar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriveInfo {
@@ -25,9 +31,8 @@ pub struct DriveInfo {
     pub drive_type: String,
 }
 
-/// Enumerate local logical drives as returned by Windows. Only fixed and
-/// removable local drives are returned; CD/DVD/network drives are filtered out
-/// for M0 to keep the UI simple.
+/// Discover local and mapped network drives. Remote volumes are listed without
+/// contacting the server; existence and access are checked when opened.
 pub fn list_local_drives() -> Vec<DriveInfo> {
     // Suppress insert-media dialogs only on this background worker. Restore
     // the original mode so unrelated Shell operations keep Windows behavior.
@@ -68,8 +73,19 @@ pub fn list_local_drives() -> Vec<DriveInfo> {
             let drive_type = local_drive_type(&path);
             if let Some(drive_type) = drive_type {
                 let letter = os_string.to_string_lossy().into_owned();
-                let (total_bytes, free_bytes) = drive_capacity(&path);
-                let (name, file_system) = volume_details(&path);
+                let (total_bytes, free_bytes) = if drive_type == "Network" {
+                    (0, 0)
+                } else {
+                    drive_capacity(&path)
+                };
+                let (name, file_system) = if drive_type == "Network" {
+                    (
+                        format!("Network ({})", letter.trim_end_matches('\\')),
+                        String::new(),
+                    )
+                } else {
+                    volume_details(&path)
+                };
                 Some(DriveInfo {
                     name,
                     file_system,
@@ -161,6 +177,7 @@ fn local_drive_type(path: &std::path::Path) -> Option<&'static str> {
         DRIVE_FIXED => Some("Local disk"),
         DRIVE_REMOVABLE => Some("Removable"),
         DRIVE_RAMDISK => Some("RAM disk"),
+        4 => Some("Network"),
         _ => None,
     }
 }

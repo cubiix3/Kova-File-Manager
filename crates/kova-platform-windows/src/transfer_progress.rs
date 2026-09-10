@@ -18,6 +18,7 @@ use windows::{
 
 #[implement(IFileOperationProgressSink)]
 pub struct ProgressSink {
+    record_undo: bool,
     handle: TransferHandle,
     sizes: Mutex<HashMap<PathBuf, u64>>,
     roots: Mutex<HashSet<PathBuf>>,
@@ -25,8 +26,15 @@ pub struct ProgressSink {
     weight: f32,
 }
 impl ProgressSink {
-    pub fn new(handle: TransferHandle, sources: &[PathBuf], base: f32, weight: f32) -> Self {
+    pub fn new(
+        handle: TransferHandle,
+        sources: &[PathBuf],
+        base: f32,
+        weight: f32,
+        record_undo: bool,
+    ) -> Self {
         Self {
+            record_undo,
             handle,
             sizes: Mutex::new(HashMap::new()),
             roots: Mutex::new(sources.iter().cloned().collect()),
@@ -94,6 +102,9 @@ impl ProgressSink {
             });
             if is_move && result.is_ok() && result != COPYENGINE_S_USER_IGNORED {
                 if let Some(destination) = item_path(moved) {
+                    if root_done && self.record_undo {
+                        self.handle.undo.record(&path, &destination, false);
+                    }
                     if let Ok(mut moves) = self.handle.moved.lock() {
                         moves.push((path, destination));
                     }

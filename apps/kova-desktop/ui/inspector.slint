@@ -1,0 +1,116 @@
+import { FilesNavBack, FilesNavForward } from "files-icons.slint";
+import { ScrollView } from "std-widgets.slint";
+import { AppState, Theme, Metrics } from "shared.slint";
+import { ActionButton, NavIconButton, IconPlus, TextButton } from "controls.slint";
+
+export component Inspector inherits Rectangle {
+    property <float> preview-zoom: 1;
+    property <bool> preview-fit: true;
+    property <string> zoom-path: AppState.preview-path;
+    changed zoom-path => { self.preview-fit = true; self.preview-zoom = 1; }
+            border-radius: Metrics.radius-lg;
+            border-width: 1px; border-color: Theme.border-subtle;
+            background: Theme.content-bg;
+            Text {
+                x: 14px; y: 0; width: parent.width - 56px; height: 42px;
+                text: AppState.preview-title; overflow: elide;
+                color: Theme.text-primary; font-size: 13px; font-weight: 600; vertical-alignment: center;
+            }
+            Rectangle {
+                x: parent.width - 34px; y: 8px; width: 26px; height: 26px; border-radius: Metrics.radius-sm;
+                background: preview-close.has-hover ? Theme.surface-hover : transparent;
+                Path { x: 8px; y: 8px; width: 10px; height: 10px; viewbox-width: 10; viewbox-height: 10; commands: "M1 1L9 9M9 1L1 9"; fill: transparent; stroke: Theme.text-secondary; stroke-width: 1.2px; }
+                accessible-role: button; accessible-label: @tr("Close inspector");
+                accessible-action-default => { AppState.request-view-option(3); }
+                preview-close := TouchArea { clicked => { AppState.request-view-option(3); } }
+            }
+            Rectangle { x: 12px; y: 42px; width: parent.width - 24px; height: 1px; background: Theme.border; }
+            Text {
+                x: 14px; y: 44px; width: parent.width - 28px; height: 20px;
+                text: AppState.preview-info; color: Theme.text-muted; font-size: 11px;
+                overflow: elide; vertical-alignment: center;
+            }
+            if AppState.preview-has-image: HorizontalLayout {
+                x: 12px; y: 68px; width: parent.width - 24px; height: 28px; spacing: 4px;
+                Text { text: @tr("Zoom"); color: Theme.text-muted; font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; }
+                NavIconButton { width: 28px; height: 28px; enabled: root.preview-fit || root.preview-zoom > 0.25;
+                    label: @tr("Zoom out");
+                    clicked => { root.preview-fit = false; root.preview-zoom = Math.max(0.25, root.preview-zoom - 0.25); }
+                    Text { text: "−"; color: Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                NavIconButton { width: 60px; height: 28px;
+                    label: @tr("Fit or actual preview pixels");
+                    clicked => { root.preview-fit = !root.preview-fit; root.preview-zoom = 1; }
+                    Text { text: root.preview-fit ? "Fit" : Math.round(root.preview-zoom * 100) + "%"; color: Theme.accent; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                NavIconButton { width: 28px; height: 28px; enabled: root.preview-fit || root.preview-zoom < 4;
+                    label: @tr("Zoom in");
+                    clicked => { root.preview-fit = false; root.preview-zoom = Math.min(4, root.preview-zoom + 0.25); }
+                    IconPlus { x: 7px; y: 7px; }
+                }
+            }
+            if AppState.preview-has-image: Rectangle {
+                x: 12px; y: 104px; width: parent.width - 24px; height: Math.max(100px, parent.height * 0.48 - 110px);
+                background: Theme.sidebar-bg; border-radius: Metrics.radius-md; clip: true;
+                ScrollView {
+                    width: parent.width; height: parent.height;
+                    viewport-width: root.preview-fit ? self.width : Math.max(self.width, AppState.preview-pixel-width * root.preview-zoom * 1px);
+                    viewport-height: root.preview-fit ? self.height : Math.max(self.height, AppState.preview-pixel-height * root.preview-zoom * 1px);
+                    Image {
+                        width: root.preview-fit ? parent.width : AppState.preview-pixel-width * root.preview-zoom * 1px;
+                        height: root.preview-fit ? parent.height : AppState.preview-pixel-height * root.preview-zoom * 1px;
+                        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                        source: AppState.preview-image; image-fit: contain;
+                    }
+                }
+            }
+            if !AppState.preview-has-image: ScrollView {
+                x: 12px; y: 72px; width: parent.width - 24px; height: Math.max(100px, parent.height * 0.48 - 82px);
+                viewport-width: self.width;
+                viewport-height: Math.max(self.height, preview-copy.preferred-height + 8px);
+                preview-copy := Text {
+                    width: parent.width - 14px; text: AppState.preview-text;
+                    wrap: word-wrap; font-family: "Consolas"; font-size: 12px; color: Theme.text-secondary;
+                }
+            }
+            if AppState.preview-has-image: HorizontalLayout {
+                x: 12px; y: parent.height * 0.48 - 2px; width: parent.width - 24px; height: 30px; spacing: 6px;
+                if AppState.preview-animated: ActionButton {
+                    width: 88px; height: 30px;
+                    label: AppState.preview-paused ? "Play" : "Pause";
+                    triggered => { AppState.preview-paused = !AppState.preview-paused; }
+                    Path {
+                        x: 10px; y: 8px; width: 14px; height: 14px;
+                        viewbox-width: 14; viewbox-height: 14;
+                        commands: AppState.preview-paused ? "M3 1L12 7L3 13Z" : "M3 2H5V12H3ZM9 2H11V12H9Z";
+                        fill: Theme.accent;
+                    }
+                }
+                if AppState.preview-pages > 0: NavIconButton { label: @tr("Previous PDF page"); enabled: AppState.preview-page > 0; width: 30px; clicked => { AppState.preview-page -= 1; } FilesNavBack { x: 7px; y: 7px; width: 16px; height: 16px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; } }
+                Text { text: AppState.preview-text; color: Theme.text-muted; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; horizontal-stretch: 1; }
+                if AppState.preview-pages > 0: NavIconButton { label: @tr("Next PDF page"); enabled: AppState.preview-page + 1 < AppState.preview-pages; width: 30px; clicked => { AppState.preview-page += 1; } FilesNavForward { x: 7px; y: 7px; width: 16px; height: 16px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; } }
+            }
+            Rectangle { x: 14px; y: parent.height * 0.48 + 36px; width: parent.width - 28px; height: 1px; background: Theme.border-subtle; }
+            ScrollView {
+                x: 14px; y: parent.height * 0.48 + 46px; width: parent.width - 28px; height: parent.height - self.y - 12px;
+                viewport-width: self.width;
+                viewport-height: info-layout.preferred-height;
+                info-layout := VerticalLayout {
+                    width: parent.width - 12px; spacing: 12px;
+                    TextButton { text: @tr("Copy Path"); enabled: AppState.preview-path != ""; width: 104px; clicked => { AppState.copy-text(AppState.preview-path); } }
+                    Text { text: @tr("FILE INFORMATION"); color: Theme.text-muted; font-size: 10px; font-weight: 600; height: 20px; }
+                    for item in AppState.inspector-info: HorizontalLayout {
+                        spacing: 8px;
+                        Text { width: 68px; text: item.label; color: Theme.text-muted; font-size: 11px; }
+                        value-cell := Rectangle {
+                            horizontal-stretch: 1; min-width: 0px; height: Math.max(24px, value-label.preferred-height);
+                            value-label := Text { width: parent.width; text: item.value; color: Theme.text-primary; font-size: 12px; wrap: char-wrap; }
+                            TouchArea { clicked => { AppState.copy-text(item.value); } }
+                            accessible-role: button; accessible-label: "Copy " + item.label + ": " + item.value;
+                            accessible-action-default => { AppState.copy-text(item.value); }
+                        }
+                    }
+                }
+            }
+
+}

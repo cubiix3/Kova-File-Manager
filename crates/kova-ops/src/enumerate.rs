@@ -4,36 +4,114 @@ use kova_platform_windows::path_resolver::map_io_error;
 use std::os::windows::fs::MetadataExt;
 use tokio::fs;
 
+/// Explicit recursive search. Tokio cancellation drops the traversal at every I/O await.
+/// Never follow directory reparse points or hydrate observed offline placeholders.
+pub async fn enumerate_tree(
+    location: Location,
+    request_id: u64,
+    tab_id: kova_core::domain::TabId,
+    events: &tokio::sync::mpsc::Sender<kova_core::domain::KovaEvent>,
+) -> Result<DirectorySnapshot> {
+    let mut pending = std::collections::VecDeque::from([location.path.clone()]);
+    let mut entries = Vec::new();
+    let mut folders = 0;
+    let mut skipped = 0;
+    let mut reported = std::time::Instant::now();
+    while let Some(path) = pending.pop_front() {
+        let snapshot = match enumerate_directory(Location::new(path.clone()), request_id).await {
+            Ok(snapshot) => snapshot,
+            Err(error) if folders == 0 => return Err(error),
+            Err(_) => {
+                skipped += 1;
+                continue;
+            }
+        };
+        folders += 1;
+        for entry in snapshot.entries {
+            if entry.is_directory() {
+                if entry.metadata.raw_attributes & 0x0044_1400 == 0 {
+                    pending.push_back(entry.path.clone());
+                } else {
+                    skipped += 1;
+                }
+            }
+            entries.push(entry);
+        }
+        if reported.elapsed() >= std::time::Duration::from_millis(200) {
+            let _ = events
+                .send(kova_core::domain::KovaEvent::DirectoryProgress {
+                    tab_id,
+                    request_id,
+                    folders,
+                    entries: entries.len(),
+                    skipped,
+                })
+                .await;
+            reported = std::time::Instant::now();
+        }
+        tokio::task::yield_now().await;
+    }
+    let _ = events
+        .send(kova_core::domain::KovaEvent::DirectoryProgress {
+            tab_id,
+            request_id,
+            folders,
+            entries: entries.len(),
+            skipped,
+        })
+        .await;
+    Ok(DirectorySnapshot {
+        location,
+        request_id,
+        entries,
+    })
+}
+
 /// Enumerate a directory asynchronously, off the UI thread.
 ///
 /// A single broken entry must not abort the whole listing. The returned
 /// snapshot carries a `request_id` so callers can discard stale results.
 pub async fn enumerate_directory(location: Location, request_id: u64) -> Result<DirectorySnapshot> {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Cancel(Arc<AtomicBool>);
+    impl Drop for Cancel {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let _cancel = Cancel(cancelled.clone());
+    tokio::task::spawn_blocking(move || {
+        enumerate_directory_blocking(location, request_id, &cancelled)
+    })
+    .await
+    .map_err(|e| kova_core::error::OperationError::Shell(e.to_string()))?
+}
+
+fn enumerate_directory_blocking(
+    location: Location,
+    request_id: u64,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<DirectorySnapshot> {
     let path = location.path.clone();
-
     let mut entries = Vec::new();
-    let mut read_dir = fs::read_dir(&path)
-        .await
-        .map_err(|e| map_io_error(&path, e))?;
-
-    while let Some(item) = read_dir
-        .next_entry()
-        .await
-        .map_err(|e| map_io_error(&path, e))?
-    {
+    // Windows DirEntry metadata reuses FindFirst/NextFile information. Keeping
+    // this loop on one worker avoids 100,000 separate Tokio blocking dispatches.
+    let directory = std::fs::read_dir(&path).map_err(|e| map_io_error(&path, e))?;
+    for (index, item) in directory.enumerate() {
+        if index % 256 == 0 && cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(kova_core::error::OperationError::OperationCancelled);
+        }
+        let item = item.map_err(|e| map_io_error(&path, e))?;
         let path = item.path();
-        let name = match item.file_name().into_string() {
-            Ok(n) => n,
-            Err(_os) => {
-                tracing::warn!("skipping non-Unicode entry at {}", path.display());
-                continue;
-            }
-        };
-
-        let metadata = match item.metadata().await {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("metadata failed for {}: {e}", path.display());
+        let name = item.file_name().to_string_lossy().into_owned();
+        let metadata = match item.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                tracing::warn!(%error,path=%path.display(),"Metadata unavailable");
                 continue;
             }
         };

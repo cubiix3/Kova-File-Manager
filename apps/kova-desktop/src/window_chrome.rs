@@ -61,11 +61,64 @@ pub fn connect(
     });
     let weak = app.as_weak();
     let styled = std::cell::Cell::new(false);
-    app.window().on_winit_window_event(move |window, _event| {
+    let performance = std::env::var_os("KOVA_PERF").is_some();
+    let input = std::rc::Rc::new(std::cell::Cell::new(None::<std::time::Instant>));
+    tracing::info!(performance, "Window diagnostics");
+    if performance {
+        let pending = input.clone();
+        if let Err(error) = app.window().set_rendering_notifier(move |state, _| {
+            if matches!(state, slint::RenderingState::AfterRendering) {
+                crate::diagnostics::rendered();
+                if let Some(start) = pending.take() {
+                    tracing::info!(
+                        elapsed_ms = start.elapsed().as_secs_f64() * 1000.,
+                        "input to rendered frame"
+                    );
+                }
+            }
+        }) {
+            tracing::warn!(%error, "Frame timing unavailable");
+        }
+    }
+    let mut shortcuts = crate::keyboard::Shortcuts::default();
+    app.window().on_winit_window_event(move |window, event| {
+        if let Some(app) = weak.upgrade() {
+            if shortcuts.handle(&app, event) {
+                return EventResult::PreventDefault;
+            }
+        }
+        if performance
+            && matches!(
+                event,
+                slint::winit_030::winit::event::WindowEvent::RedrawRequested
+            )
+        {
+            if let Some(start) = input.take() {
+                tracing::info!(
+                    elapsed_ms = start.elapsed().as_secs_f64() * 1000.,
+                    "input to redraw request"
+                );
+            }
+        }
+        if performance
+            && matches!(
+                event,
+                slint::winit_030::winit::event::WindowEvent::KeyboardInput { .. }
+                    | slint::winit_030::winit::event::WindowEvent::MouseInput { .. }
+                    | slint::winit_030::winit::event::WindowEvent::MouseWheel { .. }
+            )
+            && input.get().is_none()
+        {
+            input.set(Some(std::time::Instant::now()));
+        }
         if let Some(app) = weak.upgrade() {
             window.with_winit_window(|native| {
                 app.set_window_maximized(native.is_maximized());
                 if !styled.get() {
+                    if app.get_restore_maximized() {
+                        native.set_maximized(true);
+                        app.set_restore_maximized(false);
+                    }
                     if let Ok(handle) = native.window_handle() {
                         if let RawWindowHandle::Win32(handle) = handle.as_raw() {
                             kova_platform_windows::window_theme::style_window(handle.hwnd.get());

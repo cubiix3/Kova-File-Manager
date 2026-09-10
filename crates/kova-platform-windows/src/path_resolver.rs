@@ -114,15 +114,10 @@ pub fn child_path(parent: &Location, name: &str) -> PathBuf {
 /// Rename one entry without replacing an existing destination. Unlike
 /// std::fs::rename on Windows this cannot silently overwrite another file.
 pub fn rename_no_replace(source: &Path, destination: &Path) -> Result<(), OperationError> {
-    use std::os::windows::ffi::OsStrExt;
     use windows::Win32::Storage::FileSystem::MoveFileW;
     use windows::core::PCWSTR;
-    let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination_wide: Vec<u16> = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
+    let source_wide = extended_path(source);
+    let destination_wide = extended_path(destination);
     // SAFETY: both paths are NUL-terminated and their backing buffers live
     // throughout the call. MoveFileW fails when the destination exists.
     unsafe {
@@ -132,6 +127,29 @@ pub fn rename_no_replace(source: &Path, destination: &Path) -> Result<(), Operat
         )
     }
     .map_err(|e| OperationError::Shell(format!("Rename failed: {e}")))
+}
+
+/// Extended-length syntax for Win32 file APIs; preserves non-Unicode filenames.
+/// Shell display/parsing paths remain separate because providers differ in support.
+pub(crate) fn extended_path(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    let normalized = normalize_separators(path.to_path_buf());
+    let wide: Vec<_> = normalized.as_os_str().encode_wide().collect();
+    let mut result = if !normalized.is_absolute()
+        || wide.starts_with(&[92, 92, 63, 92])
+        || wide.starts_with(&[92, 92, 46, 92])
+    {
+        wide
+    } else if wide.starts_with(&[92, 92]) {
+        r"\\?\UNC\"
+            .encode_utf16()
+            .chain(wide.into_iter().skip(2))
+            .collect()
+    } else {
+        r"\\?\".encode_utf16().chain(wide).collect()
+    };
+    result.push(0);
+    result
 }
 
 #[cfg(test)]

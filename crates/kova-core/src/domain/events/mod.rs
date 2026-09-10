@@ -5,6 +5,13 @@ use super::tab::TabId;
 /// Events emitted by the core / operations layer back to the UI state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KovaEvent {
+    DirectoryProgress {
+        tab_id: TabId,
+        request_id: u64,
+        folders: usize,
+        entries: usize,
+        skipped: usize,
+    },
     /// A directory snapshot has been produced for a tab.
     DirectoryLoaded {
         tab_id: TabId,

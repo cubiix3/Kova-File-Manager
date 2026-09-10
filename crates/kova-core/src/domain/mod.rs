@@ -8,6 +8,7 @@ pub mod location;
 pub mod navigation;
 pub mod search;
 pub mod selection;
+pub mod size;
 pub mod sort;
 pub mod tab;
 
@@ -21,5 +22,6 @@ pub use location::*;
 pub use navigation::*;
 pub use search::*;
 pub use selection::*;
+pub use size::*;
 pub use sort::*;
 pub use tab::*;

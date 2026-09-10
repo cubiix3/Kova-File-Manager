@@ -36,23 +36,6 @@ fn range(state: &AppState) -> std::ops::Range<usize> {
     first..first.saturating_add(state.get_visible_row_count().clamp(1, 128) as usize)
 }
 
-pub fn image_for_row(
-    state: &AppState,
-    ctrl: &AppController,
-    models: &UiModels,
-    index: usize,
-) -> Option<slint::Image> {
-    if !range(state).contains(&index) {
-        return None;
-    }
-    let cache = models.thumbnails.borrow();
-    if cache.context != context(ctrl) {
-        return None;
-    }
-    let path = &ctrl.snapshot()?.entries.get(index)?.path;
-    cache.entries.get(path)?.clone()
-}
-
 pub fn connect(
     app: &MainWindow,
     controller: Arc<Mutex<AppController>>,
