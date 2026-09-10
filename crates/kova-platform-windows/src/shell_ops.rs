@@ -310,6 +310,96 @@ fn execute_group(
     Ok(())
 }
 
+/// Restore the captured Recycle Bin Shell item, keeping Windows' bookkeeping
+/// intact. Never manipulate the private $I/$R files ourselves.
+pub(crate) fn restore_recycled(
+    item: &IShellItem,
+    current: &Path,
+    original: &Path,
+) -> Result<PathBuf, String> {
+    use windows::Win32::UI::Shell::{
+        FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_RENAMEONCOLLISION, FOF_SILENT, FOFX_EARLYFAILURE,
+        IFileOperationProgressSink,
+    };
+    let parent = original
+        .parent()
+        .ok_or("Original parent folder is unavailable")?;
+    let name: Vec<u16> = original
+        .file_name()
+        .ok_or("Original file name is unavailable")?
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let queue = crate::transfers::TransferQueue::default();
+    let request = queue.enqueue(ShellOpCommand::Move {
+        sources: vec![current.into()],
+        dest: parent.into(),
+    })?;
+    let sink: IFileOperationProgressSink = crate::transfer_progress::ProgressSink::new(
+        request.handle.clone(),
+        &[current.into()],
+        0.0,
+        1.0,
+        false,
+    )
+    .into();
+    // SAFETY: called from an initialized STA with an apartment-local Shell item.
+    // Passing the sink to MoveItem keeps its lifetime scoped to this operation.
+    unsafe {
+        let operation: IFileOperation =
+            CoCreateInstance(&FileOperation, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
+        // The preflight rejects an occupied original path. If another process
+        // creates it afterwards, the Shell chooses a new name instead of replacing
+        // it. The progress sink returns the actual restored path in that case.
+        operation
+            .SetOperationFlags(
+                FOF_RENAMEONCOLLISION
+                    | FOF_NOCONFIRMATION
+                    | FOF_NOERRORUI
+                    | FOF_SILENT
+                    | FOFX_EARLYFAILURE,
+            )
+            .map_err(|e| e.to_string())?;
+        operation
+            .MoveItem(
+                item,
+                &shell_item(parent)?,
+                windows::core::PCWSTR(name.as_ptr()),
+                Some(&sink),
+            )
+            .map_err(|e| e.to_string())?;
+        operation.PerformOperations().map_err(|e| e.to_string())?;
+        if operation
+            .GetAnyOperationsAborted()
+            .map_err(|e| e.to_string())?
+            .as_bool()
+        {
+            return Err("Restore was cancelled; the item remains in the Recycle Bin".into());
+        }
+    }
+    if let Some(error) = request
+        .handle
+        .state
+        .lock()
+        .ok()
+        .map(|s| s.error.clone())
+        .filter(|s| !s.is_empty())
+    {
+        return Err(error);
+    }
+    request
+        .handle
+        .moved
+        .lock()
+        .map_err(|_| "Restore result unavailable")?
+        .last()
+        .map(|(_, destination)| destination.clone())
+        .ok_or_else(|| {
+            "Windows did not restore this item; it may have been removed from the Recycle Bin"
+                .into()
+        })
+}
+
 fn capitalize(word: &str) -> String {
     let mut chars = word.chars();
     match chars.next() {

@@ -24,6 +24,7 @@ pub struct ProgressSink {
     roots: Mutex<HashSet<PathBuf>>,
     base: f32,
     weight: f32,
+    recycled: Mutex<Vec<crate::undo::Recycled>>,
 }
 impl ProgressSink {
     pub fn new(
@@ -40,6 +41,7 @@ impl ProgressSink {
             roots: Mutex::new(sources.iter().cloned().collect()),
             base,
             weight,
+            recycled: Mutex::new(Vec::new()),
         }
     }
     fn check(&self) -> windows::core::Result<()> {
@@ -53,7 +55,7 @@ impl ProgressSink {
     }
     fn before(&self, item: Ref<'_, IShellItem>) -> windows::core::Result<()> {
         self.check()?;
-        if let Some(path) = item_path(item) {
+        if let Some(path) = item_path(item.as_ref()) {
             let bytes = std::fs::symlink_metadata(&path)
                 .ok()
                 .filter(|m| m.is_file())
@@ -76,7 +78,7 @@ impl ProgressSink {
         moved: Ref<'_, IShellItem>,
         is_move: bool,
     ) -> windows::core::Result<()> {
-        if let Some(path) = item_path(item) {
+        if let Some(path) = item_path(item.as_ref()) {
             let bytes = self
                 .sizes
                 .lock()
@@ -101,7 +103,7 @@ impl ProgressSink {
                 }
             });
             if is_move && result.is_ok() && result != COPYENGINE_S_USER_IGNORED {
-                if let Some(destination) = item_path(moved) {
+                if let Some(destination) = item_path(moved.as_ref()) {
                     if root_done && self.record_undo {
                         self.handle.undo.record(&path, &destination, false);
                     }
@@ -115,8 +117,8 @@ impl ProgressSink {
     }
 }
 
-fn item_path(item: Ref<'_, IShellItem>) -> Option<PathBuf> {
-    let item = item.as_ref()?;
+pub(crate) fn item_path(item: Option<&IShellItem>) -> Option<PathBuf> {
+    let item = item?;
     // SAFETY: live apartment-local Shell item. GetDisplayName returns an owned
     // terminated string allocated by COM; free it after copying, on all paths.
     unsafe {
@@ -136,6 +138,11 @@ impl IFileOperationProgressSink_Impl for ProgressSink_Impl {
         self.check()
     }
     fn FinishOperations(&self, _: HRESULT) -> windows::core::Result<()> {
+        if let Ok(mut items) = self.recycled.lock() {
+            self.handle
+                .undo
+                .record_recycled(std::mem::take(&mut *items));
+        }
         Ok(())
     }
     fn PreRenameItem(
@@ -206,6 +213,18 @@ impl IFileOperationProgressSink_Impl for ProgressSink_Impl {
         result: HRESULT,
         new: Ref<'_, IShellItem>,
     ) -> windows::core::Result<()> {
+        if result.is_ok() && result != COPYENGINE_S_USER_IGNORED {
+            if let (Some(path), Some(new)) = (item_path(item.as_ref()), new.as_ref()) {
+                let root = self.roots.lock().is_ok_and(|roots| roots.contains(&path));
+                if root {
+                    if let Some(recycled) = crate::undo::Recycled::capture(path, new) {
+                        if let Ok(mut items) = self.recycled.lock() {
+                            items.push(recycled);
+                        }
+                    }
+                }
+            }
+        }
         self.after(item, result, new, false)
     }
     fn PreNewItem(&self, _: u32, _: Ref<'_, IShellItem>, _: &PCWSTR) -> windows::core::Result<()> {

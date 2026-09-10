@@ -2496,7 +2496,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kova-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bitflags 2.13.1",
  "chrono",
@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "kova-desktop"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "kova-core",
@@ -2526,7 +2526,7 @@ dependencies = [
 
 [[package]]
 name = "kova-ops"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "kova-core",
@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "kova-platform-windows"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "image",

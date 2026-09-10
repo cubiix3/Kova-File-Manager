@@ -1,5 +1,7 @@
-Kova 0.2.1 fixes file menus closing immediately during automatic refresh and
-folder sizes repeatedly disappearing while being recalculated.
+Kova 0.2.2 adds responsive context-menu hover highlighting and Ctrl+Z recovery
+for files and folders deleted by Kova into the Recycle Bin, including batches.
+Restoration preserves occupied destinations and keeps pending items retryable.
+Undo history lasts for the current app session; permanent deletions cannot be restored.
 
 Background changes wait until a file menu closes. Unchanged metadata preserves
 the existing view, and ordinary browsing no longer watches the entire subtree.
@@ -32,8 +34,8 @@ runtime files are included; Rust and Visual Studio are not needed. Packages are 
 
 ## Limits
 
-Undo is session-only and covers validated non-replacing renames and same-volume
-file moves. Copies, deletions, replacements, cross-volume moves and folder moves
+Undo is session-only and covers recycled items, validated non-replacing renames
+and same-volume file moves. Copies, permanent deletions, replacements, cross-volume moves and folder moves
 are not offered as undoable. Recursive search skips directory links and observed
 offline placeholders; it is not a system-wide index. Cloud virtual-file drag formats,
 split panes, batch rename, full German translations and light theme are not included.

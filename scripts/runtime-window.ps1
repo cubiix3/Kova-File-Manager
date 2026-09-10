@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][int]$ProcessId,
-    [ValidateSet('Inspect','Screenshot','Keys','Click','Drag','Resize','Close','Wheel','Restore','RightClick')][string]$Action = 'Inspect',
+    [ValidateSet('Inspect','Screenshot','Keys','Click','Hover','Drag','Resize','Close','Wheel','Restore','RightClick')][string]$Action = 'Inspect',
     [string]$Text,
     [string]$OutputPath,
     [int]$X, [int]$Y, [int]$EndX, [int]$EndY,
@@ -67,7 +67,7 @@ if ($kovaOwner -ne $ProcessId) { throw "Window does not belong to the specified 
 if ($kovaHandle -eq [IntPtr]::Zero) { throw 'The specified process has no visible window.' }
 $kovaBounds = New-Object KovaWindowTest+Rect
 [void][KovaWindowTest]::GetWindowRect($kovaHandle,[ref]$kovaBounds)
-if ($Action -in @('Keys','Click','Drag','Resize','Wheel','Restore','RightClick')) {
+if ($Action -in @('Keys','Click','Hover','Drag','Resize','Wheel','Restore','RightClick')) {
     for ($kovaFocusAttempt=0; $kovaFocusAttempt -lt 4 -and -not [KovaWindowTest]::OwnsForeground($ProcessId); $kovaFocusAttempt++) {
         [KovaWindowTest]::FocusWindow($kovaHandle)
         Start-Sleep -Milliseconds 250
@@ -81,6 +81,7 @@ function Save-KovaSnapshot([string]$Path) {
     finally { $kovaGraphics.Dispose();$kovaImage.Dispose() }
 }
 switch ($Action) {
+    'Hover' { [void][KovaWindowTest]::SetCursorPos($kovaBounds.Left+$X,$kovaBounds.Top+$Y); Start-Sleep -Milliseconds 150 }
     'Keys' { [System.Windows.Forms.SendKeys]::SendWait($Text) }
     'Click' {
         [void][KovaWindowTest]::SetCursorPos($kovaBounds.Left+$X,$kovaBounds.Top+$Y)

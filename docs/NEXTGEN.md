@@ -108,13 +108,21 @@ Copy or **Shift** for Move. Native feedback states the effect before dropping.
 Kova destinations use the same transfer queue and conflict handling as Paste.
 Virtual collections are not filesystem drop destinations.
 
-**Undo** or **Ctrl+Z** opens a confirmation showing the exact reversible action.
-History lasts for the current process and contains up to 32 confirmed renames
-and non-replacing, same-volume file moves. Multi-file moves create individual
+**Undo** or **Ctrl+Z** restores the last selection deleted by Kova into the Recycle
+Bin, including files and folders, without a second confirmation. Kova records
+the exact recycled Shell items reported by Windows; it does not search the bin
+by filename or manipulate its private bookkeeping files. Occupied destinations
+are preserved; pending items remain retryable after a conflict or partial failure.
+Permanently deleted items, emptied-bin items and deletions from other applications
+cannot be restored through Kova's session history.
+
+For renames and non-replacing, same-volume file moves, Undo opens a confirmation
+showing the exact reversible action. History lasts for the current process and
+contains up to 32 operations. Multi-file moves create individual
 Undo entries, reviewed and reversed one file at a time. Undo checks file identity, size and
 modified time, then renames through an open handle without replacing anything.
 Changed/replaced files or an occupied original path cause an error. Copies,
-deletions, cross-volume moves, folder moves and actions executed by Explorer or
+cross-volume moves, folder moves and actions executed by Explorer or
 Shell extensions are not offered as application Undo. Cancellation is not Undo.
 
 ## Session and Home

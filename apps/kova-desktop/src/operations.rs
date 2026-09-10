@@ -6,9 +6,15 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> slint::Timer 
     let offered_undo = std::rc::Rc::new(std::cell::Cell::new(None));
     let reviewed_undo = offered_undo.clone();
     let queue = dispatcher.transfers.clone();
+    let restore_dispatcher = dispatcher.clone();
     let weak = app.as_weak();
     app.global::<AppState>().on_request_undo(move || {
         if let (Some(ui), Some((id, label))) = (weak.upgrade(), queue.undo.next()) {
+            if queue.undo.is_recycle(id) {
+                ui.invoke_dismiss_file_menu();
+                restore_dispatcher.dispatch_undo(id);
+                return;
+            }
             reviewed_undo.set(Some(id));
             ui.global::<AppState>().set_undo_description(label.into());
             ui.invoke_dismiss_file_menu();
