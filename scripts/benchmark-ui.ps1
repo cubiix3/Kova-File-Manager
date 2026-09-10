@@ -40,6 +40,9 @@ foreach($kovaCount in @(1000,10000,100000)) {
         Start-Sleep -Seconds 3
         $kovaWindow=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
         $kovaScale=$kovaWindow.Dpi/96.0
+        $kovaScreen=[Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+        & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Resize -PositionX ($kovaScreen.Left+20) -PositionY ($kovaScreen.Top+20) -X ([int][math]::Min(1120*$kovaScale,$kovaScreen.Width-40)) -Y ([int][math]::Min(720*$kovaScale,$kovaScreen.Height-40)) | Out-Null
+        $kovaWindow=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
         for($kovaTrial=0;$kovaTrial -lt 3;$kovaTrial++) {
             & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Click -X ([int](500*$kovaScale)) -Y ([int](520*$kovaScale)) | Out-Null
             & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Keys -Text '{F5}' | Out-Null

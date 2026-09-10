@@ -49,6 +49,10 @@ function Close-TestWindow {
 $kovaProcess = Start-TestWindow
 try {
     Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'initial folder enumeration and accessibility tree'
+    $kovaWindowInfo=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
+    $kovaScale=$kovaWindowInfo.Dpi/96.0
+    $kovaScreen=[Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Resize -PositionX ($kovaScreen.Left+20) -PositionY ($kovaScreen.Top+20) -X ([int][math]::Min(1120*$kovaScale,$kovaScreen.Width-40)) -Y ([int][math]::Min(720*$kovaScale,$kovaScreen.Height-40)) | Out-Null
     $kovaItem = Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)
     $kovaItem.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     Send-TestKeys '{F2}'
