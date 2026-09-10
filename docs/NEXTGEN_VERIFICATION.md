@@ -1,4 +1,7 @@
-# Next-generation verification
+# Next-generation verification — historical report
+
+This is the September 6 milestone, not the 0.2 release verification. Current test
+counts, runtime coverage and performance are in the [daily-driver report](DAILY_DRIVER_VERIFICATION.md).
 
 Windows 11 x64, September 6, 2026. Tests used isolated app preferences and local
 demonstration files; normal personal folders were not modified. The current

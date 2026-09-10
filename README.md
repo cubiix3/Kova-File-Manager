@@ -6,7 +6,7 @@
 <p align="center">A native Windows file manager. Your files, with a clearer view.</p>
 
 <p align="center">
-  <a href="https://github.com/cubiix3/Kova-File-Manager/releases">Download for Windows</a> ·
+  <a href="#download--install">Download for Windows</a> ·
   <a href="#a-closer-look">Screenshots</a> ·
   <a href="docs/VIEW_AND_PREVIEW.md">User guide</a> ·
   <a href="https://github.com/cubiix3/Kova-File-Manager/issues">Report an issue</a>
@@ -26,15 +26,23 @@ Windows 10/11 x64. No Electron or WebView.
 
 ## Download & install
 
-1. Open [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases).
-2. Download **Kova-Setup-<version>-x64.exe** from the release's **Assets** section.
-3. Run Setup, then launch Kova from the Start menu. A desktop shortcut is optional.
+Choose the build you want:
+
+- **0.2.0 candidate shown here:** open the [verified package run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34473650758),
+  sign in to GitHub and download **kova-windows-x64** under **Artifacts**. Extract
+  that download, then run `Kova-Setup-0.2.0-x64.exe`.
+- **Published preview:** open [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases)
+  and download the Setup EXE from **Assets**. The currently published v0.1.0
+  predates the features and screenshots on this page.
+
+After Setup, launch Kova from the Start menu. A desktop shortcut is optional.
 
 The installer includes the required Visual C++ runtime files and installs for
 your Windows account. Rust and Visual Studio are not required. To remove Kova,
 use **Windows Settings → Apps → Installed apps → Kova → Uninstall**.
 
-Prefer a ZIP? Download **Kova-<version>-x64.zip**, extract the entire archive and run
+Prefer a ZIP? Use the `Kova-<version>-x64.zip` included with your chosen build,
+extract the entire archive and run
 **Kova.exe**. Keep the included DLLs beside the executable. Package checksums
 are available in **SHA256SUMS.txt**. The preview packages are not code-signed.
 
@@ -70,6 +78,14 @@ Choose small, medium or large tiles, then inspect a file alongside the gallery.
 
 Select a file and press **Space**. Read text, inspect images or page through a PDF
 alongside your files. GIF, animated WebP and APNG support Play/Pause.
+The inspector wraps long paths and offers **Copy Path**.
+
+<details>
+<summary>Text preview and file metadata</summary>
+
+![Text inspector with full path and Copy Path](docs/images/daily-driver-inspector.png)
+
+</details>
 
 ### Feels new. Works native.
 
@@ -133,7 +149,7 @@ See [Contributing](CONTRIBUTING.md) for quality checks and
 - [User guide: views, previews and storage](docs/VIEW_AND_PREVIEW.md)
 - [Windows integration and restoration](docs/INTERACTION_INTEGRATION.md)
 - [Daily-driver verification and performance](docs/DAILY_DRIVER_VERIFICATION.md)
-- [Current design](docs/APPROVED_DESIGN.md)
+- [Design background (historical)](docs/APPROVED_DESIGN.md)
 - [Product scope and planned work](docs/PRODUCT.md)
 - [Architecture](docs/ARCHITECTURE.md) · [Data safety](docs/SECURITY_AND_DATA_SAFETY.md)
 - [Documentation index and historical reports](docs/README.md)
