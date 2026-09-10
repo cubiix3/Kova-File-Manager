@@ -844,6 +844,7 @@ fn sync_ui(
 }
 
 fn sync_selection(ui: &MainWindow, dispatcher: &CommandDispatcher, models: &UiModels) {
+    ui.invoke_dismiss_file_menu();
     let controller = dispatcher.controller();
     let ctrl = controller.lock().unwrap();
     let selected = ctrl.selected_indices();

@@ -98,6 +98,14 @@ try {
     Send-TestKeys '{ENTER}'
     Wait-TestCondition { Test-Path -LiteralPath (Join-Path $kovaFiles 'Before.txt') } 'Undo restored original path'
     Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'restored selection model'
+    (Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Open-FileMenu
+    $kovaRefreshFile=Join-Path $kovaFiles 'MenuRefresh.tmp'
+    [IO.File]::WriteAllText($kovaRefreshFile,'External refresh fixture.')
+    Wait-TestCondition { -not (Find-FileMenu) } 'snapshot changes dismiss stale menu actions'
+    Wait-TestCondition { Find-TestElement 'MenuRefresh.tmp' ([Windows.Automation.ControlType]::ListItem) } 'external file appears'
+    Remove-Item -LiteralPath $kovaRefreshFile
+    Wait-TestCondition { -not (Find-TestElement 'MenuRefresh.tmp' ([Windows.Automation.ControlType]::ListItem)) } 'external fixture cleanup'
     Send-TestKeys '^a'
     Open-FileMenu
     if(Find-FileMenuButton 'Rename'){throw 'Multi-selection must not offer single-item rename'}
@@ -113,6 +121,17 @@ try {
     Wait-TestCondition { [KovaWindowTest]::NativeMenuWindow($kovaProcess.Id) -ne [IntPtr]::Zero } 'native Shell extensions remain available'
     Send-TestKeys '{ESC}'
     Wait-TestCondition { [KovaWindowTest]::NativeMenuWindow($kovaProcess.Id) -eq [IntPtr]::Zero } 'native menu dismissal'
+    Send-TestKeys '^2'
+    Wait-TestCondition { Find-TestElement 'Gallery' ([Windows.Automation.ControlType]::Text) } 'Gallery view'
+    $kovaGalleryItem=(Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)).Current.BoundingRectangle
+    $kovaGalleryWindow=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action RightClick -X ([int]($kovaGalleryItem.Left+$kovaGalleryItem.Width/2-$kovaGalleryWindow.Left)) -Y ([int]($kovaGalleryItem.Top+35-$kovaGalleryWindow.Top)) | Out-Null
+    Wait-TestCondition { Find-FileMenu } 'Gallery file menu'
+    Invoke-FileMenu 'Copy path'
+    Wait-TestCondition { [Windows.Forms.Clipboard]::GetText() -eq (Join-Path $kovaFiles 'Before.txt') } 'Gallery menu targets the clicked file'
+    Send-TestKeys '^1'
+    Wait-TestCondition { -not (Find-TestElement 'Gallery' ([Windows.Automation.ControlType]::Text)) } 'Details view restored'
+    $kovaItem = Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)
     $kovaSourceBounds = $kovaItem.Current.BoundingRectangle
     $kovaTargetBounds = (Find-TestElement 'Nested' ([Windows.Automation.ControlType]::ListItem)).Current.BoundingRectangle
     $kovaBounds = & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
@@ -138,6 +157,11 @@ try {
     Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'restored first tab'
     & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Screenshot -OutputPath (Join-Path $kovaFixture 'verified.png') | Out-Null
     [pscustomobject]@{Result='PASS';Flows='themed menu/keyboard/clipboard paths/native menu/open/select/rename/refresh/undo/Ctrl-drag copy/recursive search/global address/tabs/debounced save/restart';Fixture=$kovaFixture} | ConvertTo-Json
+} catch {
+    $kovaFailure=$_
+    [IO.File]::WriteAllText((Join-Path $kovaFixture 'failure.txt'),($kovaFailure.ToString()+"`r`n"+$kovaFailure.ScriptStackTrace))
+    try { & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Screenshot -OutputPath (Join-Path $kovaFixture 'failure.png') | Out-Null } catch { Write-Warning "Failure capture unavailable: $_" }
+    throw $kovaFailure
 } finally {
     if (-not $kovaProcess.HasExited) { Close-TestWindow }
 }

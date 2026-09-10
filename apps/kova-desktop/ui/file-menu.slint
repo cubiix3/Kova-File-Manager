@@ -84,8 +84,19 @@ export component FileContextMenu inherits Rectangle {
     // Navigation and transforms invalidate a menu's row context.
     property <string> context: AppState.current-path + "/" + AppState.active_tab + "/" + AppState.search-text + "/" + AppState.sort_column + "/" + (AppState.sort_ascending ? "asc" : "desc") + "/" + (AppState.loading ? "loading" : "ready");
     changed context => { if AppState.file-menu-visible { root.dismiss(); } }
-    changed visible => { if self.visible { self.active = self.single ? 0 : 3; AppState.tooltip = ""; } else { root.dismissed(); } }
-    public function dismiss() { AppState.file-menu-visible = false; }
+    public function open() {
+        // Choose a visible command before exposing/focusing the accessibility tree.
+        root.active = root.single ? 0 : 3;
+        AppState.tooltip = "";
+        AppState.file-menu-visible = true;
+    }
+    public function dismiss() {
+        if AppState.file-menu-visible {
+            // Move focus out before removing its accessible node from the tree.
+            root.dismissed();
+            AppState.file-menu-visible = false;
+        }
+    }
     function choose(index: int) {
         if !AppState.file-menu-visible || AppState.selected_count == 0 || !root.commands[index].shown { return; }
         root.dismiss();

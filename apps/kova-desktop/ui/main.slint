@@ -20,13 +20,15 @@ export component MainWindow inherits Window {
         if command == 0 { address-field.focus-field(); address-field.select-all-text(); }
         else { search-field.focus-field(); search-field.select-all-text(); }
     }
+    callback dismiss-file-menu();
+    dismiss-file-menu => { file-menu.dismiss(); }
     property <int> file-menu-row: -1;
     property <length> file-menu-x;
     property <length> file-menu-y;
     function show-file-menu(row: int, x: length, y: length) {
         if row >= 0 && row < AppState.files.length && AppState.selected_count > 0 && !AppState.loading && !AppState.inline-visible && !AppState.dialog_visible {
             root.file-menu-row = row; root.file-menu-x = x; root.file-menu-y = y;
-            AppState.file-menu-visible = true;
+            file-menu.open();
         }
     }
     in-out property <bool> window-maximized: false;
