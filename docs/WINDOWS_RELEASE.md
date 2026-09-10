@@ -14,6 +14,16 @@ files together before launching `Kova.exe`. No Rust toolchain is needed.
 
 Close Kova before updating, then run the newer installer. Setup reuses the same
 installation identity and directory. User preferences are preserved.
+There is no automatic updater. Release notifications are available through
+GitHub **Watch → Custom → Releases**.
+
+The [0.2.0 preview](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.0)
+publishes the unchanged Setup and ZIP from [package run 34487070491](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34487070491),
+built from `a527789286b87694fc4d114fbf2716425b2aaa94`. The release tag identifies that
+exact package source; subsequent changes before publication affected documentation
+and screenshots only. [Interactive verification run 34489098656](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34489098656)
+checked the downloaded package's provenance and checksums, real UI interactions
+and large-folder behavior. Local SHA-256 verification also passed before upload.
 
 Uninstall through Windows Settings. If the stable installation has an association
 backup, the uninstaller first runs Kova's existing restoration helper. A failed

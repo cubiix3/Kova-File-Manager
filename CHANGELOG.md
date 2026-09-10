@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — release candidate, 2026-09-10
+## 0.2.0 — Windows preview, 2026-09-10
 
 - Restore tabs, active location, search scope and filters, window state, columns,
   gallery and inspector. Save preferences after a short debounce with atomic replacement.
