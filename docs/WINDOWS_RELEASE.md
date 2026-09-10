@@ -69,5 +69,6 @@ Dispatch **Windows packages** with `verify_package_run` set to the successful
 package run ID. The separate job downloads that exact artifact, verifies its
 checksums and provenance, runs keyboard/UI Automation/native-drag interactions,
 and measures 1k/10k/100k-folder UI behavior. Set `capture_demo` to capture current
-Details, Gallery, Home, Inspector, native menu and conflict views as well.
+Details, Gallery, Home, Inspector, themed file menu, native extension menu and
+conflict views as well.
 Results are uploaded as `kova-ui-verification`. No tag or public release is created.

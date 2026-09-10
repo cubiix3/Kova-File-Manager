@@ -819,6 +819,7 @@ fn close_dialog(ui: &MainWindow, pending: &Arc<Mutex<Option<PendingDialog>>>) {
 }
 
 fn show_error_dialog(ui: &MainWindow, message: &str) {
+    ui.invoke_dismiss_file_menu();
     let state = ui.global::<AppState>();
     state.set_inline_visible(false);
     state.set_dialog_title("Error".into());
@@ -844,6 +845,7 @@ fn sync_ui(
 }
 
 fn sync_selection(ui: &MainWindow, dispatcher: &CommandDispatcher, models: &UiModels) {
+    ui.invoke_dismiss_file_menu();
     let controller = dispatcher.controller();
     let ctrl = controller.lock().unwrap();
     let selected = ctrl.selected_indices();

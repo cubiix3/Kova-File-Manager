@@ -19,8 +19,8 @@ and an inspector in a compact desktop interface. Built with **Rust, Slint and Wi
 Windows 10/11 x64. No Electron or WebView.
 
 > **0.2 release candidate:** The current source includes the daily-driver changes below.
-> The published v0.1.0 installer predates these changes. The verified 0.2.0 Setup
-> and ZIP are available in the [candidate workflow artifacts](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34473650758)
+> The published v0.1.0 installer predates these changes. Get the 0.2.0 Setup
+> and ZIP from the [candidate workflow artifacts](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34487070491)
 > (GitHub sign-in required). No new public release has been published.
 > See [verification and limits](docs/DAILY_DRIVER_VERIFICATION.md) and the [changelog](CHANGELOG.md).
 
@@ -28,8 +28,8 @@ Windows 10/11 x64. No Electron or WebView.
 
 Choose the build you want:
 
-- **0.2.0 candidate shown here:** open the [verified package run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34473650758),
-  sign in to GitHub and download **kova-windows-x64** under **Artifacts**. Extract
+- **0.2.0 candidate shown here:** open the [candidate package run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34487070491),
+  after its checks pass, sign in to GitHub and download **kova-windows-x64** under **Artifacts**. Extract
   that download, then run `Kova-Setup-0.2.0-x64.exe`.
 - **Published preview:** open [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases)
   and download the Setup EXE from **Assets**. The currently published v0.1.0
@@ -87,12 +87,23 @@ The inspector wraps long paths and offers **Copy Path**.
 
 </details>
 
-### Feels new. Works native.
+### File actions that fit the app
 
-Use your installed Shell extensions, associated applications and familiar
-Windows commands directly from Kova's native context menu.
+Right-click a file or choose **More** for a menu with matching icons, clear groups
+and visible shortcuts. Cut, copy, rename, preview and copy full paths without
+leaving the app. Multi-selection shows the actions that apply to those files.
+
+![Kova file actions with icons and shortcuts](docs/images/daily-driver-context.png)
+
+Choose **More Windows options**, or press **Shift+F10** from the file list, for the
+full native Windows menu and installed Shell extensions such as 7-Zip.
+
+<details>
+<summary>Native Windows extensions remain available</summary>
 
 ![Native Windows context menu](docs/images/daily-driver-native.png)
+
+</details>
 
 ### Every drive. One place.
 
@@ -122,6 +133,7 @@ collisions wait for your choice; folder merges retain native Windows handling.
 | Copy / cut / paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` |
 | Select all / delete | `Ctrl+A` / `Delete` |
 | Toggle preview | `Space` |
+| Native Windows options | `Shift+F10` |
 | Details / Gallery | `Ctrl+1` / `Ctrl+2` |
 | Search the current folder/tree | `Ctrl+F` |
 | Review the last supported Undo | `Ctrl+Z` |

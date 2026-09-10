@@ -6,6 +6,7 @@ Large folders use background natural sorting/filtering and a lazy UI model.
 
 - Restored tabs, searches, window state, columns, gallery and inspector.
 - Plain search with Type / Size / Date controls and cancellable Include subfolders.
+- Themed file context actions with icons and shortcuts; native extensions through More Windows options.
 - Explorer-compatible drag/drop and clipboard; Copy/Move feedback before dropping.
 - Incoming/existing conflict comparison with Replace, Skip, Keep Both and apply to remaining.
 - Recent folders and favorites on Home, clearer actions, copyable inspector paths,

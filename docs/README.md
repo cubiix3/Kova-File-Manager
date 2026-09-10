@@ -5,6 +5,7 @@ Start with the [project overview and download guide](../README.md).
 ## Using Kova
 
 - [Daily-driver release verification and performance](DAILY_DRIVER_VERIFICATION.md)
+- [Themed file actions and native Windows extensions](FILE_CONTEXT_MENU.md)
 - [Gallery, search, transfers, tags and collections](NEXTGEN.md)
 - [Views, previews and storage](VIEW_AND_PREVIEW.md)
 - [Product images and captured build](DEMO.md)

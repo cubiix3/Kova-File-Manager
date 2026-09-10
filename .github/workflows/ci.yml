@@ -26,6 +26,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -36,8 +38,34 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      - name: Test the isolated runner clipboard, including contention
+        run: cargo test --locked -p kova-platform-windows clipboard::tests -- --ignored --test-threads=1
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Build the interactive desktop application
+        run: cargo build --locked -p kova-desktop
+
+      - name: Exercise real Windows interactions and capture product views
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          ./scripts/test-ui.ps1 -Executable target/debug/kova-desktop.exe
+          ./scripts/capture-demo.ps1 -Executable target/debug/kova-desktop.exe
+
+      - name: Preserve Windows interaction evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-ui-evidence
+          path: |
+            target/runtime/ui-test-*/**
+            target/runtime/demo-*/screenshots/*
+            target/runtime/demo-*/app.log
+            target/runtime/demo-*/error.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Both the repository ruleset (windows) and branch protection (CI) are required.
   # Keep CI as an aggregate of the actual Windows quality gates, including failures.

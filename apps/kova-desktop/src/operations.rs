@@ -11,6 +11,7 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> slint::Timer 
         if let (Some(ui), Some((id, label))) = (weak.upgrade(), queue.undo.next()) {
             reviewed_undo.set(Some(id));
             ui.global::<AppState>().set_undo_description(label.into());
+            ui.invoke_dismiss_file_menu();
             ui.global::<AppState>().set_undo_visible(true);
         }
     });
@@ -129,6 +130,9 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> slint::Timer 
                 state.set_conflict_existing(conflict.existing.to_string_lossy().as_ref().into());
                 state.set_conflict_incoming_info(conflict.incoming_info.as_str().into());
                 state.set_conflict_existing_info(conflict.existing_info.as_str().into());
+                if !state.get_conflict_visible() {
+                    ui.invoke_dismiss_file_menu();
+                }
                 state.set_conflict_visible(true);
             } else {
                 state.set_conflict_visible(false);

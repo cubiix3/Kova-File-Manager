@@ -71,7 +71,12 @@ try {
     Select-DemoFile 'README.md'
     Invoke-DemoButton 'Close inspector'
     Select-DemoFile 'README.md'
-    Send-DemoKeys '+{F10}'
+    $kovaMenuItem=(Wait-DemoElement 'README.md' ([Windows.Automation.ControlType]::ListItem)).Current.BoundingRectangle
+    $kovaMenuWindow=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action RightClick -X ([int]($kovaMenuItem.Left+110-$kovaMenuWindow.Left)) -Y ([int]($kovaMenuItem.Top+$kovaMenuItem.Height/2-$kovaMenuWindow.Top)) | Out-Null
+    $null=Wait-DemoElement 'File actions' ([Windows.Automation.ControlType]::Group)
+    Save-Demo 'context'
+    Invoke-DemoButton 'More Windows options'
     $kovaMenuDeadline=[DateTime]::UtcNow.AddSeconds(10)
     while([KovaWindowTest]::NativeMenuWindow($kovaProcess.Id) -eq [IntPtr]::Zero){
         if([DateTime]::UtcNow -gt $kovaMenuDeadline){throw 'Shift+F10 did not open a native Windows menu'}

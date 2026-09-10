@@ -2,12 +2,16 @@
 
 ## Mouse selection
 
-Drag with the left button from blank space or a file row to draw a selection
-rectangle. Dragging back shrinks the selection. Ctrl/Shift preserves the selection
+Drag with the left button from blank space to draw a selection rectangle. Dragging back shrinks the selection. Ctrl/Shift preserves the selection
 from mouse-down and adds the intersected rows. Escape restores that baseline.
 The list scrolls automatically near its top/bottom edge. A stable input surface
 keeps the gesture alive as rows are virtualized; only changed selection flags
 are written to the existing model. Navigation/loading cancels the gesture.
+
+Dragging from a file row or Gallery tile starts a native file transfer. Drop onto
+a folder, tab, sidebar location or Explorer; Ctrl requests Copy and Shift requests
+Move. Right-click opens the [themed file actions](FILE_CONTEXT_MENU.md), with the
+complete native extension menu available through More Windows options.
 
 ## Open Windows folders in Kova
 
@@ -49,7 +53,11 @@ Win+E, virtual Shell folders, file-picker dialogs, and applications that force a
 Explorer-specific API remain Windows-controlled. This does not claim to replace
 all Explorer functionality. Each external folder launch opens a Kova window.
 
-## Verification
+## Historical interaction verification
+
+The following checks describe the earlier selection/integration milestone, before
+row dragging became native file transfer. Current coverage is in the
+[daily-driver report](DAILY_DRIVER_VERIFICATION.md) and [file-menu verification](FILE_CONTEXT_MENU.md).
 
 Actual release mouse/keyboard input and Windows Shell execution:
 

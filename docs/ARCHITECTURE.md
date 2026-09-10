@@ -73,7 +73,7 @@ Filesystem I/O happens on the Tokio runtime, not the UI thread.
 - `preferences`: versioned session capture and debounced atomic persistence
 - `keyboard`, `drag_drop`, `operations`: native interaction boundaries
 - `shared.slint`, `controls.slint`, `search.slint`, `inspector.slint`,
-  `operations.slint`: coherent view components, with `main.slint` composing them
+  `operations.slint`, `file-menu.slint`: coherent view components, with `main.slint` composing them
 
 Contains no direct `std::fs` calls from callbacks.
 

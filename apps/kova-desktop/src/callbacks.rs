@@ -49,6 +49,26 @@ pub(crate) fn wire_callbacks(
             actions_copy.set_status_message("Copied to clipboard".into());
         }
     });
+    let paths_copy = dispatcher.clone();
+    let paths_ui = ui.clone();
+    ui.unwrap()
+        .global::<AppState>()
+        .on_copy_selected_paths(move || {
+            let text = paths_copy
+                .controller()
+                .lock()
+                .unwrap()
+                .selected_paths()
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("\r\n");
+            if !text.is_empty() {
+                if let Some(ui) = paths_ui.upgrade() {
+                    ui.global::<AppState>().invoke_copy_text(text.into());
+                }
+            }
+        });
     let actions = dispatcher.clone();
     ui.unwrap()
         .global::<AppState>()
@@ -439,7 +459,7 @@ pub(crate) fn wire_callbacks(
         }
     });
 
-    // Right click on a row: native Explorer shell context menu.
+    // More Windows options / Shift+F10: retain the native Explorer extension menu.
     let d = dispatcher.clone();
     let ui_menu = ui.clone();
     let last_menu = Arc::clone(&last_address);
@@ -447,9 +467,44 @@ pub(crate) fn wire_callbacks(
     ui.unwrap()
         .global::<AppState>()
         .on_request_shell_menu(move |idx: i32| {
-            if let Err(e) = d.dispatch_shell_menu(idx as usize) {
-                show_action_error(&ui_menu, &d, &last_menu, &models_menu, &e);
+            let context = {
+                let controller = d.controller();
+                let ctrl = controller.lock().unwrap();
+                (
+                    ctrl.active_tab_id(),
+                    ctrl.path_at(idx as usize),
+                    ctrl.selected_paths(),
+                )
+            };
+            let d = d.clone();
+            let ui_menu = ui_menu.clone();
+            let last_menu = Arc::clone(&last_menu);
+            let models_menu = Rc::clone(&models_menu);
+            // TrackPopupMenu runs a native modal loop. Give Slint a frame to
+            // paint the dismissed themed menu before entering that loop.
+            if let Some(ui) = ui_menu.upgrade() {
+                ui.window().request_redraw();
             }
+            slint::Timer::single_shot(std::time::Duration::from_millis(32), move || {
+                if ui_menu.upgrade().is_none() {
+                    return;
+                }
+                let current = {
+                    let controller = d.controller();
+                    let ctrl = controller.lock().unwrap();
+                    (
+                        ctrl.active_tab_id(),
+                        ctrl.path_at(idx as usize),
+                        ctrl.selected_paths(),
+                    )
+                };
+                if context != current {
+                    return;
+                }
+                if let Err(e) = d.dispatch_shell_menu(idx as usize) {
+                    show_action_error(&ui_menu, &d, &last_menu, &models_menu, &e);
+                }
+            });
         });
 
     let d = dispatcher.clone();

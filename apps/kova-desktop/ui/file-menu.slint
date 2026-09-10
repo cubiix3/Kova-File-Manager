@@ -1,0 +1,165 @@
+import { AppState, Theme } from "shared.slint";
+import { FilesCut, FilesCopy, FilesRename, FilesDelete } from "files-icons.slint";
+
+struct FileMenuCommand { title: string, shortcut: string, shown: bool, separator: bool }
+
+component CommandGlyph inherits Rectangle {
+    in property <int> command;
+    in property <color> tint: Theme.text-secondary;
+    width: 18px; height: 18px;
+    if command == 3: FilesCut { tint: root.tint; accent: Theme.accent; }
+    if command == 4 || command == 6: FilesCopy { tint: root.tint; accent: Theme.accent; }
+    if command == 5: FilesRename { tint: root.tint; accent: Theme.accent; }
+    if command == 7: FilesDelete { tint: root.tint; accent: Theme.accent; }
+    if command == 0 || command == 1: Path {
+        width: 18px; height: 18px; viewbox-width: 18; viewbox-height: 18;
+        fill: transparent; stroke: root.tint; stroke-width: 1.2px;
+        commands: root.command == 0 ? "M 9 3 L 15 3 L 15 9 M 15 3 L 7 11 M 6 4 L 3 4 L 3 15 L 14 15 L 14 12" : "M 3 4 L 15 4 L 15 15 L 3 15 Z M 3 7 L 15 7 M 9 9 L 9 13 M 7 11 L 11 11";
+    }
+    if command == 2: Path {
+        width: 18px; height: 18px; viewbox-width: 18; viewbox-height: 18;
+        fill: transparent; stroke: root.tint; stroke-width: 1.2px;
+        commands: "M 2 9 Q 9 0 16 9 Q 9 18 2 9 Z M 11 9 A 2 2 0 1 1 7 9 A 2 2 0 1 1 11 9";
+    }
+    if command == 8: Path {
+        width: 18px; height: 18px; viewbox-width: 18; viewbox-height: 18;
+        fill: transparent; stroke: root.tint; stroke-width: 1.2px;
+        commands: "M 2.5 3.5 L 15.5 3.5 L 15.5 14.5 L 2.5 14.5 Z M 2.5 7 L 15.5 7 M 6 9 L 12 9 M 6 12 L 10 12";
+    }
+}
+
+component CommandRow inherits Rectangle {
+    in property <FileMenuCommand> command;
+    in property <int> index;
+    in property <bool> current;
+    callback chosen(int);
+    callback hovered(int);
+    height: command.shown ? 34px + (command.separator ? 9px : 0px) : 0px;
+    visible: command.shown;
+    forward-focus: row-focus;
+    changed current => { if self.current { row-focus.focus(); } }
+    if command.separator: Rectangle { x: 10px; y: 3px; width: parent.width - 20px; height: 1px; background: Theme.border-subtle; }
+    row-focus := FocusScope {
+        y: root.command.separator ? 9px : 0px; width: parent.width; height: 34px;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " { root.chosen(root.index); accept } else { reject }
+        }
+        Rectangle {
+            border-radius: 5px;
+            background: root.current ? Theme.sidebar-selected : transparent;
+            CommandGlyph { x: 10px; y: 8px; command: root.index; tint: root.current ? Theme.accent : Theme.text-secondary; }
+            Text { x: 40px; width: parent.width - 140px; height: parent.height; text: root.command.title; color: Theme.text-primary; font-size: 13px; vertical-alignment: center; overflow: elide; }
+            Text { x: parent.width - 98px; width: 86px; height: parent.height; text: root.command.shortcut; color: Theme.text-muted; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; }
+            TouchArea { moved => { root.hovered(root.index); } clicked => { root.chosen(root.index); } }
+        }
+    }
+    accessible-role: button;
+    accessible-label: command.title;
+    accessible-description: command.shortcut;
+    accessible-action-default => { root.chosen(root.index); }
+}
+
+// A window-contained menu: placement stays inside the current logical viewport,
+// and file operations continue through the existing command/worker boundaries.
+export component FileContextMenu inherits Rectangle {
+    in property <int> target-row: -1;
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    callback dismissed();
+    visible: AppState.file-menu-visible;
+    property <int> active: 0;
+    property <bool> single: AppState.selected_count == 1;
+    property <bool> folder: root.target-row >= 0 && root.target-row < AppState.files.length && AppState.files[root.target-row].is-dir;
+    property <[FileMenuCommand]> commands: [
+        { title: @tr("Open"), shortcut: "Enter", shown: root.single, separator: false },
+        { title: @tr("Open in new tab"), shortcut: "Ctrl+Enter", shown: root.single && root.folder, separator: false },
+        { title: AppState.preview-visible ? @tr("Hide preview") : @tr("Preview"), shortcut: "Space", shown: root.single && !root.folder, separator: false },
+        { title: @tr("Cut"), shortcut: "Ctrl+X", shown: true, separator: true },
+        { title: @tr("Copy"), shortcut: "Ctrl+C", shown: true, separator: false },
+        { title: @tr("Rename"), shortcut: "F2", shown: root.single, separator: false },
+        { title: root.single ? @tr("Copy path") : @tr("Copy paths"), shortcut: "", shown: true, separator: false },
+        { title: @tr("Delete"), shortcut: "Del", shown: true, separator: true },
+        { title: @tr("More Windows options"), shortcut: "Shift+F10", shown: true, separator: true },
+    ];
+    // Navigation and transforms invalidate a menu's row context.
+    property <string> context: AppState.current-path + "/" + AppState.active_tab + "/" + AppState.search-text + "/" + AppState.sort_column + "/" + (AppState.sort_ascending ? "asc" : "desc") + "/" + (AppState.loading ? "loading" : "ready");
+    changed context => { if AppState.file-menu-visible { root.dismiss(); } }
+    public function open() {
+        // Choose a visible command before exposing/focusing the accessibility tree.
+        root.active = root.single ? 0 : 3;
+        AppState.tooltip = "";
+        AppState.file-menu-visible = true;
+    }
+    public function dismiss() {
+        if AppState.file-menu-visible {
+            // Move focus out before removing its accessible node from the tree.
+            root.dismissed();
+            AppState.file-menu-visible = false;
+        }
+    }
+    function choose(index: int) {
+        if !AppState.file-menu-visible || AppState.selected_count == 0 || !root.commands[index].shown { return; }
+        root.dismiss();
+        if index == 0 { AppState.request_activate(root.target-row); }
+        else if index == 1 { AppState.request_context_open_in_new_tab(root.target-row); }
+        else if index == 2 { AppState.request-view-option(3); }
+        else if index == 3 { AppState.request_cut(); }
+        else if index == 4 { AppState.request_copy(); }
+        else if index == 5 { AppState.request_rename(root.target-row); }
+        else if index == 6 { AppState.copy-selected-paths(); }
+        else if index == 7 { AppState.request_delete(); }
+        else if index == 8 { AppState.request_shell_menu(root.target-row); }
+    }
+    function advance(step: int) {
+        let a = Math.mod(root.active + step + 9, 9);
+        let b = root.commands[a].shown ? a : Math.mod(a + step + 9, 9);
+        let c = root.commands[b].shown ? b : Math.mod(b + step + 9, 9);
+        let d = root.commands[c].shown ? c : Math.mod(c + step + 9, 9);
+        root.active = d;
+    }
+    TouchArea {
+        pointer-event(event) => { if event.kind == PointerEventKind.down { root.dismiss(); } }
+        scroll-event(event) => { accept }
+    }
+    menu-panel := Rectangle {
+        accessible-role: groupbox; accessible-label: @tr("File actions");
+        x: Math.clamp(root.anchor-x, 8px, root.width - self.width - 8px);
+        y: Math.clamp(root.anchor-y, 8px, root.height - self.height - 8px);
+        width: 326px; height: root.single ? 346px : 244px;
+        background: Theme.surface; border-radius: 8px; border-width: 1px; border-color: Theme.border;
+        drop-shadow-blur: 18px; drop-shadow-offset-y: 6px; drop-shadow-color: Theme.shadow;
+        // Consume header/padding clicks instead of forwarding them to the list.
+        TouchArea { scroll-event(event) => { accept } }
+        Text {
+            x: 18px; y: 12px; width: parent.width - 36px; height: 20px;
+            text: root.single && root.target-row >= 0 && root.target-row < AppState.files.length ? AppState.files[root.target-row].name : @tr("{} items selected", AppState.selected_count);
+            color: Theme.text-muted; font-size: 11px; overflow: elide; vertical-alignment: center;
+        }
+        menu-focus := FocusScope {
+            x: 7px; y: 38px; width: parent.width - 14px; height: parent.height - 45px;
+            key-pressed(event) => {
+                if event.text == Key.Escape || event.text == Key.Tab { root.dismiss(); }
+                else if event.text == Key.DownArrow { root.advance(1); }
+                else if event.text == Key.UpArrow { root.advance(-1); }
+                else if event.text == Key.Home { root.active = root.single ? 0 : 3; }
+                else if event.text == Key.End { root.active = 8; }
+                else if event.text == Key.F10 && event.modifiers.shift { root.choose(8); }
+                else if event.modifiers.control && event.text == "c" { root.choose(4); }
+                else if event.modifiers.control && event.text == "x" { root.choose(3); }
+                else if event.text == Key.F2 && root.single { root.choose(5); }
+                else if event.text == Key.Delete { root.choose(7); }
+                accept
+            }
+            VerticalLayout {
+                spacing: 0px; padding: 0px; alignment: start;
+                // Keep component/accessibility IDs stable when single/multiple
+                // selection changes the command labels and visibility.
+                for index in [0, 1, 2, 3, 4, 5, 6, 7, 8]: CommandRow {
+                    command: root.commands[index]; index: index; current: root.visible && root.active == index;
+                    hovered(index) => { root.active = index; }
+                    chosen(index) => { root.choose(index); }
+                }
+            }
+        }
+    }
+}

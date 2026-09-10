@@ -7,6 +7,16 @@ pub(crate) fn update_ui(
     last_address: &LastAddress,
     models: &UiModels,
 ) {
+    // Dismiss before selection/count properties can hide a focused menu item.
+    let render_key = (
+        controller.active_tab_id().0,
+        controller.revision,
+        controller.show_extensions,
+        controller.folder_sizes_enabled,
+    );
+    if models.render_key.get() != render_key {
+        ui.invoke_dismiss_file_menu();
+    }
     sync_preview_path(ui, controller);
     // Only touch the address bar when the navigation state actually changed;
     // otherwise a background refresh would clobber text being typed.
@@ -94,12 +104,6 @@ pub(crate) fn update_ui(
     state.set_sort_ascending(sort.direction == SortDirection::Ascending);
 
     let model_started = std::time::Instant::now();
-    let render_key = (
-        controller.active_tab_id().0,
-        controller.revision,
-        controller.show_extensions,
-        controller.folder_sizes_enabled,
-    );
     if models.render_key.get() != render_key {
         models.files.replace(
             controller.snapshot_shared(),

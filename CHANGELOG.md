@@ -14,6 +14,8 @@
   destination checks. Copy, delete, replacement and cross-volume moves remain outside Undo.
 - Compare incoming/existing names, paths, sizes and dates in conflicts. Keep Both,
   Skip, Replace and apply-to-remaining choices preserve explicit overwrite consent.
+- Match the file context menu to the app with icons, grouped actions and shortcuts;
+  retain native Shell extensions through More Windows options and Shift+F10.
 - Give Home recent folders and favorites; simplify toolbar actions; improve inspector
   path wrapping/copying, tooltips, keyboard shortcuts and accessibility labels.
 - Detect drive arrival/removal automatically; show unavailable locations with Retry.

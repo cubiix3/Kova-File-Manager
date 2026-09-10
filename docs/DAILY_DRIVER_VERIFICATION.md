@@ -1,10 +1,11 @@
 # Kova 0.2 daily-driver verification
 
 Implementation and interactive Windows verification: 10 September 2026.
-The verified installer was built from `ea92807` (application changes through
-`46da38a`). Later commits change verification scripts, documentation and captures;
-application and packaging inputs match the installer source. Public publication
-remains a separate step.
+This report records the hardening baseline built from `ea92807` (application
+changes through `46da38a`). Its measurements and captures refer to that build.
+The subsequent [file-menu refinement](FILE_CONTEXT_MENU.md) adds themed actions
+and further Windows interaction coverage. Current candidate downloads are linked
+from the [README](../README.md). Public publication remains a separate step.
 
 ## Scope delivered
 
