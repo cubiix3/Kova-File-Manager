@@ -467,9 +467,44 @@ pub(crate) fn wire_callbacks(
     ui.unwrap()
         .global::<AppState>()
         .on_request_shell_menu(move |idx: i32| {
-            if let Err(e) = d.dispatch_shell_menu(idx as usize) {
-                show_action_error(&ui_menu, &d, &last_menu, &models_menu, &e);
+            let context = {
+                let controller = d.controller();
+                let ctrl = controller.lock().unwrap();
+                (
+                    ctrl.active_tab_id(),
+                    ctrl.path_at(idx as usize),
+                    ctrl.selected_paths(),
+                )
+            };
+            let d = d.clone();
+            let ui_menu = ui_menu.clone();
+            let last_menu = Arc::clone(&last_menu);
+            let models_menu = Rc::clone(&models_menu);
+            // TrackPopupMenu runs a native modal loop. Give Slint a frame to
+            // paint the dismissed themed menu before entering that loop.
+            if let Some(ui) = ui_menu.upgrade() {
+                ui.window().request_redraw();
             }
+            slint::Timer::single_shot(std::time::Duration::from_millis(32), move || {
+                if ui_menu.upgrade().is_none() {
+                    return;
+                }
+                let current = {
+                    let controller = d.controller();
+                    let ctrl = controller.lock().unwrap();
+                    (
+                        ctrl.active_tab_id(),
+                        ctrl.path_at(idx as usize),
+                        ctrl.selected_paths(),
+                    )
+                };
+                if context != current {
+                    return;
+                }
+                if let Err(e) = d.dispatch_shell_menu(idx as usize) {
+                    show_action_error(&ui_menu, &d, &last_menu, &models_menu, &e);
+                }
+            });
         });
 
     let d = dispatcher.clone();
