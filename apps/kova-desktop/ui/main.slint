@@ -22,11 +22,14 @@ export component MainWindow inherits Window {
     }
     callback dismiss-file-menu();
     dismiss-file-menu => { file-menu.dismiss(); }
+    property <bool> file-menu-blocked: AppState.dialog_visible || AppState.undo-visible || AppState.conflict-visible || AppState.transfers-visible || AppState.library-visible || AppState.storage-visible;
+    property <bool> file-menu-enabled: AppState.selected_count > 0 && !AppState.loading && !AppState.inline-visible && !root.file-menu-blocked;
+    changed file-menu-blocked => { if self.file-menu-blocked { file-menu.dismiss(); } }
     property <int> file-menu-row: -1;
     property <length> file-menu-x;
     property <length> file-menu-y;
     function show-file-menu(row: int, x: length, y: length) {
-        if row >= 0 && row < AppState.files.length && AppState.selected_count > 0 && !AppState.loading && !AppState.inline-visible && !AppState.dialog_visible {
+        if row >= 0 && row < AppState.files.length && root.file-menu-enabled {
             root.file-menu-row = row; root.file-menu-x = x; root.file-menu-y = y;
             file-menu.open();
         }
@@ -358,7 +361,7 @@ export component MainWindow inherits Window {
                 ActionButton { label: @tr("Rename"); shortcut: "F2"; show-label: root.width >= 1240px; enabled: AppState.selected_count == 1; triggered => { list-scope.focus(); AppState.request_rename(-1); } FilesRename { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
                 ActionButton { label: @tr("Delete"); shortcut: "Del"; show-label: root.width >= 1240px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_delete(); } FilesDelete { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
                 TextButton { text: @tr("Open"); width: 48px; enabled: AppState.selected_count == 1; clicked => { list-scope.focus(); AppState.request_activate(-1); } }
-                TextButton { text: @tr("More"); width: 48px; enabled: AppState.selected_count > 0; clicked => { root.show-file-menu(AppState.primary-row, self.absolute-position.x, self.absolute-position.y + self.height + 5px); } }
+                TextButton { text: @tr("More"); width: 48px; enabled: root.file-menu-enabled; clicked => { root.show-file-menu(AppState.primary-row, self.absolute-position.x, self.absolute-position.y + self.height + 5px); } }
                 TextButton { width: 62px; text: @tr("Undo"); enabled: AppState.undo-label != ""; clicked => { AppState.request-undo(); } }
 
                 TextButton { text: @tr("Tags & Collections"); width: 136px; clicked => { AppState.library-visible = true; } }
@@ -1087,6 +1090,12 @@ export component MainWindow inherits Window {
         }
     }
 
+    file-menu := FileContextMenu {
+        width: root.width; height: root.height; target-row: root.file-menu-row;
+        anchor-x: root.file-menu-x; anchor-y: root.file-menu-y;
+        dismissed => { list-scope.focus(); }
+    }
+
     if AppState.undo-visible: UndoDialog { dismissed => { list-scope.focus(); } }
 
     if AppState.storage-visible: Rectangle {
@@ -1182,11 +1191,6 @@ export component MainWindow inherits Window {
         width: Math.min(620px, root.width - Metrics.sidebar-width - 20px); height: 40px;
         background: Theme.selection; border-width: 1px; border-color: Theme.accent; border-radius: 6px;
         Text { x:12px; width:parent.width - 24px; height:parent.height; text:AppState.drop-feedback; color:Theme.text-primary; font-size:14px; vertical-alignment:center; overflow:elide; }
-    }
-    file-menu := FileContextMenu {
-        width: root.width; height: root.height; target-row: root.file-menu-row;
-        anchor-x: root.file-menu-x; anchor-y: root.file-menu-y;
-        dismissed => { list-scope.focus(); }
     }
     if AppState.tooltip != "": Rectangle {
         x: Math.clamp(AppState.tooltip-x, 8px, root.width - self.width - 8px);

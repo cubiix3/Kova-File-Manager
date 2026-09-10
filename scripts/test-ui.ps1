@@ -50,8 +50,12 @@ function Find-FileMenuButton([string]$Name) {
     $kovaMenu.FindFirst([Windows.Automation.TreeScope]::Descendants,$kovaCondition)
 }
 function Open-FileMenu {
-    (Find-TestElement 'More' ([Windows.Automation.ControlType]::Button)).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Wait-TestCondition { Find-FileMenu } 'themed file menu'
+    Wait-TestCondition {
+        if(Find-FileMenu){return $true}
+        $kovaMore=Find-TestElement 'More' ([Windows.Automation.ControlType]::Button)
+        if($kovaMore -and $kovaMore.Current.IsEnabled){$kovaMore.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()}
+        return $false
+    } 'themed file menu'
 }
 function Invoke-FileMenu([string]$Name) {
     $kovaAction=Find-FileMenuButton $Name
@@ -93,7 +97,9 @@ try {
     Send-TestKeys '{F5}'
     Wait-TestCondition { Find-TestElement 'After.txt' ([Windows.Automation.ControlType]::ListItem) } 'refresh after rename'
     if ((Test-Path -LiteralPath (Join-Path $kovaFiles 'Before.txt')) -or [IO.File]::ReadAllText((Join-Path $kovaFiles 'After.txt')) -ne 'Preserve these contents.') { throw 'Rename changed contents or left the original name' }
-    Send-TestKeys '^z'
+    Open-FileMenu
+    (Find-TestElement 'Undo' ([Windows.Automation.ControlType]::Button)).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Wait-TestCondition { -not (Find-FileMenu) } 'operation dialogs dismiss the file menu'
     Wait-TestCondition { Find-TestElement 'Undo operation' ([Windows.Automation.ControlType]::Text) } 'reviewable Undo dialog'
     Send-TestKeys '{ENTER}'
     Wait-TestCondition { Test-Path -LiteralPath (Join-Path $kovaFiles 'Before.txt') } 'Undo restored original path'

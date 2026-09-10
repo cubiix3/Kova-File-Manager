@@ -152,8 +152,10 @@ export component FileContextMenu inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 0px; padding: 0px; alignment: start;
-                for command[index] in root.commands: CommandRow {
-                    command: command; index: index; current: root.visible && root.active == index;
+                // Keep component/accessibility IDs stable when single/multiple
+                // selection changes the command labels and visibility.
+                for index in [0, 1, 2, 3, 4, 5, 6, 7, 8]: CommandRow {
+                    command: root.commands[index]; index: index; current: root.visible && root.active == index;
                     hovered(index) => { root.active = index; }
                     chosen(index) => { root.choose(index); }
                 }
