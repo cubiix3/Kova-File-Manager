@@ -34,7 +34,13 @@ function Wait-DemoElement([string]$Name,[Windows.Automation.ControlType]$Type) {
     do { $kovaElement=Find-DemoElement $Name $Type;if($kovaElement){return $kovaElement};Start-Sleep -Milliseconds 100 } while([DateTime]::UtcNow -lt $kovaDeadline)
     throw "Missing UI element: $Name"
 }
-function Select-DemoFile([string]$Name) { (Wait-DemoElement $Name ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke();Start-Sleep -Milliseconds 300 }
+function Select-DemoFile([string]$Name) {
+    $kovaItem=Wait-DemoElement $Name ([Windows.Automation.ControlType]::ListItem)
+    $kovaItem.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $kovaItemBounds=$kovaItem.Current.BoundingRectangle
+    $kovaWindowBounds=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $script:kovaProcess.Id -Action Inspect | ConvertFrom-Json
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $script:kovaProcess.Id -Action Click -X ([int]($kovaItemBounds.Left+90-$kovaWindowBounds.Left)) -Y ([int]($kovaItemBounds.Top+$kovaItemBounds.Height/2-$kovaWindowBounds.Top)) | Out-Null
+}
 function Invoke-DemoButton([string]$Name) { (Wait-DemoElement $Name ([Windows.Automation.ControlType]::Button)).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke();Start-Sleep -Milliseconds 300 }
 function Send-DemoKeys([string]$Keys) { & "$PSScriptRoot/runtime-window.ps1" -ProcessId $script:kovaProcess.Id -Action Keys -Text $Keys | Out-Null }
 function Save-Demo([string]$Name) { Start-Sleep -Milliseconds 700;& "$PSScriptRoot/runtime-window.ps1" -ProcessId $script:kovaProcess.Id -Action Screenshot -OutputPath (Join-Path $kovaDemo "screenshots/daily-driver-$Name.png") | Out-Null }
