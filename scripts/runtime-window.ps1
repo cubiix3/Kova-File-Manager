@@ -101,7 +101,12 @@ switch ($Action) {
         if ($DragScreenshotPath) { Save-KovaSnapshot $DragScreenshotPath }
         } finally {
             [KovaWindowTest]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
-            if ($kovaModifierKey) { [KovaWindowTest]::keybd_event($kovaModifierKey,0,2,[UIntPtr]::Zero) }
+            if ($kovaModifierKey) {
+                # OLE queries modifier state while handling mouse-up. Keep it held
+                # until the target can process the drop, like a deliberate user drag.
+                Start-Sleep -Milliseconds 200
+                [KovaWindowTest]::keybd_event($kovaModifierKey,0,2,[UIntPtr]::Zero)
+            }
         }
     }
     'Resize' { $kovaLeft=if($PositionX -eq [int]::MinValue){$kovaBounds.Left}else{$PositionX};$kovaTop=if($PositionY -eq [int]::MinValue){$kovaBounds.Top}else{$PositionY};[void][KovaWindowTest]::MoveWindow($kovaHandle,$kovaLeft,$kovaTop,$X,$Y,$true) }

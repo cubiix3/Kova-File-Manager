@@ -4,6 +4,14 @@ $kovaRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $kovaExecutable=(Resolve-Path (Join-Path $kovaRoot $Executable)).Path
 $kovaOutput=Join-Path $kovaRoot 'target/runtime/ui-benchmark'
 [void][IO.Directory]::CreateDirectory($kovaOutput)
+[pscustomobject]@{
+    DateUtc=[DateTime]::UtcNow.ToString('o')
+    OperatingSystem=(Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber)
+    Processor=(Get-CimInstance Win32_Processor | Select-Object -First 1 Name,NumberOfLogicalProcessors)
+    RamBytes=(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+    ExecutableVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo($kovaExecutable).FileVersion
+    ExecutableSha256=(Get-FileHash -LiteralPath $kovaExecutable -Algorithm SHA256).Hash
+} | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $kovaOutput 'environment.json')
 $kovaMeasurements=@()
 foreach($kovaCount in @(1000,10000,100000)) {
     $kovaFolder=Join-Path $kovaRoot ('target/runtime/large'+$(if($kovaCount -eq 100000){'100k'}else{"$kovaCount"}))
@@ -48,7 +56,7 @@ foreach($kovaCount in @(1000,10000,100000)) {
         $kovaScrollEnd=[DateTime]::UtcNow.ToString('o')
         & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Screenshot -OutputPath (Join-Path $kovaOutput "$kovaCount.png") | Out-Null
         $kovaProcess.Refresh()
-        $kovaMeasurements += [pscustomobject]@{Entries=$kovaCount;Dpi=$kovaWindow.Dpi;WorkingSetMiB=[math]::Round($kovaProcess.WorkingSet64/1MB,2);PeakWorkingSetMiB=[math]::Round($kovaProcess.PeakWorkingSet64/1MB,2);ScrollStartUtc=$kovaScrollStart;ScrollEndUtc=$kovaScrollEnd;Log=$kovaLog}
+        $kovaMeasurements += [pscustomobject]@{Entries=$kovaCount;Dpi=$kovaWindow.Dpi;WindowWidth=$kovaWindow.Width;WindowHeight=$kovaWindow.Height;WorkingSetMiB=[math]::Round($kovaProcess.WorkingSet64/1MB,2);PeakWorkingSetMiB=[math]::Round($kovaProcess.PeakWorkingSet64/1MB,2);ScrollStartUtc=$kovaScrollStart;ScrollEndUtc=$kovaScrollEnd;Log=$kovaLog}
     } finally {
         & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Close | Out-Null
         if(-not $kovaProcess.WaitForExit(5000)){throw 'Benchmark window did not exit cleanly.'}

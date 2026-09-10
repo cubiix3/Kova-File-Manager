@@ -67,7 +67,7 @@ try {
     $kovaSourceBounds = $kovaItem.Current.BoundingRectangle
     $kovaTargetBounds = (Find-TestElement 'Nested' ([Windows.Automation.ControlType]::ListItem)).Current.BoundingRectangle
     $kovaBounds = & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
-    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Drag -X ([int]($kovaSourceBounds.Left + 90 - $kovaBounds.Left)) -Y ([int]($kovaSourceBounds.Top + $kovaSourceBounds.Height/2 - $kovaBounds.Top)) -EndX ([int]($kovaTargetBounds.Left + 90 - $kovaBounds.Left)) -EndY ([int]($kovaTargetBounds.Top + $kovaTargetBounds.Height/2 - $kovaBounds.Top)) -Modifier Copy | Out-Null
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Drag -X ([int]($kovaSourceBounds.Left + 90 - $kovaBounds.Left)) -Y ([int]($kovaSourceBounds.Top + $kovaSourceBounds.Height/2 - $kovaBounds.Top)) -EndX ([int]($kovaTargetBounds.Left + 90 - $kovaBounds.Left)) -EndY ([int]($kovaTargetBounds.Top + $kovaTargetBounds.Height/2 - $kovaBounds.Top)) -Modifier Copy -DragScreenshotPath (Join-Path $kovaFixture 'ctrl-drag.png') | Out-Null
     Wait-TestCondition { Test-Path -LiteralPath (Join-Path $kovaFiles 'Nested/Before.txt') } 'Ctrl-drag of an already selected file'
     if ([IO.File]::ReadAllText((Join-Path $kovaFiles 'Before.txt')) -ne [IO.File]::ReadAllText((Join-Path $kovaFiles 'Nested/Before.txt'))) { throw 'Ctrl-drag must preserve original and copied contents' }
     Send-TestKeys '^fNeedle'
