@@ -1,23 +1,25 @@
-﻿# Product images
+# Product captures
 
-The README uses a static product image series captured on 6 September 2026:
+The README uses unedited window captures of the 0.2 release candidate taken on
+10 September 2026 on an interactive Windows Server 2025 hosted desktop at 100%
+scaling (984 × 680 physical window pixels). The executable comes from the verified
+[0.2.0 package](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34473650758),
+application source `ea92807`. Files and preferences use isolated fixtures on a
+temporary SUBST drive.
 
-- [Overview](images/product-overview.png): tabbed file browsing and image inspector.
-- [Gallery](images/product-gallery.png): large thumbnails and file information.
-- [Native Windows](images/product-native.png): the actual installed Shell menu.
-- [Drive overview](images/product-storage.png): Home, storage capacity and Quick access.
+[View/conflict captures and performance](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34475306852)
+and the [verified native-menu capture](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34476071198)
+retain their raw logs and images as workflow artifacts.
 
-All UI pixels come from the real Windows release build. Typography, background,
-and shadows frame the captures; the application interface is not
-re-created or generated. Original captures are linked from the README images.
-The demonstration illustrations were created for this project with vector/canvas
-geometry. Demo files and an isolated preferences directory keep personal content
-out of the images. Native menu labels follow Windows and installed extensions;
-Kova's own interface uses English.
+- `images/daily-driver-details.png`: tabs, readable search/filter controls and details.
+- `images/daily-driver-inspector.png`: text preview and Copy Path.
+- `images/daily-driver-gallery.png`: gallery and inspector with copyable metadata.
+- `images/daily-driver-native.png`: the real Windows Shell context menu.
+- `images/daily-driver-home.png`: recent folders, favorites and drives.
+- `images/daily-driver-conflict.png`: incoming/existing comparison and explicit choices.
 
-These captures include Gallery, Inspector, local organization and automatic
-directory updates. The downloadable v0.1.0 preview predates these features;
-build the current source until a newer Windows package is published.
+`runtime-window.ps1` captures pixels directly from the specified test window.
+No generated UI, recoloring, image editing or product framing is applied.
 
-Earlier videos remain historical recording artifacts, not the current product
-presentation. They should not be used to assess the current interface.
+Older `product-*`, `current-*`, `nextgen-*` images and videos preserve earlier
+milestones; their interfaces and feature scope are historical.

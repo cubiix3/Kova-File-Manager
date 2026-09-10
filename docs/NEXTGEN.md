@@ -1,11 +1,11 @@
 # Working with Kova
 
-These features describe the current source, after v0.1.0. Kova remains a native
+These features describe the 0.2 release candidate. Kova remains a native
 Rust/Slint Windows application; no Spacedrive or File Browser code was imported.
 
 ## Views and inspector
 
-Use the Details/Gallery buttons or **View**. **View > Thumbnail size** offers
+Use the Details/Gallery buttons, **Ctrl+1 / Ctrl+2**, or **View**. **View > Thumbnail size** offers
 Small, Medium and Large. Both views share the same directory snapshot and
 selection. Switching views maps the first visible row to its corresponding
 gallery row; exact pixel offsets can differ after resizing or changing tile size.
@@ -28,8 +28,15 @@ interrupted; stale results are discarded when it returns.
 
 ## Search
 
-**Ctrl+F** focuses the current-folder filter. Typing filters the cached snapshot
-without enumerating the directory again. Names are case-insensitive. Examples:
+**Ctrl+F** focuses the name search field. Type normally, then optionally choose
+**Type**, **Size**, or **Date**. The heading states **Current folder** or
+**Subfolders**; **Include subfolders** starts a cancellable background traversal.
+Recursive search skips observed junctions, links and offline placeholders, reports
+skipped folders, and never changes the view with stale results. It is not an index.
+Typing has a 150 ms debounce. Large snapshots filter/sort on a worker and reuse
+an ordering when only the query changes. Names use natural sorting (Image 2
+before Image 10). Advanced syntax remains available:
+
 
 | Query | Meaning |
 | --- | --- |
@@ -45,8 +52,10 @@ without enumerating the directory again. Names are case-insensitive. Examples:
 
 Filters combine with name terms. Multiple types/extensions are alternatives;
 multiple size bounds must all match. Folder sizes are unknown unless calculated.
-Global search is not implemented. The toolkit-independent query matcher can be
-reused by a future indexed provider without coupling the UI to MFT/USN traversal.
+Computed folder sizes are the same numeric source for display, filters and
+sorting. An incomplete scan is a lower bound: it cannot prove an upper bound or
+an exact size. Search is scoped to the open folder/tree; system-wide indexed
+search is not included.
 
 ## Transfers and conflicts
 
@@ -72,11 +81,45 @@ Deletion goes through the Recycle Bin where supported; Windows retains permanent
 deletion warnings on volumes that cannot recycle. Operations invoked directly by
 third-party Shell menu extensions retain their own UI and are not queue entries.
 
+## Drag & drop and Undo
+
+Drag selected list/gallery items onto a folder, tab, or sidebar destination.
+Windows Explorer can drag files into Kova and accept files dragged from Kova.
+Same-drive drops default to Move, other-drive drops to Copy; hold **Ctrl** for
+Copy or **Shift** for Move. Native feedback states the effect before dropping.
+Kova destinations use the same transfer queue and conflict handling as Paste.
+Virtual collections are not filesystem drop destinations.
+
+**Undo** or **Ctrl+Z** opens a confirmation showing the exact reversible action.
+History lasts for the current process and contains up to 32 confirmed renames
+and non-replacing, same-volume file moves. Multi-file moves create individual
+Undo entries, reviewed and reversed one file at a time. Undo checks file identity, size and
+modified time, then renames through an open handle without replacing anything.
+Changed/replaced files or an occupied original path cause an error. Copies,
+deletions, cross-volume moves, folder moves and actions executed by Explorer or
+Shell extensions are not offered as application Undo. Cancellation is not Undo.
+
+## Session and Home
+
+Tabs, active location, per-tab search/scope/filter/sort, view options, gallery
+size, columns, inspector width/visibility and normal/maximized window size are
+restored. Changes are debounced and atomically saved on a background thread to
+`%LOCALAPPDATA%\Kova\session.json`, including a final flush on normal shutdown.
+A crash can lose the latest debounce interval. Missing locations retain their
+tabs and show an error with Retry; corrupt/newer settings are preserved.
+An explicit command-line location overrides restored tabs. Legacy view settings
+are imported once. Multiple windows currently share the last saved workspace.
+
+Home adds recent folders and pinned project/location shortcuts to drive capacity.
+Pins and collections remain in their separate, atomically saved library.
+
 ## Storage
 
 **Home** compares local fixed/removable/RAM drives, file systems and capacity.
-Refresh it with F5 after connecting a device. Network/CD drives are not listed;
-explicit paths can still be navigated. Unavailable capacity is labeled accordingly.
+Drive arrival/removal is detected by a one-second Windows drive-map check;
+capacity is refreshed every 30 seconds. Mapped network drives appear without
+contacting their servers for capacity. Open them, or enter a UNC path, to connect;
+failed locations show Retry. Optical drives are not currently listed.
 
 Select a folder, or open one, then choose **View > Analyze storage**. Drive rows
 also offer Analyze storage. Analysis runs in the background and reports logical
@@ -87,7 +130,7 @@ logical sizes, not physical allocation; hard links may be counted more than once
 
 ## Tags, collections and Quick access
 
-Select files and open **Organize**. Enter a name to create/add a collection or
+Select files and open **Tags & Collections**. Enter a name to create/add a collection or
 apply a tag. Existing groups provide **Add**, **Open** and **Remove**. Groups
 contain references only, including files from different drives. Removing a group
 never deletes its files. In a group, **Remove selected references** removes only
@@ -98,7 +141,7 @@ as unavailable references until removed or added from their new location; no
 background global identity index is implied. Missing entries stay visible as
 **Unavailable**. Operations on them report errors rather than acting elsewhere.
 
-Pin the current/selected folder from Organize or View. Right-click a pin to remove
+Pin the current/selected folder from Tags & Collections or View. Right-click a pin to remove
 it or move it up/down. Pins, tags and collections are stored atomically in
 `%LOCALAPPDATA%\Kova\library.json`. Corrupt/unreadable storage is left intact and
 organization becomes read-only with an error. No account or network service is used.
@@ -117,4 +160,4 @@ refresh; selection and search remain attached to file paths. Refresh is deferred
 while an inline name is being edited. Recursive notifications also reconcile
 changes inside displayed folders. Unsupported or temporarily unavailable paths
 are retried in the background. This is not a hard real-time guarantee for network
-providers or an automatic device-discovery service; Home still has manual refresh.
+providers. Drive discovery additionally follows the Windows drive map.

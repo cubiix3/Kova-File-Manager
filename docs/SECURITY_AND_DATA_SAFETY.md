@@ -4,7 +4,10 @@ File identity and data integrity take priority over visual changes. Mutating tes
 use unique temporary directories or a designated ignored runtime sandbox.
 
 Copy, Move and Delete run on a dedicated COM thread through Windows
-IFileOperation, with Kova transfer progress and undo/Recycle Bin support.
+IFileOperation, with Kova transfer progress and native Recycle Bin handling.
+Application Undo is limited to verified, non-replacing renames and same-volume
+file moves; it checks identity and current metadata through an open handle.
+Copies, deletions and untracked Shell/Explorer operations are not offered as Undo.
 Regular-file conflicts require Replace, Skip or Keep Both; directory merges and
 unusual Shell objects retain native Windows handling. Confirmation suppression
 is limited to explicitly approved replacement groups.
@@ -37,8 +40,8 @@ subject to Windows/filesystem capabilities. See [verification limits](PRODUCT_AU
 
 Default tests do not mutate the live desktop clipboard. Interactive clipboard
 tests require a controlled session and are explicitly ignored. Runtime Explorer
-checks use sandbox files and restore captured clipboard formats afterwards; this
-is not a claim of clipboard-history restoration.
+checks use sandbox files and can replace the desktop clipboard with test payloads;
+clipboard-history and arbitrary format restoration are not guaranteed.
 
 Logs may contain paths, but do not intentionally contain file contents. Builds,
 logs and machine-specific configuration are ignored by Git.

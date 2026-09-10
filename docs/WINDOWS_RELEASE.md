@@ -53,8 +53,21 @@ The download page carries Slint's attribution badge under its
 The **Windows packages** workflow builds and tests on a Windows runner, compiles
 the setup, installs it in an isolated directory, checks application startup and
 uninstalls it. It uploads the three package artifacts. Tags matching the Cargo
-version, such as `v0.1.0`, additionally publish a GitHub prerelease.
+version, such as `v0.2.0`, additionally publish a GitHub prerelease.
 
-The first preview is not code-signed. SHA-256 checksums verify downloaded file
+Use workflow_dispatch on the reviewed branch to prepare and verify a candidate
+without publishing. Require green CI and runtime verification before creating a
+release tag; keep main protected.
+
+The preview packages are not code-signed. SHA-256 checksums verify downloaded file
 integrity; they do not replace publisher authentication. A clean Windows 10
 machine and upgrade from a previous installer remain separate verification targets.
+
+## Verify a candidate package interactively
+
+Dispatch **Windows packages** with `verify_package_run` set to the successful
+package run ID. The separate job downloads that exact artifact, verifies its
+checksums and provenance, runs keyboard/UI Automation/native-drag interactions,
+and measures 1k/10k/100k-folder UI behavior. Set `capture_demo` to capture current
+Details, Gallery, Home, Inspector, native menu and conflict views as well.
+Results are uploaded as `kova-ui-verification`. No tag or public release is created.

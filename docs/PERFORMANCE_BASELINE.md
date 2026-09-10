@@ -1,5 +1,8 @@
 # Kova Performance Baseline — M0
 
+> Historical M0 measurements; implementation descriptions below are not current.
+> See the [daily-driver report](DAILY_DRIVER_VERIFICATION.md) for 0.2 measurements.
+
 All numbers below are real measurements from the current Windows machine. No
 estimates or marketing numbers.
 

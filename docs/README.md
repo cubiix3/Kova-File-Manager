@@ -4,6 +4,8 @@ Start with the [project overview and download guide](../README.md).
 
 ## Using Kova
 
+- [Daily-driver release verification and performance](DAILY_DRIVER_VERIFICATION.md)
+
 - [Gallery, search, transfers, tags and collections](NEXTGEN.md)
 - [Next-generation verification](NEXTGEN_VERIFICATION.md)
 
@@ -19,7 +21,7 @@ Start with the [project overview and download guide](../README.md).
 - [Contributing](../CONTRIBUTING.md)
 - [Architecture](ARCHITECTURE.md)
 - [Security policy](../SECURITY.md) and [data-safety principles](SECURITY_AND_DATA_SAFETY.md)
-- [Performance baseline](PERFORMANCE_BASELINE.md)
+- [Historical M0 performance baseline](PERFORMANCE_BASELINE.md)
 - [Product audit](PRODUCT_AUDIT.md) and [refinements](PRODUCT_REFINEMENT.md)
 - [Visual polish](VISUAL_POLISH.md)
 - [Files reference study](research/FILES_REFERENCE.md)
