@@ -28,7 +28,12 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> slint::Timer 
             let controller = dispatcher.controller();
             let ctrl = controller.lock().unwrap();
             let locations = ctrl.tab_locations();
-            let key = (locations.clone(), ctrl.library.revision);
+            let key = (
+                locations.clone(),
+                ctrl.library.revision,
+                ctrl.folder_sizes_enabled,
+                ctrl.recursive_tabs.clone(),
+            );
             if previous.as_ref() != Some(&key) {
                 roots.clear();
                 for (tab, location) in &locations {
@@ -46,7 +51,14 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> slint::Timer 
                     };
                     roots.insert(*tab, paths);
                 }
-                watcher.set_paths(roots.values().flatten().cloned().collect());
+                let mut watched = HashMap::new();
+                for (tab, paths) in &roots {
+                    let recursive = ctrl.folder_sizes_enabled || ctrl.recursive_tabs.contains(tab);
+                    for path in paths {
+                        *watched.entry(path.clone()).or_insert(false) |= recursive;
+                    }
+                }
+                watcher.set_paths(watched);
                 previous = Some(key);
                 pending.retain(|tab| roots.contains_key(tab));
             }
@@ -57,7 +69,8 @@ pub fn connect(app: &MainWindow, dispatcher: CommandDispatcher) -> slint::Timer 
                 }
             }
             let editing = ui.global::<AppState>().get_inline_visible()
-                || ui.global::<AppState>().get_creating_folder();
+                || ui.global::<AppState>().get_creating_folder()
+                || ui.global::<AppState>().get_file_menu_visible();
             let active = ctrl.active_tab_id();
             drop(ctrl);
             for (tab, location) in locations {

@@ -107,12 +107,14 @@ impl Worker {
                         .enumerate()
                         .map(|(i, e)| (e.path.clone(), i))
                         .collect();
-                    tracing::info!(
-                        entries = job.source.entries.len(),
-                        visible = visible.len(),
-                        elapsed_ms = start.elapsed().as_secs_f64() * 1000.,
-                        "snapshot transform"
-                    );
+                    if std::env::var_os("KOVA_PERF").is_some() {
+                        tracing::info!(
+                            entries = job.source.entries.len(),
+                            visible = visible.len(),
+                            elapsed_ms = start.elapsed().as_secs_f64() * 1000.,
+                            "snapshot transform"
+                        );
+                    }
                     if output
                         .send(ResultView {
                             tab: job.tab,

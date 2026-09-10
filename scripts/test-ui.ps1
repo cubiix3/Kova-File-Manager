@@ -79,6 +79,11 @@ try {
     $kovaItem = Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)
     $kovaItem.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     Open-FileMenu
+    # A real notification must wait while a menu is in use, including a refresh
+    # already in flight before the menu opened. No file content is changed here.
+    [IO.File]::SetLastWriteTimeUtc((Join-Path $kovaFiles 'Before.txt'), [DateTime]::UtcNow.AddMinutes(1))
+    Start-Sleep -Milliseconds 1200
+    if (-not (Find-FileMenu)) { throw 'External metadata refresh dismissed the open file menu' }
     Invoke-FileMenu 'Copy path'
     Wait-TestCondition { [Windows.Forms.Clipboard]::GetText() -eq (Join-Path $kovaFiles 'Before.txt') } 'copied full path'
     Wait-TestCondition { -not (Find-FileMenu) } 'menu closes after an action'

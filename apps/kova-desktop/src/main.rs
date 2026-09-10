@@ -495,9 +495,10 @@ async fn main() {
             let models_ref = Rc::clone(&models_for_pump);
             let store_ref = Rc::clone(&store_for_pump);
             let icon_req_ref = icon_req_for_pump.clone();
-            let editing = ui_ref
-                .upgrade()
-                .is_some_and(|ui| ui.global::<AppState>().get_inline_visible());
+            let editing = ui_ref.upgrade().is_some_and(|ui| {
+                ui.global::<AppState>().get_inline_visible()
+                    || ui.global::<AppState>().get_file_menu_visible()
+            });
             let mut ui_dirty = !editing && ctrl_ref.lock().unwrap().poll_views();
             if ui_dirty {
                 queue_icon_requests(&store_ref, &icon_req_ref, &mut ctrl_ref.lock().unwrap());
@@ -515,12 +516,27 @@ async fn main() {
                 };
                 let Some(ui) = ui_ref.upgrade() else { return };
                 let mut ctrl = ctrl_ref.lock().unwrap();
-                if matches!(&event, KovaEvent::DirectoryLoaded { tab_id, snapshot }
-                    if *tab_id == ctrl.active_tab_id()
-                        && ctrl.is_current_request(*tab_id, snapshot.request_id)
-                        && ctrl.background_in_flight(*tab_id))
-                    && ui.global::<AppState>().get_inline_visible()
-                {
+                let background_tab = match &event {
+                    KovaEvent::DirectoryLoaded { tab_id, snapshot }
+                        if ctrl.is_current_request(*tab_id, snapshot.request_id)
+                            && ctrl.background_in_flight(*tab_id) =>
+                    {
+                        Some(*tab_id)
+                    }
+                    KovaEvent::DirectoryError {
+                        tab_id, request_id, ..
+                    } if ctrl.is_current_request(*tab_id, *request_id)
+                        && ctrl.background_in_flight(*tab_id) =>
+                    {
+                        Some(*tab_id)
+                    }
+                    _ => None,
+                };
+                let state = ui.global::<AppState>();
+                if background_tab.is_some_and(|tab| {
+                    state.get_file_menu_visible()
+                        || (tab == ctrl.active_tab_id() && state.get_inline_visible())
+                }) {
                     deferred_events.push_back(event);
                     continue;
                 }

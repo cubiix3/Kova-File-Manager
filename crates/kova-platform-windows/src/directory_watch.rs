@@ -53,6 +53,7 @@ impl Burst {
     }
 }
 struct Watch {
+    recursive: bool,
     handle: Option<Handle>,
     retry: Instant,
     burst: Burst,
@@ -60,13 +61,13 @@ struct Watch {
 
 pub struct DirectoryWatcher {
     commands: mpsc::SyncSender<()>,
-    desired: Arc<Mutex<Option<HashSet<PathBuf>>>>,
+    desired: Arc<Mutex<Option<HashMap<PathBuf, bool>>>>,
     dirty: Arc<Mutex<HashSet<PathBuf>>>,
 }
 impl DirectoryWatcher {
     pub fn new() -> std::io::Result<Self> {
         let (commands, input) = mpsc::sync_channel::<()>(1);
-        let desired = Arc::new(Mutex::new(None::<HashSet<PathBuf>>));
+        let desired = Arc::new(Mutex::new(None::<HashMap<PathBuf, bool>>));
         let latest = desired.clone();
         let dirty = Arc::new(Mutex::new(HashSet::new()));
         let output = dirty.clone();
@@ -82,13 +83,14 @@ impl DirectoryWatcher {
                             else {
                                 continue;
                             };
-                            watches.retain(|path, _| paths.contains(path));
+                            watches.retain(|path, watch| paths.get(path) == Some(&watch.recursive));
                             output
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner())
-                                .retain(|p| paths.contains(p));
-                            for path in paths {
+                                .retain(|p| paths.contains_key(p));
+                            for (path, recursive) in paths {
                                 watches.entry(path).or_insert_with(|| Watch {
+                                    recursive,
                                     handle: None,
                                     retry: Instant::now(),
                                     burst: Burst::default(),
@@ -104,12 +106,11 @@ impl DirectoryWatcher {
                             let wide: Vec<u16> =
                                 path.as_os_str().encode_wide().chain(Some(0)).collect();
                             // SAFETY: wide is NUL terminated and lives throughout the call.
-                            // Child writes can change displayed folder metadata/sizes too.
-                            // Windows monitors the subtree; we never walk it on this thread.
+                            // Subtree monitoring is reserved for recursive search/sizes.
                             watch.handle = unsafe {
                                 FindFirstChangeNotificationW(
                                     PCWSTR(wide.as_ptr()),
-                                    true,
+                                    watch.recursive,
                                     FILE_NOTIFY_CHANGE_FILE_NAME
                                         | FILE_NOTIFY_CHANGE_DIR_NAME
                                         | FILE_NOTIFY_CHANGE_ATTRIBUTES
@@ -158,7 +159,7 @@ impl DirectoryWatcher {
             dirty,
         })
     }
-    pub fn set_paths(&self, paths: HashSet<PathBuf>) {
+    pub fn set_paths(&self, paths: HashMap<PathBuf, bool>) {
         *self.desired.lock().unwrap_or_else(|e| e.into_inner()) = Some(paths);
         let _ = self.commands.try_send(());
     }
@@ -196,7 +197,7 @@ mod tests {
         ));
         std::fs::create_dir(&root).unwrap();
         let watcher = DirectoryWatcher::new().unwrap();
-        watcher.set_paths(HashSet::from([root.clone()]));
+        watcher.set_paths(HashMap::from([(root.clone(), true)]));
         let wait = || {
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
@@ -223,7 +224,30 @@ mod tests {
         wait();
         std::fs::write(folder.join("child.txt"), b"new child").unwrap();
         wait();
-        watcher.set_paths(HashSet::new());
+        // Ordinary browsing must ignore unrelated deep activity, while a mode
+        // switch to recursive search/sizes must observe it again.
+        let deep = folder.join("Deep");
+        std::fs::create_dir(&deep).unwrap();
+        let nested = deep.join("log.txt");
+        std::fs::write(&nested, b"initial").unwrap();
+        wait();
+        watcher.set_paths(HashMap::from([(root.clone(), false)]));
+        wait();
+        std::thread::sleep(QUIET + TICK);
+        watcher.take_changes();
+        std::fs::write(&nested, b"unrelated application log update").unwrap();
+        std::thread::sleep(MAX_DELAY + QUIET);
+        assert!(
+            watcher.take_changes().is_empty(),
+            "shallow browsing watched the whole subtree"
+        );
+        std::fs::write(root.join("direct.txt"), b"visible new file").unwrap();
+        wait();
+        watcher.set_paths(HashMap::from([(root.clone(), true)]));
+        wait();
+        std::fs::write(&nested, b"recursive update").unwrap();
+        wait();
+        watcher.set_paths(HashMap::new());
         drop(watcher);
         std::thread::sleep(Duration::from_millis(150));
         std::fs::remove_dir_all(root).unwrap();

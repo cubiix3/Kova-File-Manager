@@ -20,8 +20,9 @@ operation dispatchers, including conflict handling and Recycle Bin deletion.
   Command rows retain stable accessibility identities when selection changes.
   Focus moves out before menu nodes are hidden; opening multi-selection chooses
   an applicable command before exposing the accessibility tree.
-- Navigation, selection changes, operation dialogs, window deactivation and snapshot replacement
-  dismiss the menu so its row context cannot act on a different file.
+- Navigation, selection changes, operation dialogs and window deactivation dismiss
+  the menu so its row context cannot act on a different file. Background refreshes
+  and folder-size updates wait while the menu is open, then reconcile queued changes.
 - Copy path(s) writes full paths as text, separated by Windows line breaks for
   multiple selections. File Copy/Cut retains Explorer-compatible clipboard data.
 
@@ -58,3 +59,11 @@ Native-menu handoff requests a redraw and briefly defers the blocking Shell call
 so the dismissed themed menu is painted away first. The captured tab, target path
 and selection must still match before Windows options opens. The final captures
 verify that the two menus are no longer drawn over one another.
+
+The 0.2.1 regression check holds the menu open during an external timestamp change.
+A local Windows test also reproduced the dismissal in 0.2.0, then kept a real
+right-click menu open in the patched build through eight file/subfolder writes
+with folder sizes enabled. Choosing Preview afterwards displayed the latest file
+contents. Controller tests cover unchanged filtered views, concurrent background
+filter work and real metadata changes; native watcher tests cover both shallow
+and recursive modes.

@@ -50,18 +50,29 @@ pub fn connect(
         return timer;
     }
     let weak = app.as_weak();
-    let mut last_key = None;
+    type ScanKey = (
+        bool,
+        kova_core::domain::TabId,
+        Option<u64>,
+        bool,
+        bool,
+        bool,
+    );
+    let mut last_key: Option<ScanKey> = None;
     timer.start(
         slint::TimerMode::Repeated,
         std::time::Duration::from_millis(150),
         move || {
             let Some(ui) = weak.upgrade() else { return };
             let state = ui.global::<AppState>();
+            if state.get_file_menu_visible() || state.get_inline_visible() {
+                return;
+            }
             let mut ctrl = controller.lock().unwrap();
             let key = (
                 state.get_folder_sizes(),
                 ctrl.active_tab_id(),
-                ctrl.snapshot().map(|s| s.request_id),
+                ctrl.folder_scan_generation(),
                 state.get_show_hidden(),
                 state.get_show_system(),
                 ctrl.is_loading(),
@@ -69,10 +80,19 @@ pub fn connect(
             let mut dirty = false;
             if last_key.as_ref() != Some(&key) {
                 let id = generation.fetch_add(1, Ordering::Relaxed) + 1;
-                dirty = !ctrl.folder_sizes.is_empty();
-                ctrl.folder_sizes.clear();
+                // Retain measured values during a same-folder rescan. Clearing
+                // them on every notification made every folder visibly flicker.
+                let reset = !key.0 || last_key.as_ref().is_none_or(|previous| previous.1 != key.1);
+                if reset {
+                    dirty = !ctrl.folder_sizes.is_empty();
+                    ctrl.folder_sizes.clear();
+                }
                 if key.0 && !key.5 {
                     let paths = ctrl.folder_size_paths();
+                    let live: std::collections::HashSet<_> = paths.iter().cloned().collect();
+                    let old_count = ctrl.folder_sizes.len();
+                    ctrl.folder_sizes.retain(|path, _| live.contains(path));
+                    dirty |= old_count != ctrl.folder_sizes.len();
                     if requests.try_send((id, paths)).is_ok() {
                         last_key = Some(key);
                     }
@@ -82,7 +102,7 @@ pub fn connect(
             }
             let current = generation.load(Ordering::Relaxed);
             while let Ok((id, path, label)) = output.try_recv() {
-                if id == current {
+                if id == current && ctrl.folder_sizes.get(&path) != Some(&label) {
                     ctrl.folder_sizes.insert(path, label);
                     dirty = true;
                 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 — refresh and context-menu fixes
+
+- Keep file context menus open while background directory changes arrive; apply
+  pending refreshes after the menu closes.
+- Monitor only the displayed directory during normal browsing. Watch descendants
+  when recursive search or folder sizes actually require them.
+- Preserve snapshots, selection and previews when fresh metadata is unchanged.
+  Keep existing folder sizes visible while recalculating and update only changed values.
+- Make UI/search performance logging opt-in so normal browsing does not write
+  diagnostic output that can trigger another directory notification.
+
 ## 0.2.0 — Windows preview, 2026-09-10
 
 - Restore tabs, active location, search scope and filters, window state, columns,
