@@ -3,7 +3,7 @@ import { ListView, ScrollView, CheckBox } from "std-widgets.slint";
 
 export { Theme, Breadcrumb, InfoItem, StorageItem, LibraryItem, TransferItem, FileListItem, DriveItem, AppState, Metrics } from "shared.slint";
 import { Theme, Breadcrumb, InfoItem, StorageItem, LibraryItem, TransferItem, FileListItem, DriveItem, AppState, Metrics } from "shared.slint";
-import { DropZone, NavTouchArea, IconFolderNew, IconClose, IconPlus, IconEmptyFolder, NavIconButton, ActionButton, TextButton, InputField, IconHome, SidebarButton, DriveRow, SectionLabel, HeaderCell, ResizeEdge, ColumnGrip, NameDialog } from "controls.slint";
+import { HoverTip, DropZone, NavTouchArea, IconFolderNew, IconClose, IconPlus, IconEmptyFolder, NavIconButton, ActionButton, TextButton, InputField, IconHome, SidebarButton, DriveRow, SectionLabel, HeaderCell, ResizeEdge, ColumnGrip, NameDialog } from "controls.slint";
 import { SearchBar } from "search.slint";
 import { Inspector } from "inspector.slint";
 import { UndoDialog, OperationCenter, ConflictDialog } from "operations.slint";
@@ -150,6 +150,9 @@ export component MainWindow inherits Window {
                             border-radius: 4px;
                             background: close-ta.has-hover ? Theme.surface-hover : transparent;
                             visible: AppState.tabs.length > 1;
+                            accessible-role: button; accessible-label: @tr("Close tab") + ": " + item;
+                            accessible-action-default => { AppState.request_close_tab(idx); }
+                            HoverTip { text: @tr("Close tab") + " (Ctrl+W)"; hovered: close-ta.has-hover; }
 
                             IconClose {
                                 x: (parent.width - self.width) / 2;
@@ -174,6 +177,9 @@ export component MainWindow inherits Window {
             height: 30px;
             border-radius: Metrics.radius-md;
             background: new-tab-ta.pressed ? Theme.surface-pressed : (new-tab-ta.has-hover ? Theme.surface-hover : transparent);
+            accessible-role: button; accessible-label: @tr("New tab");
+            accessible-action-default => { AppState.request_new_tab(); }
+            HoverTip { text: @tr("New tab") + " (Ctrl+T)"; hovered: new-tab-ta.has-hover; }
             IconPlus { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
             new-tab-ta := NavTouchArea { clicked => { AppState.request_new_tab(); } }
         }
@@ -348,6 +354,9 @@ export component MainWindow inherits Window {
                 Rectangle {
                     width: 70px; border-radius: 4px; background: Theme.surface;
                     for label[index] in ["☰", "▦"]: Rectangle {
+                        accessible-role: button; accessible-label: index == 0 ? @tr("Details") : @tr("Gallery");
+                        accessible-action-default => { AppState.gallery = index == 1; list-scope.focus(); }
+                        HoverTip { text: index == 0 ? @tr("Details") + " (Ctrl+1)" : @tr("Gallery") + " (Ctrl+2)"; hovered: mode-touch.has-hover; }
                         x: index * 35px; width: 35px; height: parent.height;
                         border-radius: 4px;
                         background: (AppState.gallery ? index == 1 : index == 0) ? Theme.selection : (mode-touch.has-hover ? Theme.surface-hover : transparent);

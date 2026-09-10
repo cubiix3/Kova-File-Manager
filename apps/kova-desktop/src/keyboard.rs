@@ -36,6 +36,8 @@ impl Shortcuts {
         }
         if self.modifiers.control_key() && !self.modifiers.alt_key() {
             match &event.logical_key {
+                Key::Character(key) if key == "1" => state.set_gallery(false),
+                Key::Character(key) if key == "2" => state.set_gallery(true),
                 Key::Character(key) if key.eq_ignore_ascii_case("l") => app.invoke_focus_command(0),
                 Key::Character(key) if key.eq_ignore_ascii_case("f") => app.invoke_focus_command(1),
                 Key::Character(key) if key.eq_ignore_ascii_case("t") => {

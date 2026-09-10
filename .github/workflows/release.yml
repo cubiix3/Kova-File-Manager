@@ -10,6 +10,11 @@ on:
         description: 'Optional: verify UI of an existing successful Windows packages run'
         required: false
         type: string
+      capture_demo:
+        description: 'Capture product views after the interactive tests'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -94,6 +99,10 @@ jobs:
       - name: Measure real large-folder UI behavior
         shell: powershell
         run: ./scripts/benchmark-ui.ps1 -Executable target/ui-package/Kova.exe -PrepareFixtures
+      - name: Capture real product windows and conflict flow
+        if: inputs.capture_demo
+        shell: powershell
+        run: ./scripts/capture-demo.ps1 -Executable target/ui-package/Kova.exe
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -101,6 +110,7 @@ jobs:
           path: |
             target/runtime/ui-test-*/
             target/runtime/ui-benchmark/
+            target/runtime/demo-*/
             target/ui-download/provenance.txt
           if-no-files-found: error
 
