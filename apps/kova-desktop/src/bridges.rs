@@ -55,7 +55,7 @@ impl CommandDispatcher {
         }
     }
 
-    fn send_ops(&self, cmd: ShellOpCommand) -> Result<(), String> {
+    pub fn send_ops(&self, cmd: ShellOpCommand) -> Result<(), String> {
         let request = self.transfers.enqueue(cmd)?;
         self.ops_tx.send(request).map_err(|error| {
             error.0.handle.update(|state| {
@@ -69,6 +69,14 @@ impl CommandDispatcher {
 
     fn next_request_id(&self, tab_id: TabId) -> u64 {
         self.generations.lock().unwrap().next(tab_id)
+    }
+
+    pub fn dispatch_undo(&self, id: u64) {
+        if self.transfers.snapshots().iter().any(|s| !s.finished) {
+            self.set_status_message("Wait for active transfers before undoing an operation".into());
+            return;
+        }
+        self.send(WorkerCommand::Undo { id });
     }
 
     pub fn request_enumeration(&self, tab_id: TabId, location: Location) {
@@ -127,6 +135,12 @@ impl CommandDispatcher {
             location,
             request_id,
             background,
+            recursive: self
+                .controller
+                .lock()
+                .unwrap()
+                .recursive_tabs
+                .contains(&tab_id),
         });
     }
 

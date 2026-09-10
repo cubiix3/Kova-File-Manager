@@ -1,681 +1,12 @@
-import { FilesNavBack, FilesNavForward, FilesNavUp, FilesRefresh, FilesCut, FilesCopy, FilesPaste, FilesRename, FilesDelete } from "files-icons.slint";
+﻿import { FilesNavBack, FilesNavForward, FilesNavUp, FilesRefresh, FilesCut, FilesCopy, FilesPaste, FilesRename, FilesDelete } from "files-icons.slint";
 import { ListView, ScrollView, CheckBox } from "std-widgets.slint";
 
-// Theme tokens — central place for colors and metrics.
-export global Theme {
-    out property <color> window-bg: #20262c;
-    // Raised fill used by the address bar and other inset controls.
-    out property <color> surface: #262d34;
-    out property <color> surface-alt: #2c343d;
-    out property <color> surface-hover: #303943;
-    out property <color> surface-pressed: #3a4652;
-    out property <color> sidebar-bg: #242b32;
-    out property <color> sidebar-selected: #293d4a;
-    out property <color> sidebar-hover: #2b343d;
-    out property <color> selection: #2e4053;
-    out property <color> selection-strong: #374e65;
-    out property <color> border: #434c55;
-    out property <color> border-subtle: #39424b;
-    out property <color> text-primary: #f2f2f4;
-    out property <color> text-secondary: #c5cbd1;
-    out property <color> text-muted: #a7afb8;
-    out property <color> text-disabled: #73808b;
-    out property <color> accent: #75c5ee;
-    out property <color> danger: #e5534b;
-    out property <color> content-bg: #252c33;
-    out property <color> tabs-bg: #1b2127;
-    out property <color> shadow: #00000066;
-}
-
-export struct Breadcrumb { label: string, path: string }
-export struct InfoItem { label: string, value: string }
-export struct StorageItem { name: string, path: string, kind: string, size: string, fraction: float }
-export struct LibraryItem { name: string, key: string, count: int, tag: bool }
-export struct TransferItem { id: int, title: string, source: string, destination: string, current: string, status: string, progress: float, has-progress: bool, detail: string, error: string, running: bool }
-
-export struct FileListItem {
-    name: string,
-    type_name: string,
-    size_text: string,
-    modified_text: string,
-    icon-id: int,
-    thumbnail: image,
-    has-thumbnail: bool,
-    is-dir: bool,
-    selected: bool,
-}
-
-export struct DriveItem {
-    name: string,
-    path: string,
-    icon: image,
-    // Fraction of the drive in use, 0..1 (0 when unknown).
-    usage: float,
-    // e.g. "120 GB free of 476 GB"; empty when unknown.
-    detail: string,
-    file-system: string,
-    drive-type: string,
-    total-text: string,
-    free-text: string,
-    used-text: string,
-    capacity-known: bool,
-}
-
-export global AppState {
-    in-out property <bool> show-hidden: false;
-    in-out property <bool> show-system: false;
-    in-out property <bool> show-extensions: true;
-    in-out property <bool> preview-visible: false;
-    in-out property <bool> compact-rows: true;
-    in-out property <bool> alternating-rows: false;
-    in-out property <bool> animations: true;
-    in-out property <bool> drive-overview: false;
-    in-out property <bool> drives-loading: true;
-    in-out property <bool> folder-sizes: false;
-    in-out property <bool> gallery: false;
-    in-out property <int> gallery-size: 1;
-    in-out property <string> search-text: "";
-    callback request-search(string);
-    callback request-grid-marquee(int, int, int, int, int, int, bool);
-    in-out property <bool> storage-visible: false;
-    in-out property <bool> storage-busy: false;
-    in-out property <string> storage-path: "";
-    in-out property <string> storage-total: "";
-    in-out property <string> storage-status: "";
-    in-out property <[StorageItem]> storage-items: [];
-    callback request-analyze(string);
-    callback cancel-analysis();
-    in-out property <bool> filesystem-location: false;
-    in-out property <bool> library-visible: false;
-    in-out property <bool> library-writable: true;
-    in-out property <string> library-error: "";
-    in-out property <string> library-name: "";
-    in-out property <[LibraryItem]> quick-access: [];
-    in-out property <[LibraryItem]> library-groups: [];
-    callback library-action(int, string, string);
-    in-out property <bool> transfers-visible: false;
-    in-out property <[TransferItem]> transfers: [];
-    in-out property <int> transfer-count: 0;
-    in-out property <int> context-pin: -1;
-    in-out property <string> context-group-key;
-    in-out property <string> context-group-name;
-    in-out property <bool> context-group-tag;
-    in-out property <string> context-drive;
-    in-out property <string> transfer-summary: "";
-    callback cancel-transfer(int);
-    callback clear-transfers();
-    in-out property <bool> conflict-visible: false;
-    in-out property <int> conflict-id: -1;
-    in-out property <string> conflict-incoming: "";
-    in-out property <string> conflict-existing: "";
-    in-out property <string> conflict-incoming-info: "";
-    in-out property <string> conflict-existing-info: "";
-    in-out property <bool> conflict-all: false;
-    callback resolve-conflict(int, bool);
-    callback request-view-option(int);
-    in-out property <string> preview-path: "";
-    in-out property <string> preview-title: "Preview";
-    in-out property <string> preview-text: "Select a file to preview";
-    in-out property <image> preview-image;
-    in-out property <bool> preview-has-image: false;
-    in-out property <bool> preview-animated: false;
-    in-out property <bool> preview-paused: false;
-    in-out property <int> preview-page: 0;
-    in-out property <int> preview-pages: 0;
-    in-out property <int> preview-revision: 0;
-    in-out property <string> preview-info: "";
-    in-out property <[InfoItem]> inspector-info: [];
-    in-out property <string> selection-info: "";
-    in-out property <int> primary-row: -1;
-    in-out property <int> preview-pixel-width: 0;
-    in-out property <int> preview-pixel-height: 0;
-    in-out property <[Breadcrumb]> breadcrumbs: [];
-    in-out property <string> address_path: "";
-    in-out property <string> status_text: "Ready";
-    in-out property <int> item_count: 0;
-    in-out property <int> filtered-count: 0;
-    in-out property <int> selected_count: 0;
-    in-out property <bool> loading: false;
-    in-out property <string> directory-error: "";
-    in-out property <string> current-path: "";
-    in-out property <[FileListItem]> files: [];
-    in-out property <[string]> tabs: [];
-    in-out property <[DriveItem]> drives: [];
-    in-out property <[image]> icons: [];
-    in-out property <int> first-visible-row: 0;
-    in-out property <int> visible-row-count: 40;
-    in-out property <int> active_tab: 0;
-    in-out property <bool> can_go_back: false;
-    in-out property <bool> can_go_forward: false;
-    in-out property <bool> can_go_parent: false;
-
-    in-out property <string> home_path: "";
-    in-out property <string> desktop_path: "";
-    in-out property <string> documents_path: "";
-    in-out property <string> downloads_path: "";
-    in-out property <image> home_icon;
-    in-out property <image> desktop_icon;
-    in-out property <image> documents_icon;
-    in-out property <image> downloads_icon;
-
-    in-out property <int> sort_column: 0;
-    in-out property <bool> sort_ascending: true;
-
-    in-out property <bool> inline-visible: false;
-    in-out property <bool> creating-folder: false;
-    in-out property <int> inline-row: -1;
-    in-out property <int> inline-selection-end: 0;
-    in-out property <string> inline-path: "";
-    in-out property <bool> dialog_visible: false;
-    in-out property <string> dialog_title: "";
-    in-out property <string> dialog_value: "";
-
-    callback request_navigate(string);
-    callback request_back();
-    callback request_forward();
-    callback request_parent();
-    callback request_refresh();
-    callback request_new_tab();
-    callback request_duplicate_location();
-    callback request_close_tab(int);
-    callback request_switch_tab(int);
-    callback request_select(int);
-    callback request_toggle(int);
-    callback request_range(int);
-    callback request_select_all();
-    callback request_clear_selection();
-    callback request_marquee(int, int, int, bool);
-    in-out property <bool> integration-busy: false;
-    callback request-default-manager(bool);
-    callback request_activate(int);
-    callback request_new_folder();
-    callback request_rename(int);
-    callback request_dialog_confirm(string);
-    callback request_dialog_cancel();
-    callback request_sort(int);
-    callback request_context_open_in_new_tab(int);
-    // Explorer clipboard integration.
-    callback request_copy();
-    callback request_cut();
-    callback request_paste();
-    callback request_delete();
-    // Native Windows shell context menu for a row.
-    callback request_shell_menu(int);
-}
-
-// Layout metrics (single source of truth for the window skeleton).
-export global Metrics {
-    out property <length> space-xs: 4px;
-    out property <length> space-sm: 8px;
-    out property <length> space-md: 12px;
-    out property <length> space-lg: 16px;
-    out property <length> space-xl: 24px;
-    out property <length> radius-sm: 4px;
-    out property <length> radius-md: 6px;
-    out property <length> radius-lg: 8px;
-    out property <length> tabs-height: 44px;
-    out property <length> toolbar-height: 48px;
-    out property <length> statusbar-height: 34px;
-    out property <length> sidebar-width: 224px;
-    out property <length> sidebar-item-height: 36px;
-    out property <length> sidebar-drive-height: 72px;
-    out property <length> actions-height: 48px;
-    out property <length> panel-gap: 0px;
-    out property <length> header-height: 34px;
-    out property <length> row-height: AppState.compact-rows ? 34px : 40px;
-    out property <length> icon-size: 20px;
-    out property <length> icon-size-sm: 16px;
-    out property <length> col-type: 108px;
-    out property <length> col-size: 88px;
-    out property <length> col-modified: 146px;
-}
-
-// TouchArea that additionally reacts to the mouse back/forward buttons
-// (XBUTTON1 / XBUTTON2), exactly like the toolbar navigation buttons.
-// Slint TouchAreas always grab non-primary button presses, so every
-// interactive region uses this component to keep global mouse navigation
-// working; a press that nothing grabs bubbles up to the region wrappers.
-component NavTouchArea inherits TouchArea {
-    callback secondary-clicked(length, length);
-    pointer-event(event) => {
-        if event.kind == PointerEventKind.up && event.button == PointerEventButton.right { root.secondary-clicked(self.mouse-x, self.mouse-y); }
-        if event.kind == PointerEventKind.down && !AppState.dialog_visible {
-            if event.button == PointerEventButton.back {
-                AppState.request_back();
-            } else if event.button == PointerEventButton.forward {
-                AppState.request_forward();
-            }
-        }
-    }
-}
-
-// --- Vector glyphs (viewbox 16x16 unless noted, self-centering) ------------
-// All icons accept a `tint` so disabled states can dim them.
-
-component IconFolderNew inherits Path {
-    in property <color> tint: Theme.text-secondary;
-    width: 16px;
-    height: 16px;
-    viewbox-width: 16;
-    viewbox-height: 16;
-    fill: root.tint;
-    commands: "M 1.5 4.4 C 1.5 3.5 2.2 2.8 3.1 2.8 L 6 2.8 L 7.2 4.3 L 12.9 4.3 C 13.8 4.3 14.5 5 14.5 5.9 L 14.5 11.6 C 14.5 12.5 13.8 13.2 12.9 13.2 L 3.1 13.2 C 2.2 13.2 1.5 12.5 1.5 11.6 Z";
-}
-
-// Small close glyph for tab chips (viewbox 10x10).
-component IconClose inherits Path {
-    in property <color> tint: Theme.text-muted;
-    width: 12px;
-    height: 12px;
-    viewbox-width: 10;
-    viewbox-height: 10;
-    fill: transparent;
-    stroke: root.tint;
-    stroke-width: 1.3px;
-    commands: "M 2 2 L 8 8 M 8 2 L 2 8";
-}
-
-// Small plus glyph for the new-tab button (viewbox 10x10).
-component IconPlus inherits Path {
-    in property <color> tint: Theme.text-secondary;
-    width: 14px;
-    height: 14px;
-    viewbox-width: 10;
-    viewbox-height: 10;
-    fill: transparent;
-    stroke: root.tint;
-    stroke-width: 1.4px;
-    commands: "M 5 1.5 L 5 8.5 M 1.5 5 L 8.5 5";
-}
-
-// Large outline folder for the empty state (viewbox 24x24).
-component IconEmptyFolder inherits Path {
-    width: 44px;
-    height: 44px;
-    viewbox-width: 24;
-    viewbox-height: 24;
-    fill: transparent;
-    stroke: Theme.text-disabled;
-    stroke-width: 1.6px;
-    commands: "M 3 7.5 C 3 6.4 3.9 5.1 5 5.1 L 8.6 5.1 L 10.8 7.6 L 19 7.6 C 20.1 7.6 21 8.5 21 9.6 L 21 16.5 C 21 17.6 20.1 18.9 19 18.9 L 5 18.9 C 3.9 18.9 3 17.6 3 16.5 Z";
-}
-
-// --- Controls --------------------------------------------------------------
-
-// Square 32x32 navigation button (Back / Forward / Up). The glyph is passed
-// as a child and must be centered by the caller.
-component NavIconButton inherits Rectangle {
-    in property <bool> enabled: true;
-    callback clicked();
-
-    // Explicit width: without it the toolbar layout stretches the button.
-    width: 32px;
-    height: 32px;
-    border-radius: Metrics.radius-md;
-    background: !enabled
-        ? transparent
-        : (btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : transparent));
-
-    btn-ta := NavTouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
-    }
-
-    @children
-}
-
-// Compact "New Folder" action aligned with the nav buttons.
-component ActionButton inherits Rectangle {
-    in property <string> label;
-    in property <string> shortcut;
-    in property <bool> enabled: true;
-    in property <bool> show-label: true;
-    callback triggered();
-    width: show-label ? 96px : 36px; height: 34px;
-    border-radius: Metrics.radius-sm;
-    background: !enabled ? transparent : (action-ta.pressed ? Theme.surface-pressed : (action-ta.has-hover ? Theme.surface-hover : transparent));
-    accessible-role: button;
-    accessible-label: label;
-    accessible-description: shortcut;
-    Text { x: 34px; width: parent.width - 38px; height: parent.height; text: root.label; visible: root.show-label; font-size: 12px; color: root.enabled ? Theme.text-primary : Theme.text-disabled; vertical-alignment: center; }
-    action-ta := NavTouchArea { enabled: root.enabled; clicked => { root.triggered(); } }
-    @children
-}
-
-// Themed single-line text field (address bar, dialogs). Built directly on
-// TextInput so the visual language (radius, borders, focus ring) matches the
-// rest of Kova instead of the stock widget style.
-//
-// `quiet` renders the field without a resting border (address bar style);
-// `right-inset` reserves space so trailing @children (e.g. the embedded
-// refresh button) do not overlap the text.
-component TextButton inherits Rectangle {
-    in property <string> text;
-    in property <bool> enabled: true;
-    in property <bool> accent: false;
-    callback clicked();
-    forward-focus: button-focus;
-    width: 104px; height: 32px; border-radius: 5px;
-    background: touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-hover : root.accent ? Theme.selection : Theme.surface;
-    border-width: 1px; border-color: root.accent ? Theme.accent.with-alpha(0.4) : Theme.border-subtle;
-    Text { text: root.text; color: !root.enabled ? Theme.text-disabled : root.accent ? Theme.accent : Theme.text-primary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-    button-focus := FocusScope { key-pressed(event) => { if root.enabled && (event.text == Key.Return || event.text == " ") { root.clicked(); accept } else { reject } } }
-    touch := NavTouchArea { enabled: root.enabled; clicked => { button-focus.focus(); root.clicked(); } }
-    accessible-role: button; accessible-label: root.text;
-    accessible-action-default => { if root.enabled { root.clicked(); } }
-}
-
-component InputField inherits Rectangle {
-    in property <string> placeholder: "";
-    in property <length> font-size: 13px;
-    in property <length> right-inset: 10px;
-    in property <length> left-inset: 12px;
-    in property <bool> quiet: false;
-    in property <bool> navigation: false;
-    in property <bool> inline-mode: false;
-    out property <bool> editing: ti.has-focus;
-    in-out property <string> text <=> ti.text;
-    callback accepted();
-    callback cancelled();
-    callback edited(string);
-
-    public function focus-field() { ti.focus(); }
-    public function select-all-text() { ti.select-all(); }
-    public function focus-name(end: int) { ti.focus(); ti.set-selection-offsets(0, end); }
-
-    forward-focus: ti;
-    height: 32px;
-    border-radius: Metrics.radius-md;
-    background: Theme.surface;
-    border-width: 1px;
-    border-color: ti.has-focus
-        ? Theme.accent
-        : (fld-ta.has-hover ? Theme.border-subtle : (root.quiet ? transparent : Theme.border-subtle));
-
-    // Click-to-focus for the padding area around the text. The TextInput on
-    // top handles clicks within the text region itself (caret placement,
-    // selection).
-    fld-ta := TouchArea {
-        clicked => { ti.focus(); }
-    }
-
-    VerticalLayout {
-        padding-left: root.left-inset;
-        padding-right: root.right-inset;
-        alignment: center;
-
-        ti := TextInput {
-
-            font-size: root.font-size;
-            color: root.navigation && !ti.has-focus ? transparent : Theme.text-primary;
-            selection-background-color: root.navigation && !ti.has-focus ? transparent : Theme.selection-strong;
-            selection-foreground-color: root.navigation && !ti.has-focus ? transparent : Theme.text-primary;
-            accepted => { root.accepted(); }
-            edited => { root.edited(self.text); }
-            key-pressed(event) => {
-                if event.text == Key.Escape {
-                    root.cancelled();
-                    accept
-                } else { reject }
-            }
-        }
-    }
-
-    Text {
-        text: root.placeholder;
-        visible: ti.text == "";
-        color: Theme.text-disabled;
-        font-size: root.font-size;
-        x: root.left-inset;
-        height: parent.height;
-        vertical-alignment: center;
-    }
-
-    ContextMenuArea {
-        Menu {
-            MenuItem { title: "Cut"; activated => { ti.cut(); } }
-            MenuItem { title: "Copy"; activated => { ti.copy(); } }
-            MenuItem { title: "Paste"; activated => { ti.paste(); } }
-            MenuSeparator { }
-            MenuItem { title: "Select All"; activated => { ti.select-all(); } }
-        }
-    }
-
-    @children
-}
-
-component IconHome inherits Path {
-    in property <color> tint: Theme.text-secondary;
-    width: 18px; height: 18px;
-    viewbox-width: 20; viewbox-height: 20;
-    fill: transparent; stroke: root.tint; stroke-width: 1.5px;
-    commands: "M 2 9 L 10 2.5 L 18 9 M 4 7.5 L 4 17 L 8 17 L 8 11 L 12 11 L 12 17 L 16 17 L 16 7.5";
-}
-
-component SidebarButton inherits Rectangle {
-    in property <string> text;
-    in property <image> icon;
-    in property <string> target: "";
-    in property <bool> selected: false;
-    in property <bool> home: false;
-    in property <bool> collection: false;
-    callback context-requested(length, length);
-    in property <int> count: -1;
-    in property <color> base-background: transparent;
-
-    height: Metrics.sidebar-item-height;
-    animate background { duration: AppState.animations ? 120ms : 0ms; }
-    border-radius: Metrics.radius-md;
-    background: selected ? Theme.sidebar-selected : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.sidebar-hover : root.base-background));
-
-    Rectangle { x: 0; y: (parent.height - 14px) / 2; width: 3px; height: 14px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
-
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 10px;
-        spacing: Metrics.space-sm;
-
-        VerticalLayout {
-            width: 18px;
-            alignment: center;
-            if root.home: IconHome { tint: root.selected ? Theme.accent : Theme.text-secondary; }
-            if root.collection: Path { width: 18px; height: 18px; viewbox-width: 18; viewbox-height: 18; fill: transparent; stroke: Theme.accent; stroke-width: 1.2px; commands: "M2 2H7V7H2ZM11 2H16V7H11ZM2 11H7V16H2ZM11 11H16V16H11Z"; }
-            if !root.home && !root.collection: Image {
-                source: root.icon;
-                width: 18px;
-                height: 18px;
-                image-rendering: smooth;
-            }
-        }
-
-        Text {
-            text: root.text;
-            color: selected ? Theme.text-primary : Theme.text-secondary;
-            font-size: 14px;
-            vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
-        }
-        if root.count >= 0: Text { text: "" + root.count; color: Theme.text-muted; font-size: 11px; vertical-alignment: center; }
-    }
-
-    side-ta := NavTouchArea {
-        secondary-clicked(x, y) => { root.context-requested(x, y); }
-        clicked => { if root.target != "" { AppState.request_navigate(root.target); } }
-    }
-}
-
-// Fixed icon/text anchors keep drive names aligned with the Places links.
-component DriveRow inherits Rectangle {
-    in property <DriveItem> drive;
-    property <bool> selected: AppState.current-path == drive.path;
-
-    height: Metrics.sidebar-drive-height;
-    border-width: selected ? 1px : 0px; border-color: Theme.accent;
-    border-radius: Metrics.radius-md;
-    background: selected ? Theme.sidebar-selected : (drive-ta.pressed ? Theme.surface-pressed : (drive-ta.has-hover ? Theme.sidebar-hover : transparent));
-
-    Rectangle { x: 0; y: (parent.height - 14px) / 2; width: 3px; height: 14px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
-    Image { x: 12px; y: 13px; source: drive.icon; width: 20px; height: 20px; image-rendering: smooth; }
-    Text {
-        x: 40px; y: 9px; width: parent.width - 46px; height: 20px;
-        text: drive.name; color: root.selected ? Theme.text-primary : Theme.text-secondary;
-        font-size: 14px; vertical-alignment: center; overflow: elide;
-    }
-    Rectangle {
-        x: 40px; y: 35px; width: parent.width - 54px; height: 6px;
-        border-radius: 2px; background: Theme.surface-hover;
-        visible: drive.capacity-known;
-        Rectangle {
-            x: 0; y: 0;
-            height: parent.height;
-            width: parent.width * Math.clamp(drive.usage, 0, 1);
-            border-radius: 2px;
-            background: drive.usage > 0.9 ? Theme.danger : Theme.accent;
-            animate width { duration: AppState.animations ? 240ms : 0ms; easing: ease-out; }
-        }
-    }
-    Text {
-        x: 40px; y: 47px; width: parent.width - 48px; height: 18px;
-        text: drive.capacity-known ? drive.free-text + " free of " + drive.total-text : drive.detail; color: Theme.text-muted;
-        font-size: 11px; vertical-alignment: center; overflow: elide;
-    }
-
-    drive-ta := NavTouchArea {
-        clicked => { if drive.path != "" { AppState.request_navigate(drive.path); } }
-    }
-}
-
-component SectionLabel inherits Rectangle {
-    in property <string> text;
-    in property <string> detail;
-    height: 36px;
-    Text { x: 12px; height: parent.height; text: root.text; color: Theme.text-secondary; font-size: 14px; font-weight: 400; vertical-alignment: center; }
-    Text { x: parent.width - 64px; width: 52px; height: parent.height; text: root.detail; color: Theme.text-disabled; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
-}
-
-component HeaderCell inherits Rectangle {
-    in property <string> text;
-    in property <int> column;
-    in property <length> text-indent: 8px;
-    in property <bool> right-align: false;
-
-    height: 100%;
-    background: header-ta.pressed ? Theme.surface-pressed : (header-ta.has-hover ? Theme.surface-hover : transparent);
-
-    label := Text {
-        x: root.right-align ? root.width - self.width - 24px : root.text-indent;
-        width: self.preferred-width; height: root.height;
-        text: root.text; color: Theme.text-secondary; font-size: 13px;
-        vertical-alignment: center;
-    }
-    Path {
-        x: label.x + label.width + 7px; y: (root.height - 5px) / 2;
-        width: 8px; height: 5px; viewbox-width: 8; viewbox-height: 5;
-        visible: AppState.sort_column == root.column;
-        commands: AppState.sort_ascending ? "M1 4L4 1L7 4" : "M1 1L4 4L7 1";
-        fill: transparent; stroke: Theme.accent; stroke-width: 1.2px;
-    }
-
-    header-ta := NavTouchArea {
-        clicked => { AppState.request_sort(root.column); }
-    }
-}
-
-component ResizeEdge inherits TouchArea {
-    in property <int> direction;
-    callback resize(int);
-    mouse-cursor: direction == 0 || direction == 4 ? ns-resize : (direction == 2 || direction == 6 ? ew-resize : (direction == 1 || direction == 5 ? nesw-resize : nwse-resize));
-    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize(root.direction); } }
-}
-component ColumnGrip inherits Rectangle {
-    callback moved-by(length);
-    width: 10px;
-    Rectangle { x: 4px; y: 6px; width: 1px; height: parent.height - 12px; background: grip.has-hover || grip.pressed ? Theme.accent : Theme.border; }
-    grip := TouchArea {
-        mouse-cursor: ew-resize;
-        property <length> last-position;
-        pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { self.last-position = self.mouse-x + root.x; } }
-        moved => { if self.pressed { let current-position = self.mouse-x + root.x; root.moved-by(current-position - self.last-position); self.last-position = current-position; } }
-    }
-}
-
-component NameDialog inherits Rectangle {
-    in-out property <string> title <=> AppState.dialog_title;
-    visible: AppState.dialog_visible;
-    background: #000000aa;
-    TouchArea {}
-
-    Rectangle {
-        width: 420px;
-        height: root.title == "Error" ? 236px : 184px;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        background: Theme.surface-alt;
-        border-radius: Metrics.radius-lg;
-        border-width: 1px;
-        border-color: Theme.border;
-        drop-shadow-blur: 20px;
-        drop-shadow-color: Theme.shadow;
-        drop-shadow-offset-y: 6px;
-
-        Text {
-            x: 24px; y: 20px; width: 372px; height: 24px;
-            text: root.title;
-            color: root.title == "Error" ? Theme.danger : Theme.text-primary;
-            font-size: 18px; font-weight: 600;
-        }
-
-        dialog-scope := FocusScope {
-            x: 24px; y: 60px; width: 372px;
-            height: root.title == "Error" ? 104px : 36px;
-            key-pressed(event) => {
-                if event.text == Key.Escape || (event.text == Key.Return && root.title == "Error") {
-                    AppState.request_dialog_cancel();
-                    accept
-                } else { reject }
-            }
-            name-input := InputField {
-                x: 0; y: 0; width: 372px; height: 36px;
-                visible: root.title != "Error";
-                font-size: 13px;
-                text <=> AppState.dialog_value;
-                accepted => { AppState.request_dialog_confirm(AppState.dialog_value); }
-            }
-            Text {
-                x: 0; y: 0; width: 372px; height: 104px;
-                visible: root.title == "Error";
-                text: AppState.dialog_value;
-                color: Theme.text-secondary;
-                font-size: 12px;
-                wrap: word-wrap;
-                overflow: elide;
-            }
-        }
-
-        Rectangle {
-            x: 220px; y: parent.height - 54px; width: 84px; height: 30px;
-            visible: root.title != "Error";
-            background: cancel-ta.pressed ? Theme.surface-pressed : Theme.surface-hover;
-            border-radius: Metrics.radius-md;
-            Text { text: "Cancel"; color: Theme.text-primary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-            cancel-ta := TouchArea { clicked => { AppState.request_dialog_cancel(); } }
-        }
-        Rectangle {
-            x: 312px; y: parent.height - 54px; width: 84px; height: 30px;
-            background: ok-ta.pressed ? Theme.text-secondary : Theme.accent;
-            border-radius: Metrics.radius-md;
-            Text { text: root.title == "Error" ? "Close" : (root.title == "Rename" ? "Rename" : "Create"); color: Theme.window-bg; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-            ok-ta := TouchArea { clicked => { AppState.request_dialog_confirm(AppState.dialog_value); } }
-        }
-    }
-    changed visible => {
-        if self.visible {
-            if root.title == "Error" { dialog-scope.focus(); }
-            else { name-input.focus-field(); name-input.select-all-text(); }
-        }
-    }
-}
+export { Theme, Breadcrumb, InfoItem, StorageItem, LibraryItem, TransferItem, FileListItem, DriveItem, AppState, Metrics } from "shared.slint";
+import { Theme, Breadcrumb, InfoItem, StorageItem, LibraryItem, TransferItem, FileListItem, DriveItem, AppState, Metrics } from "shared.slint";
+import { HoverTip, DropZone, NavTouchArea, IconFolderNew, IconClose, IconPlus, IconEmptyFolder, NavIconButton, ActionButton, TextButton, InputField, IconHome, SidebarButton, DriveRow, SectionLabel, HeaderCell, ResizeEdge, ColumnGrip, NameDialog } from "controls.slint";
+import { SearchBar } from "search.slint";
+import { Inspector } from "inspector.slint";
+import { UndoDialog, OperationCenter, ConflictDialog } from "operations.slint";
 export component MainWindow inherits Window {
     title: "Kova";
     icon: @image-url("../assets/kova.png");
@@ -683,12 +14,19 @@ export component MainWindow inherits Window {
     resize-border-width: 0px;
     callback resize-window(int);
     callback window-action(int);
+    callback focus-command(int);
+    focus-command(command) => {
+        if command == 0 { address-field.focus-field(); address-field.select-all-text(); }
+        else { search-field.focus-field(); search-field.select-all-text(); }
+    }
     in-out property <bool> window-maximized: false;
-    property <length> inspector-width: 340px;
-    property <float> preview-zoom: 1;
-    property <bool> preview-fit: true;
-    property <string> zoom-path: AppState.preview-path;
-    changed zoom-path => { self.preview-fit = true; self.preview-zoom = 1; }
+    in-out property <bool> restore-maximized: false;
+    in-out property <length> normal-width: 1280px;
+    in-out property <length> normal-height: 820px;
+    in-out property <length> inspector-width: 340px;
+    in-out property <length> saved-type-width: 140px;
+    in-out property <length> saved-size-width: 148px;
+    in-out property <length> saved-date-width: 200px;
     property <length> tab-width: Math.min(240px, Math.max(140px, (root.width - 74px - 202px) / Math.max(1, AppState.tabs.length) - 4px));
     min-width: 760px;
     min-height: 500px;
@@ -745,8 +83,8 @@ export component MainWindow inherits Window {
         app-menu := ContextMenuArea {
             x: 14px; y: 6px; width: 38px; height: 34px;
             Menu {
-                MenuItem { title: "Use Kova for folders and drives"; enabled: !AppState.integration-busy; activated => { AppState.request-default-manager(true); } }
-                MenuItem { title: "Restore previous folder app"; enabled: !AppState.integration-busy; activated => { AppState.request-default-manager(false); } }
+                MenuItem { title: @tr("Use Kova for folders and drives"); enabled: !AppState.integration-busy; activated => { AppState.request-default-manager(true); } }
+                MenuItem { title: @tr("Restore previous folder app"); enabled: !AppState.integration-busy; activated => { AppState.request-default-manager(false); } }
             }
             TouchArea { clicked => { app-menu.show({x: 0px, y: 32px}); } }
         }
@@ -772,6 +110,9 @@ export component MainWindow inherits Window {
                 border-color: Theme.border;
                 background: idx == AppState.active_tab ? Theme.window-bg : (tab-ta.pressed ? Theme.surface-pressed : (tab-ta.has-hover ? Theme.surface-hover : transparent));
 
+                accessible-role: button; accessible-label: "Tab " + item; accessible-description: idx == AppState.active_tab ? "Active tab" : "";
+                accessible-action-default => { AppState.request_switch_tab(idx); }
+                DropZone { target: AppState.tab-paths[idx]; clip-left: tab-scroll.absolute-position.x; clip-right: tab-scroll.absolute-position.x + tab-scroll.width; }
                 tab-ta := NavTouchArea {
                     clicked => { AppState.request_switch_tab(idx); }
                 }
@@ -809,6 +150,9 @@ export component MainWindow inherits Window {
                             border-radius: 4px;
                             background: close-ta.has-hover ? Theme.surface-hover : transparent;
                             visible: AppState.tabs.length > 1;
+                            accessible-role: button; accessible-label: @tr("Close tab") + ": " + item;
+                            accessible-action-default => { AppState.request_close_tab(idx); }
+                            HoverTip { text: @tr("Close tab") + " (Ctrl+W)"; hovered: close-ta.has-hover; }
 
                             IconClose {
                                 x: (parent.width - self.width) / 2;
@@ -833,6 +177,9 @@ export component MainWindow inherits Window {
             height: 30px;
             border-radius: Metrics.radius-md;
             background: new-tab-ta.pressed ? Theme.surface-pressed : (new-tab-ta.has-hover ? Theme.surface-hover : transparent);
+            accessible-role: button; accessible-label: @tr("New tab");
+            accessible-action-default => { AppState.request_new_tab(); }
+            HoverTip { text: @tr("New tab") + " (Ctrl+T)"; hovered: new-tab-ta.has-hover; }
             IconPlus { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
             new-tab-ta := NavTouchArea { clicked => { AppState.request_new_tab(); } }
         }
@@ -841,7 +188,7 @@ export component MainWindow inherits Window {
             spacing: 0px;
             Rectangle {
                 width: 46px; background: min-ta.has-hover ? Theme.surface-hover : transparent;
-                accessible-role: button; accessible-label: "Minimize";
+                accessible-role: button; accessible-label: @tr("Minimize");
                 Rectangle { x: 18px; y: 20px; width: 10px; height: 1px; background: Theme.text-secondary; }
                 min-ta := TouchArea { clicked => { root.window-action(1); } }
             }
@@ -854,7 +201,7 @@ export component MainWindow inherits Window {
             }
             Rectangle {
                 width: 46px; background: exit-ta.has-hover ? #c42b3b : transparent;
-                accessible-role: button; accessible-label: "Close window";
+                accessible-role: button; accessible-label: @tr("Close window");
                 IconClose { x: 18px; y: 15px; tint: exit-ta.has-hover ? #ffffff : Theme.text-secondary; }
                 exit-ta := TouchArea { clicked => { root.window-action(3); } }
             }
@@ -877,10 +224,10 @@ export component MainWindow inherits Window {
         HorizontalLayout {
             width: parent.width; height: parent.height;
             padding-left: 14px; padding-right: 12px; padding-top: 6px; padding-bottom: 6px; spacing: 12px;
-            NavIconButton { enabled: AppState.can_go_back; clicked => { AppState.request_back(); } FilesNavBack { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
-            NavIconButton { enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } FilesNavForward { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
-            NavIconButton { enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } FilesNavUp { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
-            NavIconButton { clicked => { AppState.request_refresh(); } FilesRefresh { x: 7px; y: 7px; } }
+            NavIconButton { label: @tr("Back"); shortcut: "Alt+Left"; enabled: AppState.can_go_back; clicked => { AppState.request_back(); } FilesNavBack { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
+            NavIconButton { label: @tr("Forward"); shortcut: "Alt+Right"; enabled: AppState.can_go_forward; clicked => { AppState.request_forward(); } FilesNavForward { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
+            NavIconButton { label: @tr("Parent folder"); shortcut: "Alt+Up"; enabled: AppState.can_go_parent; clicked => { AppState.request_parent(); } FilesNavUp { tint: parent.enabled ? Theme.text-primary : Theme.text-disabled; x: 7px; y: 7px; } }
+            NavIconButton { label: @tr("Refresh"); shortcut: "F5"; clicked => { AppState.request_refresh(); } FilesRefresh { x: 7px; y: 7px; } }
             address-field := InputField {
                 height: 34px; horizontal-stretch: 1; quiet: false;
                 background: Theme.window-bg;
@@ -946,34 +293,34 @@ export component MainWindow inherits Window {
                 spacing: 2px;
                 alignment: start;
 
-                SectionLabel { text: "Places  ⌄"; }
-                SidebarButton { text: "Home"; home: true; target: "Home"; selected: AppState.drive-overview; }
-                SidebarButton { text: "User folder"; icon: AppState.home_icon; target: AppState.home_path; selected: AppState.current-path == AppState.home_path; }
-                SidebarButton { text: "Desktop"; icon: AppState.desktop_icon; target: AppState.desktop_path; selected: AppState.current-path == AppState.desktop_path; }
-                SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; selected: AppState.current-path == AppState.documents_path; }
-                SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; selected: AppState.current-path == AppState.downloads_path; }
+                SectionLabel { text: @tr("Places  ⌄"); }
+                SidebarButton { text: @tr("Home"); home: true; target: "Home"; selected: AppState.drive-overview; }
+                SidebarButton { text: @tr("User folder"); icon: AppState.home_icon; target: AppState.home_path; selected: AppState.current-path == AppState.home_path; }
+                SidebarButton { text: @tr("Desktop"); icon: AppState.desktop_icon; target: AppState.desktop_path; selected: AppState.current-path == AppState.desktop_path; }
+                SidebarButton { text: @tr("Documents"); icon: AppState.documents_icon; target: AppState.documents_path; selected: AppState.current-path == AppState.documents_path; }
+                SidebarButton { text: @tr("Downloads"); icon: AppState.downloads_icon; target: AppState.downloads_path; selected: AppState.current-path == AppState.downloads_path; }
 
                 Rectangle { height: Metrics.space-md; }
-                if AppState.quick-access.length > 0: SectionLabel { text: "Quick access"; }
+                if AppState.quick-access.length > 0: SectionLabel { text: @tr("Quick access"); }
                 for pin[index] in AppState.quick-access: ContextMenuArea {
                     height: Metrics.sidebar-item-height;
                     Menu {
-                        MenuItem { title: "Remove from Quick access"; activated => { AppState.library-action(1, "" + AppState.context-pin, ""); } }
-                        MenuItem { title: "Move up"; enabled: AppState.context-pin > 0; activated => { AppState.library-action(2, "" + AppState.context-pin, ""); } }
-                        MenuItem { title: "Move down"; enabled: AppState.context-pin + 1 < AppState.quick-access.length; activated => { AppState.library-action(3, "" + AppState.context-pin, ""); } }
+                        MenuItem { title: @tr("Remove from Quick access"); activated => { AppState.library-action(1, "" + AppState.context-pin, ""); } }
+                        MenuItem { title: @tr("Move up"); enabled: AppState.context-pin > 0; activated => { AppState.library-action(2, "" + AppState.context-pin, ""); } }
+                        MenuItem { title: @tr("Move down"); enabled: AppState.context-pin + 1 < AppState.quick-access.length; activated => { AppState.library-action(3, "" + AppState.context-pin, ""); } }
                     }
                     SidebarButton { text: pin.name; icon: AppState.home_icon; target: pin.key; selected: AppState.current-path == pin.key; context-requested(x, y) => { AppState.context-pin = index; parent.show({x: x, y: y}); } }
                 }
-                if AppState.library-groups.length > 0: SectionLabel { text: "Collections & tags"; }
+                if AppState.library-groups.length > 0: SectionLabel { text: @tr("Collections & tags"); }
                 for group in AppState.library-groups: ContextMenuArea {
                     height: Metrics.sidebar-item-height;
                     Menu {
-                        MenuItem { title: "Add selection"; enabled: AppState.selected_count > 0; activated => { AppState.library-action(AppState.context-group-tag ? 5 : 4, "", AppState.context-group-name); } }
-                        MenuItem { title: "Remove group (keep files)"; activated => { AppState.library-action(7, AppState.context-group-key, ""); } }
+                        MenuItem { title: @tr("Add selection"); enabled: AppState.selected_count > 0; activated => { AppState.library-action(AppState.context-group-tag ? 5 : 4, "", AppState.context-group-name); } }
+                        MenuItem { title: @tr("Remove group (keep files)"); activated => { AppState.library-action(7, AppState.context-group-key, ""); } }
                     }
                     SidebarButton { text: (group.tag ? "# " : "") + group.name; count: group.count; collection: true; target: group.key; selected: AppState.current-path == group.key; context-requested(x, y) => { AppState.context-group-key = group.key; AppState.context-group-name = group.name; AppState.context-group-tag = group.tag; parent.show({x: x, y: y}); } }
                 }
-                SectionLabel { text: "Drives  ⌄"; }
+                SectionLabel { text: @tr("Drives  ⌄"); }
                 for drive in AppState.drives: DriveRow { drive: drive; }
             }
 
@@ -991,20 +338,25 @@ export component MainWindow inherits Window {
             HorizontalLayout {
                 padding: 7px; spacing: root.width < 1000px ? 4px : 8px;
 
-                ActionButton { label: "New folder"; shortcut: "Ctrl+Shift+N"; show-label: root.width >= 1000px; width: root.width >= 1000px ? 120px : 36px; enabled: !AppState.creating-folder && AppState.filesystem-location && !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_new_folder(); } IconFolderNew { x: 10px; y: 9px; tint: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: @tr("New folder"); shortcut: "Ctrl+Shift+N"; show-label: root.width >= 1000px; width: root.width >= 1000px ? 120px : 36px; enabled: !AppState.creating-folder && AppState.filesystem-location && !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_new_folder(); } IconFolderNew { x: 10px; y: 9px; tint: parent.enabled ? Theme.accent : Theme.text-disabled; } }
                 Rectangle { width: 1px; background: Theme.border-subtle; }
-                ActionButton { label: "Cut"; shortcut: "Ctrl+X"; show-label: root.width >= 1240px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_cut(); } FilesCut { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                ActionButton { label: "Copy"; shortcut: "Ctrl+C"; show-label: root.width >= 1240px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_copy(); } FilesCopy { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                ActionButton { label: "Paste"; shortcut: "Ctrl+V"; show-label: root.width >= 1240px; enabled: AppState.filesystem-location && !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_paste(); } FilesPaste { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                ActionButton { label: "Rename"; shortcut: "F2"; show-label: root.width >= 1240px; enabled: AppState.selected_count == 1; triggered => { list-scope.focus(); AppState.request_rename(-1); } FilesRename { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                ActionButton { label: "Delete"; shortcut: "Del"; show-label: root.width >= 1240px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_delete(); } FilesDelete { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
-                TextButton { text: "Open"; width: 48px; enabled: AppState.selected_count == 1; clicked => { list-scope.focus(); AppState.request_activate(-1); } }
-                TextButton { text: "More"; width: 48px; enabled: AppState.selected_count > 0; clicked => { list-scope.focus(); AppState.request_shell_menu(AppState.primary-row); } }
-                TextButton { text: "Organize"; width: 76px; clicked => { AppState.library-visible = true; } }
+                ActionButton { label: @tr("Cut"); shortcut: "Ctrl+X"; show-label: root.width >= 1240px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_cut(); } FilesCut { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: @tr("Copy"); shortcut: "Ctrl+C"; show-label: root.width >= 1240px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_copy(); } FilesCopy { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: @tr("Paste"); shortcut: "Ctrl+V"; show-label: root.width >= 1240px; enabled: AppState.filesystem-location && !AppState.loading && AppState.directory-error == ""; triggered => { list-scope.focus(); AppState.request_paste(); } FilesPaste { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: @tr("Rename"); shortcut: "F2"; show-label: root.width >= 1240px; enabled: AppState.selected_count == 1; triggered => { list-scope.focus(); AppState.request_rename(-1); } FilesRename { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                ActionButton { label: @tr("Delete"); shortcut: "Del"; show-label: root.width >= 1240px; enabled: AppState.selected_count > 0; triggered => { list-scope.focus(); AppState.request_delete(); } FilesDelete { x: 9px; y: 8px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; accent: parent.enabled ? Theme.accent : Theme.text-disabled; } }
+                TextButton { text: @tr("Open"); width: 48px; enabled: AppState.selected_count == 1; clicked => { list-scope.focus(); AppState.request_activate(-1); } }
+                TextButton { text: @tr("More"); width: 48px; enabled: AppState.selected_count > 0; clicked => { list-scope.focus(); AppState.request_shell_menu(AppState.primary-row); } }
+                TextButton { width: 62px; text: @tr("Undo"); enabled: AppState.undo-label != ""; clicked => { AppState.request-undo(); } }
+
+                TextButton { text: @tr("Tags & Collections"); width: 136px; clicked => { AppState.library-visible = true; } }
                 Rectangle { horizontal-stretch: 1; }
                 Rectangle {
                     width: 70px; border-radius: 4px; background: Theme.surface;
                     for label[index] in ["☰", "▦"]: Rectangle {
+                        accessible-role: button; accessible-label: index == 0 ? @tr("Details") : @tr("Gallery");
+                        accessible-action-default => { AppState.gallery = index == 1; list-scope.focus(); }
+                        HoverTip { text: index == 0 ? @tr("Details") + " (Ctrl+1)" : @tr("Gallery") + " (Ctrl+2)"; hovered: mode-touch.has-hover; }
                         x: index * 35px; width: 35px; height: parent.height;
                         border-radius: 4px;
                         background: (AppState.gallery ? index == 1 : index == 0) ? Theme.selection : (mode-touch.has-hover ? Theme.surface-hover : transparent);
@@ -1015,141 +367,45 @@ export component MainWindow inherits Window {
                 view-menu := ContextMenuArea {
                     width: root.width >= 1000px ? 104px : 76px;
                     Menu {
-                        MenuItem { title: "Details"; checkable: true; checked: !AppState.gallery; activated => { AppState.gallery = false; } }
-                        MenuItem { title: "Gallery"; checkable: true; checked: AppState.gallery; activated => { AppState.gallery = true; } }
+                        MenuItem { title: @tr("Details"); checkable: true; checked: !AppState.gallery; activated => { AppState.gallery = false; } }
+                        MenuItem { title: @tr("Gallery"); checkable: true; checked: AppState.gallery; activated => { AppState.gallery = true; } }
                         Menu {
-                            title: "Thumbnail size";
-                            MenuItem { title: "Small"; checkable: true; checked: AppState.gallery-size == 0; activated => { AppState.gallery-size = 0; AppState.gallery = true; } }
-                            MenuItem { title: "Medium"; checkable: true; checked: AppState.gallery-size == 1; activated => { AppState.gallery-size = 1; AppState.gallery = true; } }
-                            MenuItem { title: "Large"; checkable: true; checked: AppState.gallery-size == 2; activated => { AppState.gallery-size = 2; AppState.gallery = true; } }
+                            title: @tr("Thumbnail size");
+                            MenuItem { title: @tr("Small"); checkable: true; checked: AppState.gallery-size == 0; activated => { AppState.gallery-size = 0; AppState.gallery = true; } }
+                            MenuItem { title: @tr("Medium"); checkable: true; checked: AppState.gallery-size == 1; activated => { AppState.gallery-size = 1; AppState.gallery = true; } }
+                            MenuItem { title: @tr("Large"); checkable: true; checked: AppState.gallery-size == 2; activated => { AppState.gallery-size = 2; AppState.gallery = true; } }
                         }
                         MenuSeparator { }
-                        MenuItem { title: "Preview"; checkable: true; checked: AppState.preview-visible; activated => { AppState.request-view-option(3); } }
-                        MenuItem { title: "Pin folder to Quick access"; enabled: AppState.library-writable && AppState.filesystem-location; activated => { AppState.library-action(0, "", ""); } }
-                        MenuItem { title: "Analyze storage"; enabled: AppState.filesystem-location; activated => { AppState.request-analyze(""); } }
-                        MenuItem { title: "Drives and storage"; activated => { AppState.request_navigate("Home"); } }
+                        MenuItem { title: @tr("Preview"); checkable: true; checked: AppState.preview-visible; activated => { AppState.request-view-option(3); } }
+                        MenuItem { title: @tr("Pin folder to Quick access"); enabled: AppState.library-writable && AppState.filesystem-location; activated => { AppState.library-action(0, "", ""); } }
+                        MenuItem { title: @tr("Analyze storage"); enabled: AppState.filesystem-location; activated => { AppState.request-analyze(""); } }
+                        MenuItem { title: @tr("Drives and storage"); activated => { AppState.request_navigate("Home"); } }
                         MenuSeparator { }
-                        MenuItem { title: "Show hidden files"; checkable: true; checked: AppState.show-hidden; activated => { AppState.request-view-option(0); } }
-                        MenuItem { title: "Show system files"; checkable: true; checked: AppState.show-system; activated => { AppState.request-view-option(1); } }
-                        MenuItem { title: "Show file extensions"; checkable: true; checked: AppState.show-extensions; activated => { AppState.request-view-option(2); } }
-                        MenuItem { title: "Calculate folder sizes"; checkable: true; checked: AppState.folder-sizes; activated => { AppState.request-view-option(7); } }
+                        MenuItem { title: @tr("Show hidden files"); checkable: true; checked: AppState.show-hidden; activated => { AppState.request-view-option(0); } }
+                        MenuItem { title: @tr("Show system files"); checkable: true; checked: AppState.show-system; activated => { AppState.request-view-option(1); } }
+                        MenuItem { title: @tr("Show file extensions"); checkable: true; checked: AppState.show-extensions; activated => { AppState.request-view-option(2); } }
+                        MenuItem { title: @tr("Calculate folder sizes"); checkable: true; checked: AppState.folder-sizes; activated => { AppState.request-view-option(7); } }
                         MenuSeparator { }
-                        MenuItem { title: "Compact rows"; checkable: true; checked: AppState.compact-rows; activated => { AppState.request-view-option(4); } }
-                        MenuItem { title: "Alternating row colors"; checkable: true; checked: AppState.alternating-rows; activated => { AppState.request-view-option(5); } }
-                        MenuItem { title: "Animations"; checkable: true; checked: AppState.animations; activated => { AppState.request-view-option(6); } }
+                        MenuItem { title: @tr("Compact rows"); checkable: true; checked: AppState.compact-rows; activated => { AppState.request-view-option(4); } }
+                        MenuItem { title: @tr("Alternating row colors"); checkable: true; checked: AppState.alternating-rows; activated => { AppState.request-view-option(5); } }
+                        MenuItem { title: @tr("Animations"); checkable: true; checked: AppState.animations; activated => { AppState.request-view-option(6); } }
                     }
                     Rectangle {
                         border-radius: Metrics.radius-sm;
                         background: view-touch.has-hover ? Theme.surface-hover : transparent;
-                        Text { text: "☷  View  ⌄"; color: Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; }
+                        Text { text: @tr("☷  View  ⌄"); color: Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; }
                         view-touch := TouchArea { clicked => { view-menu.show({ x: self.width - 220px, y: self.height }); } }
                     }
                 }
             }
         }
 
-        preview-panel := Rectangle {
+        preview-panel := Inspector {
             visible: AppState.preview-visible && !AppState.drive-overview;
             width: Math.clamp(root.inspector-width, 260px, Math.max(260px, root.width - Metrics.sidebar-width - 280px));
             x: parent.width - self.width - Metrics.space-sm;
-            y: 64px;
+            y: 104px;
             height: parent.height - self.y;
-            border-radius: Metrics.radius-lg;
-            border-width: 1px; border-color: Theme.border-subtle;
-            background: Theme.content-bg;
-            Text {
-                x: 14px; y: 0; width: parent.width - 56px; height: 42px;
-                text: AppState.preview-title; overflow: elide;
-                color: Theme.text-primary; font-size: 13px; font-weight: 600; vertical-alignment: center;
-            }
-            Rectangle {
-                x: parent.width - 34px; y: 8px; width: 26px; height: 26px; border-radius: Metrics.radius-sm;
-                background: preview-close.has-hover ? Theme.surface-hover : transparent;
-                Path { x: 8px; y: 8px; width: 10px; height: 10px; viewbox-width: 10; viewbox-height: 10; commands: "M1 1L9 9M9 1L1 9"; fill: transparent; stroke: Theme.text-secondary; stroke-width: 1.2px; }
-                preview-close := TouchArea { clicked => { AppState.request-view-option(3); } }
-            }
-            Rectangle { x: 12px; y: 42px; width: parent.width - 24px; height: 1px; background: Theme.border; }
-            Text {
-                x: 14px; y: 44px; width: parent.width - 28px; height: 20px;
-                text: AppState.preview-info; color: Theme.text-muted; font-size: 11px;
-                overflow: elide; vertical-alignment: center;
-            }
-            if AppState.preview-has-image: HorizontalLayout {
-                x: 12px; y: 68px; width: parent.width - 24px; height: 28px; spacing: 4px;
-                Text { text: "Zoom"; color: Theme.text-muted; font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; }
-                NavIconButton { width: 28px; height: 28px; enabled: root.preview-fit || root.preview-zoom > 0.25;
-                    accessible-role: button; accessible-label: "Zoom out";
-                    clicked => { root.preview-fit = false; root.preview-zoom = Math.max(0.25, root.preview-zoom - 0.25); }
-                    Text { text: "−"; color: Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
-                }
-                NavIconButton { width: 60px; height: 28px;
-                    accessible-role: button; accessible-label: "Fit or actual preview pixels";
-                    clicked => { root.preview-fit = !root.preview-fit; root.preview-zoom = 1; }
-                    Text { text: root.preview-fit ? "Fit" : Math.round(root.preview-zoom * 100) + "%"; color: Theme.accent; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                }
-                NavIconButton { width: 28px; height: 28px; enabled: root.preview-fit || root.preview-zoom < 4;
-                    accessible-role: button; accessible-label: "Zoom in";
-                    clicked => { root.preview-fit = false; root.preview-zoom = Math.min(4, root.preview-zoom + 0.25); }
-                    IconPlus { x: 7px; y: 7px; }
-                }
-            }
-            if AppState.preview-has-image: Rectangle {
-                x: 12px; y: 104px; width: parent.width - 24px; height: Math.max(100px, parent.height * 0.48 - 110px);
-                background: Theme.sidebar-bg; border-radius: Metrics.radius-md; clip: true;
-                ScrollView {
-                    width: parent.width; height: parent.height;
-                    viewport-width: root.preview-fit ? self.width : Math.max(self.width, AppState.preview-pixel-width * root.preview-zoom * 1px);
-                    viewport-height: root.preview-fit ? self.height : Math.max(self.height, AppState.preview-pixel-height * root.preview-zoom * 1px);
-                    Image {
-                        width: root.preview-fit ? parent.width : AppState.preview-pixel-width * root.preview-zoom * 1px;
-                        height: root.preview-fit ? parent.height : AppState.preview-pixel-height * root.preview-zoom * 1px;
-                        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-                        source: AppState.preview-image; image-fit: contain;
-                    }
-                }
-            }
-            if !AppState.preview-has-image: ScrollView {
-                x: 12px; y: 72px; width: parent.width - 24px; height: Math.max(100px, parent.height * 0.48 - 82px);
-                viewport-width: self.width;
-                viewport-height: Math.max(self.height, preview-copy.preferred-height + 8px);
-                preview-copy := Text {
-                    width: parent.width - 14px; text: AppState.preview-text;
-                    wrap: word-wrap; font-family: "Consolas"; font-size: 12px; color: Theme.text-secondary;
-                }
-            }
-            if AppState.preview-has-image: HorizontalLayout {
-                x: 12px; y: parent.height * 0.48 - 2px; width: parent.width - 24px; height: 30px; spacing: 6px;
-                if AppState.preview-animated: ActionButton {
-                    width: 88px; height: 30px;
-                    label: AppState.preview-paused ? "Play" : "Pause";
-                    triggered => { AppState.preview-paused = !AppState.preview-paused; }
-                    Path {
-                        x: 10px; y: 8px; width: 14px; height: 14px;
-                        viewbox-width: 14; viewbox-height: 14;
-                        commands: AppState.preview-paused ? "M3 1L12 7L3 13Z" : "M3 2H5V12H3ZM9 2H11V12H9Z";
-                        fill: Theme.accent;
-                    }
-                }
-                if AppState.preview-pages > 0: NavIconButton { enabled: AppState.preview-page > 0; width: 30px; clicked => { AppState.preview-page -= 1; } FilesNavBack { x: 7px; y: 7px; width: 16px; height: 16px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; } }
-                Text { text: AppState.preview-text; color: Theme.text-muted; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; horizontal-stretch: 1; }
-                if AppState.preview-pages > 0: NavIconButton { enabled: AppState.preview-page + 1 < AppState.preview-pages; width: 30px; clicked => { AppState.preview-page += 1; } FilesNavForward { x: 7px; y: 7px; width: 16px; height: 16px; tint: parent.enabled ? Theme.text-secondary : Theme.text-disabled; } }
-            }
-            Rectangle { x: 14px; y: parent.height * 0.48 + 36px; width: parent.width - 28px; height: 1px; background: Theme.border-subtle; }
-            ScrollView {
-                x: 14px; y: parent.height * 0.48 + 46px; width: parent.width - 28px; height: parent.height - self.y - 12px;
-                viewport-width: self.width;
-                viewport-height: info-layout.preferred-height;
-                info-layout := VerticalLayout {
-                    width: parent.width - 12px; spacing: 12px;
-                    Text { text: "FILE INFORMATION"; color: Theme.text-muted; font-size: 10px; font-weight: 600; height: 20px; }
-                    for item in AppState.inspector-info: HorizontalLayout {
-                        spacing: 8px;
-                        Text { width: 68px; text: item.label; color: Theme.text-muted; font-size: 11px; }
-                        Text { horizontal-stretch: 1; text: item.value; color: Theme.text-primary; font-size: 12px; wrap: word-wrap; }
-                    }
-                }
-            }
-
         }
 
         Rectangle {
@@ -1172,29 +428,17 @@ export component MainWindow inherits Window {
             }
         }
 
-        Rectangle {
+        search-field := SearchBar {
             visible: !AppState.drive-overview;
-            x: Metrics.sidebar-width; y: 0; width: parent.width - self.x; height: 64px;
-            background: Theme.sidebar-bg;
-            Text { x: 20px; y: 10px; height: 26px; width: parent.width - search-field.width - 60px; text: AppState.tabs[AppState.active_tab]; font-size: 18px; font-weight: 600; color: Theme.text-primary; overflow: elide; }
-            Text { x: 20px; y: 36px; height: 20px; text: AppState.item_count + (AppState.item_count == 1 ? " item" : " items") + (AppState.selected_count > 0 ? " · " + AppState.selected_count + " selected" : ""); font-size: 13px; color: Theme.text-muted; }
-            search-field := InputField {
-                x: parent.width - self.width - 16px; y: 14px;
-                width: Math.clamp(parent.width * 0.4, 240px, 420px); height: 36px;
-                placeholder: "Search folder · type:image size:>100MB";
-                text <=> AppState.search-text;
-                edited(value) => { AppState.request-search(value); }
-                accepted => { list-scope.focus(); }
-                cancelled => { AppState.request-search(""); list-scope.focus(); }
-            }
-            Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Theme.border; }
+            x: Metrics.sidebar-width; y: 0; width: parent.width - self.x;
+            finished => { list-scope.focus(); }
         }
         // File list column.
         file-list := Rectangle {
             visible: !AppState.drive-overview;
-            property <length> type-width: 140px;
-            property <length> size-width: 148px;
-            property <length> date-width: 200px;
+            property <length> type-width <=> root.saved-type-width;
+            property <length> size-width <=> root.saved-size-width;
+            property <length> date-width <=> root.saved-date-width;
             property <bool> show-type: self.width >= 760px;
             property <bool> show-size: self.width >= 430px;
             property <bool> show-date: self.width >= 640px;
@@ -1210,13 +454,14 @@ export component MainWindow inherits Window {
             // Defer focus until Slint has finished changing the visible tree.
             Timer { running: parent.focus-pending; interval: 1ms; triggered => { parent.focus-pending = false; list-scope.focus(); } }
             x: Metrics.sidebar-width;
-            y: 64px;
+            y: 104px;
             width: parent.width - Metrics.sidebar-width - Metrics.space-sm - (AppState.preview-visible ? preview-panel.width + Metrics.panel-gap : 0px);
-            height: parent.height - 64px;
+            height: parent.height - 104px;
             background: Theme.content-bg;
             border-radius: 0px;
             clip: true;
 
+            DropZone { target: AppState.filesystem-location && !AppState.loading ? AppState.current-path : ""; priority: 0; }
             // Catches mouse back/forward and empty-area clicks for the whole
             // file column; interactive children grab their events first.
             list-nav := NavTouchArea {
@@ -1239,10 +484,10 @@ export component MainWindow inherits Window {
                 height: Metrics.header-height;
                 background: Theme.content-bg;
 
-                HeaderCell { x: 0; text: "Name"; column: 0; width: file-list.name-width; text-indent: 28px; }
-                HeaderCell { visible: file-list.show-type; x: file-list.name-width; width: file-list.actual-type; text: "Type"; column: 1; text-indent: 14px; }
-                HeaderCell { visible: file-list.show-size; x: file-list.name-width + file-list.actual-type; width: file-list.actual-size; text: "Size"; column: 2; right-align: true; }
-                HeaderCell { visible: file-list.show-date; x: file-list.name-width + file-list.actual-type + file-list.actual-size; width: file-list.actual-date; text: "Modified"; column: 3; text-indent: 14px; }
+                HeaderCell { x: 0; text: @tr("Name"); column: 0; width: file-list.name-width; text-indent: 28px; }
+                HeaderCell { visible: file-list.show-type; x: file-list.name-width; width: file-list.actual-type; text: @tr("Type"); column: 1; text-indent: 14px; }
+                HeaderCell { visible: file-list.show-size; x: file-list.name-width + file-list.actual-type; width: file-list.actual-size; text: @tr("Size"); column: 2; right-align: true; }
+                HeaderCell { visible: file-list.show-date; x: file-list.name-width + file-list.actual-type + file-list.actual-size; width: file-list.actual-date; text: @tr("Modified"); column: 3; text-indent: 14px; }
                 ColumnGrip {
                     x: file-list.name-width - 5px; height: parent.height; visible: file-list.show-size;
                     moved-by(delta) => { if file-list.show-type { file-list.type-width = Math.clamp(file-list.actual-type - delta, 80px, 280px); } else { file-list.size-width = Math.clamp(file-list.actual-size - delta, 80px, 280px); } }
@@ -1269,14 +514,14 @@ export component MainWindow inherits Window {
             // press first; those rows open the native shell menu instead.
             if AppState.gallery: Rectangle {
                 x: 0; y: 0; height: Metrics.header-height; width: parent.width;
-                Text { x: 20px; height: parent.height; text: "Gallery"; color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
+                Text { x: 20px; height: parent.height; text: @tr("Gallery"); color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
                 ContextMenuArea {
                     x: parent.width - 132px; width: 120px; height: parent.height;
                     Menu {
-                        MenuItem { title: "Name"; activated => { AppState.request_sort(0); } }
-                        MenuItem { title: "Type"; activated => { AppState.request_sort(1); } }
-                        MenuItem { title: "Size"; activated => { AppState.request_sort(2); } }
-                        MenuItem { title: "Modified"; activated => { AppState.request_sort(3); } }
+                        MenuItem { title: @tr("Name"); activated => { AppState.request_sort(0); } }
+                        MenuItem { title: @tr("Type"); activated => { AppState.request_sort(1); } }
+                        MenuItem { title: @tr("Size"); activated => { AppState.request_sort(2); } }
+                        MenuItem { title: @tr("Modified"); activated => { AppState.request_sort(3); } }
                     }
                     Text { text: "Sort: " + (AppState.sort_column == 0 ? "Name" : AppState.sort_column == 1 ? "Type" : AppState.sort_column == 2 ? "Size" : "Modified") + (AppState.sort_ascending ? " +" : " -"); font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; }
                     TouchArea { clicked => { parent.show({ x: 0px, y: self.height }); } }
@@ -1290,43 +535,43 @@ export component MainWindow inherits Window {
 
                 Menu {
                     MenuItem {
-                        title: "New folder";
+                        title: @tr("New folder");
                         enabled: AppState.filesystem-location && !AppState.loading && AppState.directory-error == "";
                         activated => { AppState.request_new_folder(); }
                     }
                     MenuItem {
-                        title: "Paste";
+                        title: @tr("Paste");
                         enabled: AppState.filesystem-location && !AppState.loading && AppState.directory-error == "";
                         activated => { AppState.request_paste(); }
                     }
                     MenuSeparator { }
                     MenuItem {
-                        title: "Open folder in new tab";
+                        title: @tr("Open folder in new tab");
                         activated => { AppState.request_duplicate_location(); }
                     }
                     Menu {
-                        title: "Sort by";
+                        title: @tr("Sort by");
                         enabled: !AppState.loading && AppState.item_count > 0;
-                        MenuItem { title: "Name"; checkable: true; checked: AppState.sort_column == 0; activated => { if (AppState.sort_column != 0) { AppState.request_sort(0); } } }
-                        MenuItem { title: "Type"; checkable: true; checked: AppState.sort_column == 1; activated => { if (AppState.sort_column != 1) { AppState.request_sort(1); } } }
-                        MenuItem { title: "Size"; checkable: true; checked: AppState.sort_column == 2; activated => { if (AppState.sort_column != 2) { AppState.request_sort(2); } } }
-                        MenuItem { title: "Date modified"; checkable: true; checked: AppState.sort_column == 3; activated => { if (AppState.sort_column != 3) { AppState.request_sort(3); } } }
+                        MenuItem { title: @tr("Name"); checkable: true; checked: AppState.sort_column == 0; activated => { if (AppState.sort_column != 0) { AppState.request_sort(0); } } }
+                        MenuItem { title: @tr("Type"); checkable: true; checked: AppState.sort_column == 1; activated => { if (AppState.sort_column != 1) { AppState.request_sort(1); } } }
+                        MenuItem { title: @tr("Size"); checkable: true; checked: AppState.sort_column == 2; activated => { if (AppState.sort_column != 2) { AppState.request_sort(2); } } }
+                        MenuItem { title: @tr("Date modified"); checkable: true; checked: AppState.sort_column == 3; activated => { if (AppState.sort_column != 3) { AppState.request_sort(3); } } }
                         MenuSeparator { }
-                        MenuItem { title: "Ascending"; checkable: true; checked: AppState.sort_ascending; activated => { if (!AppState.sort_ascending) { AppState.request_sort(AppState.sort_column); } } }
-                        MenuItem { title: "Descending"; checkable: true; checked: !AppState.sort_ascending; activated => { if (AppState.sort_ascending) { AppState.request_sort(AppState.sort_column); } } }
+                        MenuItem { title: @tr("Ascending"); checkable: true; checked: AppState.sort_ascending; activated => { if (!AppState.sort_ascending) { AppState.request_sort(AppState.sort_column); } } }
+                        MenuItem { title: @tr("Descending"); checkable: true; checked: !AppState.sort_ascending; activated => { if (AppState.sort_ascending) { AppState.request_sort(AppState.sort_column); } } }
                     }
                     MenuItem {
-                        title: "Refresh";
+                        title: @tr("Refresh");
                         activated => { AppState.request_refresh(); }
                     }
                     MenuSeparator { }
                     MenuItem {
-                        title: "Select all";
+                        title: @tr("Select all");
                         enabled: !AppState.loading && AppState.item_count > 0;
                         activated => { AppState.request_select_all(); }
                     }
                     MenuItem {
-                        title: "Clear selection";
+                        title: @tr("Clear selection");
                         enabled: AppState.selected_count > 0;
                         activated => { AppState.request_clear_selection(); }
                     }
@@ -1362,6 +607,8 @@ export component MainWindow inherits Window {
                             self.reveal(index); accept
                         } else if (event.text == "n" || event.text == "N") && event.modifiers.control && event.modifiers.shift {
                             AppState.request_new_folder(); accept
+                        } else if event.text == "z" && event.modifiers.control && AppState.undo-label != "" {
+                            AppState.request-undo(); accept
                         } else if event.text == "h" && event.modifiers.control {
                             AppState.request-view-option(0); accept
                         } else if event.text == " " && !event.modifiers.control && !event.modifiers.alt {
@@ -1372,6 +619,8 @@ export component MainWindow inherits Window {
                         } else if event.text == Key.F5 {
                             AppState.request_refresh();
                             accept
+                        } else if event.text == Key.F10 && event.modifiers.shift {
+                            AppState.request_shell_menu(AppState.primary-row); accept
                         } else if event.text == Key.F2 {
                             AppState.request_rename(-1);
                             accept
@@ -1449,9 +698,14 @@ export component MainWindow inherits Window {
                             for column in file-list.columns: Rectangle {
                                 property <int> idx: row * file-list.columns + column;
                                 property <FileListItem> item: AppState.files[self.idx];
+                                accessible-role: list-item; accessible-label: self.item.name;
+                                accessible-description: self.item.type_name + " · " + self.item.size_text + (self.item.selected ? " · Selected" : "");
+                                accessible-action-default => { AppState.request_select(self.idx); list-scope.focus(); }
+
                                 visible: self.idx < AppState.files.length;
                                 x: column * file-list.tile-width;
                                 width: file-list.tile-width; height: file-list.item-height;
+                                DropZone { target: parent.item.is-dir ? parent.item.path : ""; priority: 2; clip-top: file-viewport.absolute-position.y; clip-bottom: file-viewport.absolute-position.y + file-viewport.height; }
                                 row-pill := Rectangle {
                                     x: AppState.gallery ? 6px : 8px; y: AppState.gallery ? 6px : 1px;
                                     width: parent.width - (AppState.gallery ? 12px : 2px); height: parent.height - (AppState.gallery ? 12px : 2px);
@@ -1491,6 +745,9 @@ export component MainWindow inherits Window {
                         property <bool> armed: false;
                         property <bool> dragging: false;
                         property <bool> additive: false;
+                        property <bool> drag-source: false;
+                        property <int> pending-click: 0;
+                        property <int> pressed-row: -1;
                         property <length> start-x;
                         property <length> start-y;
                         property <int> hover-row: Math.floor((self.mouse-y - file-viewport.viewport-y) / file-list.item-height) * file-list.columns + (AppState.gallery ? Math.clamp(Math.floor(self.mouse-x / file-list.tile-width), 0, file-list.columns - 1) : 0);
@@ -1504,7 +761,7 @@ export component MainWindow inherits Window {
                         }
                         function finish(cancel: bool) {
                             if self.armed { AppState.request-grid-marquee(cancel ? 3 : 2, 0, 0, 0, 0, file-list.columns, false); }
-                            self.armed = false; self.dragging = false;
+                            self.armed = false; self.dragging = false; self.pending-click = 0;
                         }
                         pointer-event(event) => {
                             if event.kind == PointerEventKind.down {
@@ -1519,23 +776,35 @@ export component MainWindow inherits Window {
                                 } else if event.button == PointerEventButton.left && !AppState.loading {
                                     if AppState.inline-visible { AppState.request_dialog_confirm(AppState.dialog_value); }
                                     self.armed = true; self.dragging = false;
+                                    self.pending-click = 0; self.pressed-row = self.hover-row;
+                                    self.drag-source = self.hover-row >= 0 && self.hover-row < AppState.files.length;
                                     self.start-x = self.mouse-x;
                                     self.start-y = self.mouse-y - file-viewport.viewport-y;
                                     self.additive = event.modifiers.control || event.modifiers.shift;
                                     AppState.request-grid-marquee(0, 0, 0, 0, 0, file-list.columns, self.additive);
                                     if self.hover-row >= 0 && self.hover-row < AppState.files.length {
-                                        if event.modifiers.control { AppState.request_toggle(self.hover-row); }
+                                        if event.modifiers.control {
+                                            // A selected item must remain in the drag payload.
+                                            // Ctrl-click toggles it only after a non-drag release.
+                                            if AppState.files[self.hover-row].selected { self.pending-click = 1; }
+                                            else { AppState.request_toggle(self.hover-row); }
+                                        }
                                         else if event.modifiers.shift { AppState.request_range(self.hover-row); }
-                                        else { AppState.request_select(self.hover-row); }
+                                        else if !AppState.files[self.hover-row].selected { AppState.request_select(self.hover-row); }
+                                        else { self.pending-click = 2; }
                                     } else if !self.additive { AppState.request_clear_selection(); }
                                 }
                             } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                                if self.armed && !self.dragging && self.pressed-row >= 0 && self.pressed-row < AppState.files.length {
+                                    if self.pending-click == 1 { AppState.request_toggle(self.pressed-row); }
+                                    else if self.pending-click == 2 { AppState.request_select(self.pressed-row); }
+                                }
                                 self.finish(false);
                             } else if event.kind == PointerEventKind.cancel { self.finish(true); }
                         }
                         moved => {
                             if self.armed && self.pressed {
-                                if Math.abs(self.mouse-x - self.start-x) > 4px || Math.abs(self.mouse-y - file-viewport.viewport-y - self.start-y) > 4px { self.dragging = true; }
+                                if Math.abs(self.mouse-x - self.start-x) > 4px || Math.abs(self.mouse-y - file-viewport.viewport-y - self.start-y) > 4px { if self.drag-source { self.finish(false); AppState.start-drag(); } else { self.dragging = true; } }
                                 self.update-band();
                             }
                         }
@@ -1599,9 +868,10 @@ export component MainWindow inherits Window {
                         visible: AppState.files.length == 0;
 
                         VerticalLayout {
-                            width: parent.width;
-                            y: parent.height / 2 - 54px;
-                            height: 108px;
+                            x: 24px;
+                            width: parent.width - 48px;
+                            y: Math.max(12px, parent.height / 2 - self.height / 2);
+                            height: AppState.directory-error != "" ? 180px : 108px;
                             spacing: Metrics.space-sm;
                             alignment: start;
 
@@ -1633,8 +903,13 @@ export component MainWindow inherits Window {
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                                 width: parent.width;
-                                height: 18px;
+                                height: AppState.directory-error != "" ? 40px : 18px;
+                                wrap: char-wrap;
                                 visible: !AppState.loading;
+                            }
+                            if AppState.directory-error != "": HorizontalLayout {
+                                alignment: center;
+                                TextButton { text: @tr("Retry"); clicked => { AppState.request_refresh(); list-scope.focus(); } }
                             }
                         }
                     }
@@ -1719,6 +994,7 @@ export component MainWindow inherits Window {
                     if event.text == "l" && event.modifiers.control { address-field.focus-field(); address-field.select-all-text(); accept }
                     else if event.text == "t" && event.modifiers.control { AppState.request_new_tab(); accept }
                     else if event.text == "w" && event.modifiers.control { AppState.request_close_tab(AppState.active_tab); accept }
+                    else if event.text == "z" && event.modifiers.control && AppState.undo-label != "" { AppState.request-undo(); accept }
                     else if event.text == Key.F5 { AppState.request_refresh(); accept }
                     else if event.text == Key.LeftArrow && event.modifiers.alt && AppState.can_go_back { AppState.request_back(); accept }
                     else if event.text == Key.RightArrow && event.modifiers.alt && AppState.can_go_forward { AppState.request_forward(); accept }
@@ -1728,25 +1004,31 @@ export component MainWindow inherits Window {
                     else { reject }
                 }
             }
-            Text { x: 20px; y: 12px; height: 38px; text: "Home"; color: Theme.text-primary; font-size: 22px; font-weight: 600; }
-            Text { x: 20px; y: 52px; text: "Your folders and drives at a glance."; color: Theme.text-muted; font-size: 12px; }
+            Text { x: 20px; y: 12px; height: 38px; text: @tr("Home"); color: Theme.text-primary; font-size: 22px; font-weight: 600; }
+            Text { x: 20px; y: 52px; text: @tr("Your folders and drives at a glance."); color: Theme.text-muted; font-size: 12px; }
+            Text { x:20px; y:80px; text: @tr("Recent folders"); color: Theme.text-secondary; font-size:12px; }
             HorizontalLayout {
-                x: 20px; y: 84px; width: parent.width - 40px; height: 44px; spacing: 8px;
-                SidebarButton { text: "Desktop"; icon: AppState.desktop_icon; target: AppState.desktop_path; horizontal-stretch: 1; base-background: Theme.surface; }
-                SidebarButton { text: "Documents"; icon: AppState.documents_icon; target: AppState.documents_path; horizontal-stretch: 1; base-background: Theme.surface; }
-                SidebarButton { text: "Downloads"; icon: AppState.downloads_icon; target: AppState.downloads_path; horizontal-stretch: 1; base-background: Theme.surface; }
+                x:20px; y:102px; width: parent.width - 40px; height:36px; spacing:8px;
+                for index in [0, 1, 2]: SidebarButton { visible: index < AppState.recent-folders.length; text: AppState.recent-folders[index].label; target: AppState.recent-folders[index].path; horizontal-stretch:1; base-background:Theme.surface; }
+                if AppState.recent-folders.length == 0: Text { text: @tr("Folders you open will appear here."); color: Theme.text-muted; font-size:12px; }
             }
-            Text { x: 20px; y: 146px; height: 20px; text: AppState.drives-loading ? "Refreshing storage…" : "Devices and drives"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+            Text { x:20px; y:150px; text: @tr("Pinned folders & projects"); color: Theme.text-secondary; font-size:12px; }
             HorizontalLayout {
-                x: 20px; y: 182px; width: parent.width - 50px; height: 28px; spacing: 12px;
-                Text { text: "Drive"; horizontal-stretch: 1; min-width: 150px; color: Theme.text-muted; font-size: 11px; }
-                if root.width >= 1100px: Text { text: "File system"; width: 70px; color: Theme.text-muted; font-size: 11px; }
-                Text { text: "Free"; width: 82px; horizontal-alignment: right; color: Theme.text-muted; font-size: 11px; }
-                Text { text: "Total"; width: 82px; horizontal-alignment: right; color: Theme.text-muted; font-size: 11px; }
-                Text { text: "Used"; width: root.width >= 1200px ? 240px : (root.width >= 1000px ? 180px : 100px); color: Theme.text-muted; font-size: 11px; }
+                x:20px; y:172px; width: parent.width - 40px; height:36px; spacing:8px;
+                for index in [0, 1, 2]: SidebarButton { visible: index < AppState.quick-access.length; text: AppState.quick-access[index].name; target: AppState.quick-access[index].key; horizontal-stretch:1; base-background:Theme.surface; }
+                if AppState.quick-access.length == 0: Text { text: @tr("Pin a folder from Tags & Collections to keep it close."); color: Theme.text-muted; font-size:12px; }
+            }
+            Text { x: 20px; y: 226px; height: 20px; text: AppState.drives-loading ? "Refreshing storage…" : "Devices and drives"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; }
+            HorizontalLayout {
+                x: 20px; y: 254px; width: parent.width - 50px; height: 28px; spacing: 12px;
+                Text { text: @tr("Drive"); horizontal-stretch: 1; min-width: 150px; color: Theme.text-muted; font-size: 11px; }
+                if root.width >= 1100px: Text { text: @tr("File system"); width: 70px; color: Theme.text-muted; font-size: 11px; }
+                Text { text: @tr("Free"); width: 82px; horizontal-alignment: right; color: Theme.text-muted; font-size: 11px; }
+                Text { text: @tr("Total"); width: 82px; horizontal-alignment: right; color: Theme.text-muted; font-size: 11px; }
+                Text { text: @tr("Used"); width: root.width >= 1200px ? 240px : (root.width >= 1000px ? 180px : 100px); color: Theme.text-muted; font-size: 11px; }
             }
             ScrollView {
-                x: 12px; y: 206px; width: parent.width - 24px; height: parent.height - 222px;
+                x: 12px; y: 278px; width: parent.width - 24px; height: parent.height - 294px;
                 viewport-width: self.width; viewport-height: AppState.drives.length * 48px;
                 VerticalLayout {
                     spacing: 4px; padding-right: 10px;
@@ -1782,8 +1064,8 @@ export component MainWindow inherits Window {
                         }
                         ContextMenuArea {
                             Menu {
-                                MenuItem { title: "Open"; activated => { AppState.request_navigate(AppState.context-drive); } }
-                                MenuItem { title: "Analyze storage"; activated => { AppState.request-analyze(AppState.context-drive); } }
+                                MenuItem { title: @tr("Open"); activated => { AppState.request_navigate(AppState.context-drive); } }
+                                MenuItem { title: @tr("Analyze storage"); activated => { AppState.request-analyze(AppState.context-drive); } }
                             }
                         overview-drive-touch := NavTouchArea { secondary-clicked(x, y) => { AppState.context-drive = drive.path; parent.show({x: x, y: y}); } clicked => { home-focus.selected-drive = drive-index; home-focus.focus(); } double-clicked => { AppState.request_navigate(drive.path); } }
                         }
@@ -1792,6 +1074,8 @@ export component MainWindow inherits Window {
             }
         }
     }
+
+    if AppState.undo-visible: UndoDialog { dismissed => { list-scope.focus(); } }
 
     if AppState.storage-visible: Rectangle {
         x: Metrics.sidebar-width; y: Metrics.tabs-height + Metrics.toolbar-height + Metrics.actions-height;
@@ -1803,13 +1087,13 @@ export component MainWindow inherits Window {
             Timer { running: parent.pending; interval: 1ms; triggered => { parent.pending = false; storage-focus.focus(); } }
             key-pressed(event) => { if event.text == Key.Escape { AppState.cancel-analysis(); AppState.storage-visible = false; list-scope.focus(); accept } else { reject } }
         }
-        Text { x: 24px; y: 18px; text: "Storage analysis"; color: Theme.text-primary; font-size: 22px; font-weight: 600; }
+        Text { x: 24px; y: 18px; text: @tr("Storage analysis"); color: Theme.text-primary; font-size: 22px; font-weight: 600; }
         Text { x: 24px; y: 54px; width: parent.width - 48px; text: AppState.storage-path; color: Theme.text-muted; font-size: 12px; overflow: elide; }
-        TextButton { x: parent.width - 116px; y: 18px; text: "Close"; clicked => { AppState.cancel-analysis(); AppState.storage-visible = false; list-scope.focus(); } }
+        TextButton { x: parent.width - 116px; y: 18px; text: @tr("Close"); clicked => { AppState.cancel-analysis(); AppState.storage-visible = false; list-scope.focus(); } }
         TextButton { x: parent.width - 228px; y: 18px; text: AppState.storage-busy ? "Cancel scan" : "Scan again"; clicked => { if AppState.storage-busy { AppState.cancel-analysis(); } else { AppState.request-analyze(AppState.storage-path); } } }
         Text { x: 24px; y: 88px; text: AppState.storage-total; color: Theme.accent; font-size: 28px; font-weight: 600; }
         Text { x: 24px; y: 128px; width: parent.width - 48px; text: AppState.storage-status; color: Theme.text-muted; font-size: 12px; overflow: elide; }
-        Text { x: 24px; y: 162px; text: "Largest folders and files"; color: Theme.text-secondary; font-size: 13px; font-weight: 600; }
+        Text { x: 24px; y: 162px; text: @tr("Largest folders and files"); color: Theme.text-secondary; font-size: 13px; font-weight: 600; }
         ListView {
             x: 16px; y: 190px; width: parent.width - 32px; height: parent.height - self.y - 16px;
             for item in AppState.storage-items: Rectangle {
@@ -1834,11 +1118,11 @@ export component MainWindow inherits Window {
             width: Math.min(660px, parent.width - 48px); height: Math.min(540px, parent.height - 80px);
             background: Theme.content-bg; border-width: 1px; border-color: Theme.border; border-radius: 10px;
             TouchArea { }
-            Text { x: 24px; y: 20px; text: "Collections & tags"; color: Theme.text-primary; font-size: 22px; font-weight: 600; }
-            TextButton { x: parent.width - 96px; y: 16px; width: 72px; text: "Close"; clicked => { AppState.library-visible = false; list-scope.focus(); } }
+            Text { x: 24px; y: 20px; text: @tr("Collections & tags"); color: Theme.text-primary; font-size: 22px; font-weight: 600; }
+            TextButton { x: parent.width - 96px; y: 16px; width: 72px; text: @tr("Close"); clicked => { AppState.library-visible = false; list-scope.focus(); } }
             Text { x: 24px; y: 56px; text: AppState.selected_count + " selected. Organize references without moving files."; color: Theme.text-muted; font-size: 12px; }
             library-name := InputField {
-                x: 24px; y: 88px; width: parent.width - 48px; height: 36px; placeholder: "New collection or tag name"; text <=> AppState.library-name;
+                x: 24px; y: 88px; width: parent.width - 48px; height: 36px; placeholder: @tr("New collection or tag name"); text <=> AppState.library-name;
                 property <bool> pending: true;
                 Timer { running: parent.pending; interval: 1ms; triggered => { parent.pending = false; library-name.focus-field(); } }
                 accepted => { AppState.library-action(4, "", AppState.library-name); }
@@ -1846,9 +1130,9 @@ export component MainWindow inherits Window {
             }
             HorizontalLayout {
                 x: 24px; y: 136px; width: parent.width - 48px; height: 34px; spacing: 8px;
-                TextButton { text: "Create collection"; width: 144px; enabled: AppState.library-writable && AppState.library-name != ""; accent: true; clicked => { AppState.library-action(4, "", AppState.library-name); } }
-                TextButton { text: "Apply tag"; enabled: AppState.library-writable && AppState.library-name != ""; clicked => { AppState.library-action(5, "", AppState.library-name); } }
-                TextButton { text: "Pin folder"; enabled: AppState.library-writable; clicked => { AppState.library-action(0, "", ""); } }
+                TextButton { text: @tr("Create collection"); width: 144px; enabled: AppState.library-writable && AppState.library-name != ""; accent: true; clicked => { AppState.library-action(4, "", AppState.library-name); } }
+                TextButton { text: @tr("Apply tag"); enabled: AppState.library-writable && AppState.library-name != ""; clicked => { AppState.library-action(5, "", AppState.library-name); } }
+                TextButton { text: @tr("Pin folder"); enabled: AppState.library-writable; clicked => { AppState.library-action(0, "", ""); } }
                 Rectangle { horizontal-stretch: 1; }
             }
             Text { x: 24px; y: 180px; width: parent.width - 48px; text: AppState.library-error; color: Theme.danger; font-size: 12px; wrap: word-wrap; }
@@ -1858,83 +1142,17 @@ export component MainWindow inherits Window {
                     height: 48px;
                     Text { x: 0; y: 6px; width: parent.width - 228px; text: (group.tag ? "# " : "") + group.name; color: Theme.text-primary; font-size: 13px; overflow: elide; }
                     Text { x: 0; y: 26px; text: group.count + " references"; color: Theme.text-muted; font-size: 11px; }
-                    TextButton { x: parent.width - 222px; y: 7px; width: 70px; text: "Open"; clicked => { AppState.library-action(6, group.key, ""); } }
-                    TextButton { x: parent.width - 146px; y: 7px; width: 66px; text: "Add"; enabled: AppState.selected_count > 0 && AppState.library-writable; clicked => { AppState.library-action(group.tag ? 5 : 4, "", group.name); } }
-                    TextButton { x: parent.width - 74px; y: 7px; width: 60px; text: "Remove"; enabled: AppState.library-writable; clicked => { AppState.library-action(7, group.key, ""); } }
+                    TextButton { x: parent.width - 222px; y: 7px; width: 70px; text: @tr("Open"); clicked => { AppState.library-action(6, group.key, ""); } }
+                    TextButton { x: parent.width - 146px; y: 7px; width: 66px; text: @tr("Add"); enabled: AppState.selected_count > 0 && AppState.library-writable; clicked => { AppState.library-action(group.tag ? 5 : 4, "", group.name); } }
+                    TextButton { x: parent.width - 74px; y: 7px; width: 60px; text: @tr("Remove"); enabled: AppState.library-writable; clicked => { AppState.library-action(7, group.key, ""); } }
                 }
             }
-            TextButton { x: 24px; y: parent.height - 48px; width: 226px; text: "Remove selected references"; enabled: !AppState.filesystem-location && !AppState.drive-overview && AppState.selected_count > 0 && AppState.library-writable; clicked => { AppState.library-action(8, "", ""); } }
+            TextButton { x: 24px; y: parent.height - 48px; width: 226px; text: @tr("Remove selected references"); enabled: !AppState.filesystem-location && !AppState.drive-overview && AppState.selected_count > 0 && AppState.library-writable; clicked => { AppState.library-action(8, "", ""); } }
         }
     }
 
-    if AppState.transfers-visible: Rectangle {
-        background: #00000040;
-        TouchArea { clicked => { AppState.transfers-visible = false; list-scope.focus(); } }
-        Rectangle {
-            x: parent.width - self.width - 16px; y: parent.height - self.height - 44px;
-            width: Math.min(640px, parent.width - 40px); height: Math.min(540px, parent.height - 100px);
-            background: Theme.content-bg; border-width: 1px; border-color: Theme.border; border-radius: 9px;
-            TouchArea { }
-            transfer-focus := FocusScope {
-                property <bool> pending: true;
-                Timer { running: parent.pending; interval: 1ms; triggered => { parent.pending = false; transfer-focus.focus(); } }
-                key-pressed(event) => { if event.text == Key.Escape { AppState.transfers-visible = false; list-scope.focus(); accept } else { reject } }
-            }
-            Text { x: 20px; y: 20px; text: "Transfers"; color: Theme.text-primary; font-size: 22px; font-weight: 600; }
-            TextButton { x: parent.width - 212px; y: 18px; width: 108px; text: "Clear finished"; clicked => { AppState.clear-transfers(); } }
-            TextButton { x: parent.width - 96px; y: 18px; width: 76px; text: "Close"; clicked => { AppState.transfers-visible = false; list-scope.focus(); } }
-            if AppState.transfers.length == 0: Text { x: 20px; y: 86px; text: "Copy, move and delete operations appear here."; color: Theme.text-muted; font-size: 13px; }
-            ListView {
-                x: 14px; y: 70px; width: parent.width - 28px; height: parent.height - 84px;
-                for item in AppState.transfers: Rectangle {
-                    height: item.error != "" ? 186px : 162px;
-                    Rectangle { x: 0; y: 2px; width: parent.width - 14px; height: parent.height - 10px; border-radius: 6px; background: Theme.surface; }
-                    Text { x: 12px; y: 12px; text: item.title + " - " + item.status; color: Theme.text-primary; font-size: 13px; font-weight: 600; }
-                    if item.running: TextButton { x: parent.width - 102px; y: 8px; width: 72px; height: 28px; text: "Cancel"; clicked => { AppState.cancel-transfer(item.id); } }
-                    Text { x: 12px; y: 42px; width: parent.width - 44px; text: "From: " + item.source; color: Theme.text-muted; font-size: 11px; overflow: elide; }
-                    Text { x: 12px; y: 60px; width: parent.width - 44px; text: "To: " + item.destination; color: Theme.text-muted; font-size: 11px; overflow: elide; }
-                    Text { x: 12px; y: 80px; width: parent.width - 44px; text: item.current; color: Theme.text-secondary; font-size: 11px; overflow: elide; }
-                    Rectangle { x: 12px; y: 108px; width: parent.width - 44px; height: 5px; border-radius: 2px; background: Theme.window-bg;
-                        Rectangle { x: 0; y: 0; width: parent.width * item.progress; height: parent.height; border-radius: 2px; background: Theme.accent; visible: item.has-progress; }
-                    }
-                    Text { x: 12px; y: 124px; width: parent.width - 44px; text: item.detail; color: Theme.text-muted; font-size: 11px; overflow: elide; }
-                    if item.error != "": Text { x: 12px; y: 148px; width: parent.width - 44px; text: item.error; color: Theme.danger; font-size: 11px; overflow: elide; }
-                }
-            }
-        }
-    }
-    if AppState.conflict-visible: Rectangle {
-        background: #00000080;
-        TouchArea { }
-        Rectangle {
-            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-            width: Math.min(720px, parent.width - 48px); height: 360px;
-            background: Theme.content-bg; border-width: 1px; border-color: Theme.border; border-radius: 10px;
-            conflict-focus := FocusScope {
-                property <bool> pending: true;
-                Timer { running: parent.pending; interval: 1ms; triggered => { parent.pending = false; conflict-focus.focus(); } }
-                key-pressed(event) => { if event.text == Key.Escape { AppState.resolve-conflict(3, false); list-scope.focus(); accept } else { reject } }
-            }
-            Text { x: 24px; y: 22px; text: "A file with this name already exists"; color: Theme.text-primary; font-size: 21px; font-weight: 600; }
-            Text { x: 24px; y: 60px; text: "Choose what to keep. Nothing is overwritten until you choose Replace."; color: Theme.text-muted; font-size: 12px; }
-            for label[index] in ["Existing", "Incoming"]: Rectangle {
-                x: 24px + index * ((parent.width - 60px) / 2 + 12px); y: 100px;
-                width: (parent.width - 60px) / 2; height: 140px; border-radius: 6px; background: Theme.surface;
-                Text { x: 14px; y: 12px; text: label; color: index == 1 ? Theme.accent : Theme.text-secondary; font-weight: 600; font-size: 13px; }
-                Text { x: 14px; y: 40px; width: parent.width - 28px; height: 48px; text: index == 0 ? AppState.conflict-existing : AppState.conflict-incoming; color: Theme.text-primary; font-size: 12px; wrap: word-wrap; overflow: elide; }
-                Text { x: 14px; y: 100px; width: parent.width - 28px; text: index == 0 ? AppState.conflict-existing-info : AppState.conflict-incoming-info; color: Theme.text-muted; font-size: 11px; wrap: word-wrap; }
-            }
-            CheckBox { x: 24px; y: 256px; text: "Apply to all file conflicts in this operation"; checked <=> AppState.conflict-all; }
-            HorizontalLayout {
-                x: 24px; y: 304px; width: parent.width - 48px; height: 34px; spacing: 10px;
-                TextButton { text: "Cancel"; clicked => { AppState.resolve-conflict(3, false); list-scope.focus(); } }
-                Rectangle { horizontal-stretch: 1; }
-                TextButton { text: "Skip"; clicked => { AppState.resolve-conflict(1, AppState.conflict-all); list-scope.focus(); } }
-                TextButton { text: "Keep Both"; accent: true; clicked => { AppState.resolve-conflict(2, AppState.conflict-all); list-scope.focus(); } }
-                TextButton { text: "Replace"; clicked => { AppState.resolve-conflict(0, AppState.conflict-all); list-scope.focus(); } }
-            }
-        }
-    }
+    if AppState.transfers-visible: OperationCenter { dismissed => { list-scope.focus(); } }
+    if AppState.conflict-visible: ConflictDialog { dismissed => { list-scope.focus(); } }
 
     NameDialog { changed visible => { if !self.visible { list-scope.focus(); } } }
     Rectangle { background: transparent; border-width: root.window-maximized ? 0px : 1px; border-color: Theme.border; }
@@ -1947,4 +1165,18 @@ export component MainWindow inherits Window {
     ResizeEdge { x: root.width - 20px; y: root.height - 20px; width: 20px; height: 20px; direction: 3; enabled: !root.window-maximized; resize(d) => { root.resize-window(d); } }
     ResizeEdge { x: 0; y: root.height - 16px; width: 16px; height: 16px; direction: 5; enabled: !root.window-maximized; resize(d) => { root.resize-window(d); } }
     ResizeEdge { x: 0; y: 0; width: 16px; height: 16px; direction: 7; enabled: !root.window-maximized; resize(d) => { root.resize-window(d); } }
+    if AppState.drop-feedback != "": Rectangle {
+        x: Math.max(Metrics.sidebar-width, (root.width - self.width) / 2); y: root.height - 86px;
+        width: Math.min(620px, root.width - Metrics.sidebar-width - 20px); height: 40px;
+        background: Theme.selection; border-width: 1px; border-color: Theme.accent; border-radius: 6px;
+        Text { x:12px; width:parent.width - 24px; height:parent.height; text:AppState.drop-feedback; color:Theme.text-primary; font-size:14px; vertical-alignment:center; overflow:elide; }
+    }
+    if AppState.tooltip != "": Rectangle {
+        x: Math.clamp(AppState.tooltip-x, 8px, root.width - self.width - 8px);
+        y: Math.min(AppState.tooltip-y, root.height - 42px);
+        width: tip-label.preferred-width + 20px; height: 30px;
+        background: Theme.surface-pressed; border-radius: 5px; border-width: 1px; border-color: Theme.border;
+        tip-label := Text { text: AppState.tooltip; color: Theme.text-primary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+    }
+
 }

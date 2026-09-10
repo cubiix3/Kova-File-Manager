@@ -53,7 +53,8 @@ New `unsafe` blocks require a `SAFETY:` comment. The legacy ShellExecuteExW laun
 
 ### kova-ops
 
-- `enumerate_directory`: Tokio-based async directory read
+- `enumerate_directory`: one cancellable blocking Windows read on the Tokio pool
+- `enumerate_tree`: asynchronous, cancellable traversal without following reparse/offline directories
 - `new_folder`, `rename`, `open_with_default_handler`
 - `TestSandbox`: integration test root guard
 - `worker`: command/event bridge
@@ -65,7 +66,14 @@ Filesystem I/O happens on the Tokio runtime, not the UI thread.
 - Slint `.slint` UI files
 - `app_state`: UI-facing controller and view model
 - `bridges`: command dispatcher with generation IDs
-- `main.rs`: event loop wiring
+- `main.rs`: event-loop and worker wiring
+- `callbacks`, `sidebar`, `ui_sync`: navigation actions and UI synchronization
+- `search`: background filtering with generations and reusable sort order
+- `file_model`: shared immutable snapshots and bounded, lazy Slint rows
+- `preferences`: versioned session capture and debounced atomic persistence
+- `keyboard`, `drag_drop`, `operations`: native interaction boundaries
+- `shared.slint`, `controls.slint`, `search.slint`, `inspector.slint`,
+  `operations.slint`: coherent view components, with `main.slint` composing them
 
 Contains no direct `std::fs` calls from callbacks.
 
@@ -99,7 +107,7 @@ UI state update
 | tokio | Async runtime for filesystem worker; single runtime choice. |
 | tracing | Structured logging with environment-filtered levels. |
 | thiserror | Concise, maintainable error enum definitions. |
-| chrono | Localized date/time formatting for file metadata. |
+| chrono | Typed timestamps and local-calendar search boundaries; Windows APIs format metadata. |
 | bitflags | Reserved for future attribute flags. |
 | uuid | Unique sandbox directory names in tests. |
 
@@ -109,16 +117,16 @@ See `docs/SECURITY_AND_DATA_SAFETY.md`.
 
 ## Build Helper
 
-`scripts/cargo-msvc.ps1` locates Visual Studio 2022, imports the `vcvars64.bat`
+`scripts/cargo-msvc.ps1` uses vswhere to locate a C++-capable Visual Studio or
+Build Tools installation (including Program Files (x86)), imports `vcvars64.bat`
 environment, and runs the requested cargo command. This removes the need to
 start a dedicated VS developer shell.
 
 ## Deferred
 
 - MFT / USN global search
-- Thumbnails
 - Explicit permanent-delete UI
-- Preview pane, split view, Git integration, cloud paths
+- Split view, batch rename, Git integration, virtual cloud-file streams
 - Plugins, auto updater, telemetry
 
 

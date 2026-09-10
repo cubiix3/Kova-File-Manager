@@ -13,7 +13,9 @@ require both options. Extension hiding changes the displayed name only; opening,
 renaming and other operations keep the complete path. Filtering reuses cached
 entries in all tabs, remaps selection by path and excludes invisible items from
 Select All and subsequent operations. Icons are queued when entries become visible.
-Preferences are stored on normal app exit in `%LOCALAPPDATA%\Kova\view-options.txt`.
+Workspace and view preferences are saved after a short debounce to
+`%LOCALAPPDATA%\Kova\session.json` using atomic replacement on a worker thread.
+The legacy `view-options.txt` is imported when no session file exists.
 
 ## Preview pane
 

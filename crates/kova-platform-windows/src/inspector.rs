@@ -49,7 +49,10 @@ pub fn read(path: &Path) -> Vec<(String, String)> {
         },
     ));
     if !metadata.is_dir() {
-        rows.push(("Size".into(), format!("{} bytes", metadata.len())));
+        rows.push((
+            "Size".into(),
+            format!("{} bytes", crate::formatting::integer(metadata.len())),
+        ));
     }
     if !ext.is_empty() && !metadata.is_dir() {
         rows.push(("Extension".into(), format!(".{ext}")));
@@ -60,7 +63,7 @@ pub fn read(path: &Path) -> Vec<(String, String)> {
     ] {
         if let Ok(date) = date {
             let date: chrono::DateTime<chrono::Local> = date.into();
-            rows.push((label.into(), date.format("%d %b %Y, %H:%M:%S").to_string()));
+            rows.push((label.into(), crate::formatting::date(date, true)));
         }
     }
     // Do not hydrate cloud placeholders or follow reparse points merely to

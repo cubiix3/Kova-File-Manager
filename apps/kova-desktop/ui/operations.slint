@@ -1,0 +1,116 @@
+import { ListView, CheckBox } from "std-widgets.slint";
+import { AppState, Theme } from "shared.slint";
+import { TextButton } from "controls.slint";
+
+export component UndoDialog inherits Rectangle {
+    visible: AppState.undo-visible;
+    callback dismissed();
+
+        background: #0008;
+        TouchArea { }
+        Rectangle {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: Math.min(560px, parent.width - 48px); height: 210px;
+            background: Theme.surface; border-radius: 10px; border-width: 1px; border-color: Theme.border;
+            VerticalLayout {
+                padding: 24px; spacing: 16px;
+                Text { text: @tr("Undo operation"); font-size: 20px; color: Theme.text-primary; }
+                Text { text: AppState.undo-description; wrap: char-wrap; color: Theme.text-secondary; }
+                HorizontalLayout {
+                    Rectangle { horizontal-stretch: 1; }
+                    TextButton { text: @tr("Cancel"); clicked => { AppState.undo-visible = false; root.dismissed(); } }
+                    TextButton { text: @tr("Undo"); clicked => { AppState.confirm-undo(); AppState.undo-visible = false; root.dismissed(); } }
+                }
+            }
+            undo-focus := FocusScope {
+                property <bool> initial: true;
+                Timer { running: parent.initial; interval: 1ms; triggered => { parent.initial = false; undo-focus.focus(); } }
+                key-pressed(event) => {
+                    if event.text == Key.Escape { AppState.undo-visible = false; root.dismissed(); accept }
+                    else if event.text == Key.Return { AppState.confirm-undo(); AppState.undo-visible = false; root.dismissed(); accept }
+                    else { reject }
+                }
+            }
+        }
+    }
+
+export component OperationCenter inherits Rectangle {
+    visible: AppState.transfers-visible;
+    callback dismissed();
+
+        background: #00000040;
+        TouchArea { clicked => { AppState.transfers-visible = false; root.dismissed(); } }
+        Rectangle {
+            x: parent.width - self.width - 16px; y: parent.height - self.height - 44px;
+            width: Math.min(640px, parent.width - 40px); height: Math.min(540px, parent.height - 100px);
+            background: Theme.content-bg; border-width: 1px; border-color: Theme.border; border-radius: 9px;
+            TouchArea { }
+            transfer-focus := FocusScope {
+                property <bool> pending: true;
+                Timer { running: parent.pending; interval: 1ms; triggered => { parent.pending = false; transfer-focus.focus(); } }
+                key-pressed(event) => { if event.text == Key.Escape { AppState.transfers-visible = false; root.dismissed(); accept } else { reject } }
+            }
+            Text { x: 20px; y: 20px; text: @tr("Transfers"); color: Theme.text-primary; font-size: 22px; font-weight: 600; }
+            TextButton { x: parent.width - 212px; y: 18px; width: 108px; text: @tr("Clear finished"); clicked => { AppState.clear-transfers(); } }
+            TextButton { x: parent.width - 96px; y: 18px; width: 76px; text: @tr("Close"); clicked => { AppState.transfers-visible = false; root.dismissed(); } }
+            if AppState.transfers.length == 0: Text { x: 20px; y: 86px; text: @tr("Copy, move and delete operations appear here."); color: Theme.text-muted; font-size: 13px; }
+            ListView {
+                x: 14px; y: 70px; width: parent.width - 28px; height: parent.height - 84px;
+                for item in AppState.transfers: Rectangle {
+                    height: item.error != "" ? 186px : 162px;
+                    Rectangle { x: 0; y: 2px; width: parent.width - 14px; height: parent.height - 10px; border-radius: 6px; background: Theme.surface; }
+                    Text { x: 12px; y: 12px; text: item.title + " - " + item.status; color: Theme.text-primary; font-size: 13px; font-weight: 600; }
+                    if item.running: TextButton { x: parent.width - 102px; y: 8px; width: 72px; height: 28px; text: @tr("Cancel"); clicked => { AppState.cancel-transfer(item.id); } }
+                    Text { x: 12px; y: 42px; width: parent.width - 44px; text: "From: " + item.source; color: Theme.text-muted; font-size: 11px; overflow: elide; }
+                    Text { x: 12px; y: 60px; width: parent.width - 44px; text: "To: " + item.destination; color: Theme.text-muted; font-size: 11px; overflow: elide; }
+                    Text { x: 12px; y: 80px; width: parent.width - 44px; text: item.current; color: Theme.text-secondary; font-size: 11px; overflow: elide; }
+                    Rectangle { x: 12px; y: 108px; width: parent.width - 44px; height: 5px; border-radius: 2px; background: Theme.window-bg;
+                        Rectangle { x: 0; y: 0; width: parent.width * item.progress; height: parent.height; border-radius: 2px; background: Theme.accent; visible: item.has-progress; }
+                    }
+                    Text { x: 12px; y: 124px; width: parent.width - 44px; text: item.detail; color: Theme.text-muted; font-size: 11px; overflow: elide; }
+                    if item.error != "": Text { x: 12px; y: 148px; width: parent.width - 44px; text: item.error; color: Theme.danger; font-size: 11px; overflow: elide; }
+                }
+            }
+        }
+    }
+
+export component ConflictDialog inherits Rectangle {
+    visible: AppState.conflict-visible;
+    callback dismissed();
+
+        background: #00000080;
+        TouchArea { }
+        Rectangle {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: Math.min(720px, parent.width - 48px); height: 360px;
+            background: Theme.content-bg; border-width: 1px; border-color: Theme.border; border-radius: 10px;
+            conflict-focus := FocusScope {
+                property <bool> pending: true;
+                Timer { running: parent.pending; interval: 1ms; triggered => { parent.pending = false; conflict-focus.focus(); } }
+                key-pressed(event) => { if event.text == Key.Escape { AppState.resolve-conflict(3, false); root.dismissed(); accept } else { reject } }
+            }
+            Text { x: 24px; y: 22px; text: @tr("A file with this name already exists"); color: Theme.text-primary; font-size: 21px; font-weight: 600; }
+            Text { x: 24px; y: 60px; text: @tr("Choose what to keep. Nothing is overwritten until you choose Replace."); color: Theme.text-muted; font-size: 12px; }
+            for label[index] in ["Existing", "Incoming"]: Rectangle {
+                x: 24px + index * ((parent.width - 60px) / 2 + 12px); y: 100px;
+                width: (parent.width - 60px) / 2; height: 140px; border-radius: 6px; background: Theme.surface;
+                Text { x: 14px; y: 12px; text: label; color: index == 1 ? Theme.accent : Theme.text-secondary; font-weight: 600; font-size: 13px; }
+                Text { x: 14px; y: 36px; width: parent.width - 28px; height: 24px; text: index == 0 ? AppState.conflict-existing-name : AppState.conflict-incoming-name; color: Theme.text-primary; font-size: 13px; font-weight: 600; overflow: elide; }
+                Text { x: 14px; y: 62px; width: parent.width - 28px; height: 34px; text: index == 0 ? AppState.conflict-existing : AppState.conflict-incoming; color: Theme.text-secondary; font-size: 11px; wrap: char-wrap; overflow: elide; }
+                accessible-role: text;
+                accessible-label: label + ": " + (index == 0 ? AppState.conflict-existing : AppState.conflict-incoming);
+                accessible-description: index == 0 ? AppState.conflict-existing-info : AppState.conflict-incoming-info;
+                Text { x: 14px; y: 100px; width: parent.width - 28px; text: index == 0 ? AppState.conflict-existing-info : AppState.conflict-incoming-info; color: Theme.text-muted; font-size: 11px; wrap: word-wrap; }
+            }
+            CheckBox { x: 24px; y: 256px; text: @tr("Apply to all file conflicts in this operation"); checked <=> AppState.conflict-all; }
+            HorizontalLayout {
+                x: 24px; y: 304px; width: parent.width - 48px; height: 34px; spacing: 10px;
+                TextButton { text: @tr("Cancel"); clicked => { AppState.resolve-conflict(3, false); root.dismissed(); } }
+                Rectangle { horizontal-stretch: 1; }
+                TextButton { text: @tr("Skip"); clicked => { AppState.resolve-conflict(1, AppState.conflict-all); root.dismissed(); } }
+                TextButton { text: @tr("Keep Both"); accent: true; clicked => { AppState.resolve-conflict(2, AppState.conflict-all); root.dismissed(); } }
+                TextButton { text: @tr("Replace"); clicked => { AppState.resolve-conflict(0, AppState.conflict-all); root.dismissed(); } }
+            }
+        }
+    }
+

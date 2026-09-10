@@ -5,12 +5,24 @@ on:
     branches: [release/windows-installer]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      verify_package_run:
+        description: 'Optional: verify UI of an existing successful Windows packages run'
+        required: false
+        type: string
+      capture_demo:
+        description: 'Capture product views after the interactive tests'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   package:
+    if: inputs.verify_package_run == ''
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +63,55 @@ jobs:
         with:
           name: kova-windows-x64
           path: dist/*
+          if-no-files-found: error
+
+  interactive-verification:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_package_run != ''
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: kova-windows-x64
+          run-id: ${{ inputs.verify_package_run }}
+          github-token: ${{ github.token }}
+          path: target/ui-download
+      - name: Verify package provenance and checksums
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_RUN: ${{ inputs.verify_package_run }}
+        run: |
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:PACKAGE_RUN" | ConvertFrom-Json
+          if ($run.conclusion -ne 'success' -or $run.path -ne '.github/workflows/release.yml') { throw 'Expected a successful Windows packages run' }
+          "Package source: $($run.head_sha)" | Set-Content target/ui-download/provenance.txt
+          foreach ($line in Get-Content target/ui-download/SHA256SUMS.txt) {
+            if ($line -notmatch '^([a-fA-F0-9]{64})  (Kova[-A-Za-z0-9.]+)$') { throw 'Invalid package checksum entry' }
+            if ((Get-FileHash -LiteralPath (Join-Path target/ui-download $Matches[2])).Hash -ne $Matches[1]) { throw 'Package checksum mismatch' }
+          }
+          $zips = @(Get-ChildItem target/ui-download/Kova-*-x64.zip)
+          if ($zips.Count -ne 1) { throw 'Expected one portable package' }
+          Expand-Archive -LiteralPath $zips[0].FullName -DestinationPath target/ui-package
+      - name: Exercise keyboard, accessibility and native drag/drop
+        shell: powershell
+        run: ./scripts/test-ui.ps1 -Executable target/ui-package/Kova.exe
+      - name: Measure real large-folder UI behavior
+        shell: powershell
+        run: ./scripts/benchmark-ui.ps1 -Executable target/ui-package/Kova.exe -PrepareFixtures
+      - name: Capture real product windows and conflict flow
+        if: inputs.capture_demo
+        shell: powershell
+        run: ./scripts/capture-demo.ps1 -Executable target/ui-package/Kova.exe
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: kova-ui-verification
+          path: |
+            target/runtime/ui-test-*/
+            target/runtime/ui-benchmark/
+            target/runtime/demo-*/
+            target/ui-download/provenance.txt
           if-no-files-found: error
 
   release:

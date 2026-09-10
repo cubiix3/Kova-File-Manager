@@ -1,13 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Helper that runs a cargo command inside a Visual Studio 2022 x64 dev shell.
+    Helper that runs a cargo command inside an installed Visual Studio x64 dev shell.
 
 .DESCRIPTION
     Kova links against the Windows C++ runtime, so cargo needs the LIB/PATH
-    environment set by vcvars64.bat. This script discovers a VS2022 install
-    (preferring Community, then Professional, then Enterprise) and runs the
-    requested cargo command with the environment initialized.
+    environment set by vcvars64.bat. vswhere discovers the newest suitable
+    installation, including standalone Build Tools in Program Files (x86).
 
     It avoids calling the system `cmd` command because some environments have a
     Node wrapper at `cmd` that breaks argument parsing.
@@ -15,32 +14,26 @@
 .EXAMPLE
     .\scripts\cargo-msvc.ps1 test --workspace
     .\scripts\cargo-msvc.ps1 build --release
+    .\scripts\cargo-msvc.ps1 -CargoArgs @('clippy','--workspace','--','-D','warnings')
 #>
 param(
-    [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
-    [string[]]$CargoArgs
+    [string[]]$CargoArgs = @()
 )
+
+# Stay a simple script: advanced PowerShell binding consumes Cargo's -p as
+# the common -PipelineVariable parameter. Preserve all remaining Cargo flags.
+$CargoArgs = @($CargoArgs) + @($args)
+if ($CargoArgs.Count -eq 0) { throw 'Pass a Cargo command, for example: build --workspace' }
 
 $ErrorActionPreference = "Stop"
 
 function Find-VsVarsBatch {
-    # Visual Studio changed its installation layout over time: classic
-    # releases live under a four-digit year folder ("2022"), newer ones
-    # under a version-number folder ("18"). Probe every installed root and
-    # edition instead of hard-coding a single layout.
-    $roots = @()
-    $vsDir = "C:\Program Files\Microsoft Visual Studio"
-    if (Test-Path $vsDir) {
-        $roots = Get-ChildItem -LiteralPath $vsDir -Directory |
-            Sort-Object Name -Descending |
-            ForEach-Object { $_.FullName }
-    }
-    foreach ($root in $roots) {
-        foreach ($edition in @("Community", "Professional", "Enterprise")) {
-            $candidate = Join-Path $root "$edition\VC\Auxiliary\Build\vcvars64.bat"
-            if (Test-Path $candidate) {
-                return $candidate
-            }
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (Test-Path -LiteralPath $vswhere) {
+        $installations = & $vswhere -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -sort -property installationPath
+        foreach ($installation in $installations) {
+            $candidate = Join-Path $installation 'VC\Auxiliary\Build\vcvars64.bat'
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
         }
     }
     throw "vcvars64.bat not found. Install Visual Studio with the Desktop development with C++ workload."
@@ -74,10 +67,11 @@ foreach ($key in $after.Keys) {
     }
 }
 
-Write-Host "Visual Studio 2022 x64 environment loaded from: $vcvars" -ForegroundColor Cyan
+Write-Host "Visual Studio x64 environment loaded from: $vcvars" -ForegroundColor Cyan
 
 # If the user typed `cargo-msvc.ps1 cargo test ...`, drop the leading "cargo".
 if ($CargoArgs[0] -eq "cargo") {
+    if ($CargoArgs.Length -eq 1) { throw 'Pass a Cargo subcommand after cargo.' }
     $CargoArgs = $CargoArgs[1..($CargoArgs.Length - 1)]
 }
 

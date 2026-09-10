@@ -17,7 +17,8 @@ pub fn connect(
     models: Rc<UiModels>,
 ) -> slint::Timer {
     let (requests, input) = mpsc::sync_channel::<(u64, Vec<PathBuf>)>(1);
-    let (results, output) = mpsc::sync_channel::<(u64, PathBuf, (Option<u64>, String))>(64);
+    let (results, output) =
+        mpsc::sync_channel::<(u64, PathBuf, Option<kova_core::domain::EffectiveSize>)>(64);
     let generation = Arc::new(AtomicU64::new(0));
     let latest = generation.clone();
     let worker = std::thread::Builder::new()
@@ -29,19 +30,14 @@ pub fn connect(
                         break;
                     }
                     let label = if !kova_platform_windows::folder_size::is_local_fixed(&path) {
-                        (None, "Local only".into())
+                        None
                     } else {
-                        match kova_platform_windows::folder_size::calculate(&path, &latest, id) {
-                            Ok(size) => (
-                                Some(size.bytes),
-                                format!(
-                                    "{}{}",
-                                    if size.complete { "" } else { "≥ " },
-                                    crate::format_bytes(size.bytes)
-                                ),
-                            ),
-                            Err(_) => (None, "Unavailable".into()),
-                        }
+                        kova_platform_windows::folder_size::calculate(&path, &latest, id)
+                            .ok()
+                            .map(|size| kova_core::domain::EffectiveSize {
+                                bytes: size.bytes,
+                                complete: size.complete,
+                            })
                     };
                     if results.send((id, path, label)).is_err() {
                         return;
@@ -73,19 +69,10 @@ pub fn connect(
             let mut dirty = false;
             if last_key.as_ref() != Some(&key) {
                 let id = generation.fetch_add(1, Ordering::Relaxed) + 1;
+                dirty = !ctrl.folder_sizes.is_empty();
                 ctrl.folder_sizes.clear();
-                dirty = true;
                 if key.0 && !key.5 {
-                    let paths: Vec<_> = ctrl
-                        .snapshot()
-                        .map(|s| {
-                            s.entries
-                                .iter()
-                                .filter(|e| e.is_directory())
-                                .map(|e| e.path.clone())
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let paths = ctrl.folder_size_paths();
                     if requests.try_send((id, paths)).is_ok() {
                         last_key = Some(key);
                     }
@@ -101,6 +88,8 @@ pub fn connect(
                 }
             }
             if dirty {
+                let tab = ctrl.active_tab_id();
+                ctrl.refilter(Some(tab));
                 update_ui(&ui, &ctrl, &last_address, &models);
             }
         },

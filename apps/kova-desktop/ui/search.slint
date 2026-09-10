@@ -1,0 +1,62 @@
+import { AppState, Theme } from "shared.slint";
+import { InputField, TextButton } from "controls.slint";
+import { CheckBox } from "std-widgets.slint";
+
+export component SearchBar inherits Rectangle {
+    height: 104px;
+    background: Theme.sidebar-bg;
+    callback finished();
+    public function focus-field() { input.focus-field(); }
+    public function select-all-text() { input.select-all-text(); }
+    Text { x: 20px; y: 10px; height: 26px; width: parent.width - input.width - 60px; text: AppState.tabs[AppState.active_tab] + (AppState.search-recursive ? " · Subfolders" : " · Current folder"); font-size: 18px; font-weight: 600; color: Theme.text-primary; overflow: elide; }
+    Text { x: 20px; y: 36px; height: 20px; width: parent.width - input.width - 60px; text: AppState.search-recursive && AppState.loading ? AppState.search-progress : @tr("{n} item" | "{n} items" % AppState.item_count) + (AppState.selected_count > 0 ? " · " + AppState.selected_count + " selected" : ""); font-size: 12px; color: Theme.text-muted; overflow: elide; }
+    input := InputField {
+        x: parent.width - self.width - 16px; y: 12px;
+        width: Math.clamp(parent.width * 0.45, 240px, 460px); height: 36px;
+        placeholder: @tr("Search by name…");
+        text <=> AppState.search-text;
+        edited(value) => { AppState.request-search(value); }
+        accepted => { root.finished(); }
+        cancelled => { AppState.request-search(""); root.finished(); }
+    }
+    HorizontalLayout {
+        x: 20px; y: 62px; height: 30px; width: parent.width - 36px; spacing: 8px;
+        type-menu := ContextMenuArea {
+            width: 104px;
+            Menu {
+                MenuItem { title: @tr("All types"); activated => { AppState.request-filter(0,0); } }
+                MenuItem { title: @tr("Images"); activated => { AppState.request-filter(0,1); } }
+                MenuItem { title: @tr("Documents"); activated => { AppState.request-filter(0,2); } }
+                MenuItem { title: @tr("Video"); activated => { AppState.request-filter(0,3); } }
+                MenuItem { title: @tr("Audio"); activated => { AppState.request-filter(0,4); } }
+                MenuItem { title: @tr("Folders"); activated => { AppState.request-filter(0,5); } }
+                MenuItem { title: @tr("Archives"); activated => { AppState.request-filter(0,6); } }
+            }
+            TextButton { width: parent.width; height: 30px; text: ["Type: All", "Images", "Documents", "Video", "Audio", "Folders", "Archives"][AppState.filter-type]; clicked => { type-menu.show({x:0px,y:30px}); } }
+        }
+        size-menu := ContextMenuArea {
+            width: 104px;
+            Menu {
+                MenuItem { title: @tr("Any size"); activated => { AppState.request-filter(1,0); } }
+                MenuItem { title: @tr("Under 1 MiB"); activated => { AppState.request-filter(1,1); } }
+                MenuItem { title: @tr("Over 100 MiB"); activated => { AppState.request-filter(1,2); } }
+                MenuItem { title: @tr("Over 1 GiB"); activated => { AppState.request-filter(1,3); } }
+            }
+            TextButton { width: parent.width; height: 30px; text: ["Size: Any", "< 1 MiB", "> 100 MiB", "> 1 GiB"][AppState.filter-size]; clicked => { size-menu.show({x:0px,y:30px}); } }
+        }
+        date-menu := ContextMenuArea {
+            width: 104px;
+            Menu {
+                MenuItem { title: @tr("Any date"); activated => { AppState.request-filter(2,0); } }
+                MenuItem { title: @tr("Today"); activated => { AppState.request-filter(2,1); } }
+                MenuItem { title: @tr("This week"); activated => { AppState.request-filter(2,2); } }
+                MenuItem { title: @tr("This month"); activated => { AppState.request-filter(2,3); } }
+            }
+            TextButton { width: parent.width; height: 30px; text: ["Date: Any", "Today", "This week", "This month"][AppState.filter-date]; clicked => { date-menu.show({x:0px,y:30px}); } }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        CheckBox { text: @tr("Include subfolders"); enabled: AppState.filesystem-location; checked: AppState.search-recursive; toggled => { AppState.request-search-scope(self.checked); } }
+        if AppState.search-recursive && AppState.loading: TextButton { width: 62px; height: 30px; text: @tr("Cancel"); clicked => { AppState.request-search-scope(false); } }
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Theme.border; }
+}

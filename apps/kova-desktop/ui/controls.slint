@@ -1,0 +1,518 @@
+import { Theme, Breadcrumb, InfoItem, StorageItem, LibraryItem, TransferItem, FileListItem, DriveItem, AppState, Metrics } from "shared.slint";
+import { FilesNavBack, FilesNavForward, FilesNavUp, FilesRefresh, FilesCut, FilesCopy, FilesPaste, FilesRename, FilesDelete } from "files-icons.slint";
+import { ListView, ScrollView, CheckBox } from "std-widgets.slint";
+
+export component DropZone inherits Rectangle {
+    in property <string> target;
+    in property <int> priority: 1;
+    in property <length> clip-top: 0px;
+    in property <length> clip-bottom: 100000px;
+    in property <length> clip-left: 0px;
+    in property <length> clip-right: 100000px;
+    property <int> epoch: AppState.drop-epoch;
+    changed epoch => {
+        if root.visible && root.target != "" {
+            let x = Math.max(root.absolute-position.x, root.clip-left);
+            let y = Math.max(root.absolute-position.y, root.clip-top);
+            let right = Math.min(root.absolute-position.x + root.width, root.clip-right);
+            let bottom = Math.min(root.absolute-position.y + root.height, root.clip-bottom);
+            AppState.register-drop-zone(self.epoch, root.target, x / 1px, y / 1px, (right - x) / 1px, (bottom - y) / 1px, root.priority);
+        }
+    }
+    border-width: AppState.drop-path == root.target && AppState.drop-feedback != "" ? 2px : 0px;
+    border-color: Theme.accent;
+}
+
+export component HoverTip inherits Rectangle {
+    in property <string> text;
+    in property <bool> hovered;
+    property <bool> ready: false;
+    changed hovered => { self.ready = false; if !self.hovered && AppState.tooltip == self.text { AppState.tooltip = ""; } }
+    Timer { running: root.hovered && !root.ready; interval: 600ms; triggered => { root.ready = true; AppState.tooltip = root.text; AppState.tooltip-x = root.absolute-position.x; AppState.tooltip-y = root.absolute-position.y + root.height + 6px; } }
+}
+
+// TouchArea that additionally reacts to the mouse back/forward buttons
+// (XBUTTON1 / XBUTTON2), exactly like the toolbar navigation buttons.
+// Slint TouchAreas always grab non-primary button presses, so every
+// interactive region uses this component to keep global mouse navigation
+// working; a press that nothing grabs bubbles up to the region wrappers.
+export component NavTouchArea inherits TouchArea {
+    callback secondary-clicked(length, length);
+    pointer-event(event) => {
+        if event.kind == PointerEventKind.up && event.button == PointerEventButton.right { root.secondary-clicked(self.mouse-x, self.mouse-y); }
+        if event.kind == PointerEventKind.down && !AppState.dialog_visible {
+            if event.button == PointerEventButton.back {
+                AppState.request_back();
+            } else if event.button == PointerEventButton.forward {
+                AppState.request_forward();
+            }
+        }
+    }
+}
+
+// --- Vector glyphs (viewbox 16x16 unless noted, self-centering) ------------
+// All icons accept a `tint` so disabled states can dim them.
+
+export component IconFolderNew inherits Path {
+    in property <color> tint: Theme.text-secondary;
+    width: 16px;
+    height: 16px;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    fill: root.tint;
+    commands: "M 1.5 4.4 C 1.5 3.5 2.2 2.8 3.1 2.8 L 6 2.8 L 7.2 4.3 L 12.9 4.3 C 13.8 4.3 14.5 5 14.5 5.9 L 14.5 11.6 C 14.5 12.5 13.8 13.2 12.9 13.2 L 3.1 13.2 C 2.2 13.2 1.5 12.5 1.5 11.6 Z";
+}
+
+// Small close glyph for tab chips (viewbox 10x10).
+export component IconClose inherits Path {
+    in property <color> tint: Theme.text-muted;
+    width: 12px;
+    height: 12px;
+    viewbox-width: 10;
+    viewbox-height: 10;
+    fill: transparent;
+    stroke: root.tint;
+    stroke-width: 1.3px;
+    commands: "M 2 2 L 8 8 M 8 2 L 2 8";
+}
+
+// Small plus glyph for the new-tab button (viewbox 10x10).
+export component IconPlus inherits Path {
+    in property <color> tint: Theme.text-secondary;
+    width: 14px;
+    height: 14px;
+    viewbox-width: 10;
+    viewbox-height: 10;
+    fill: transparent;
+    stroke: root.tint;
+    stroke-width: 1.4px;
+    commands: "M 5 1.5 L 5 8.5 M 1.5 5 L 8.5 5";
+}
+
+// Large outline folder for the empty state (viewbox 24x24).
+export component IconEmptyFolder inherits Path {
+    width: 44px;
+    height: 44px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    fill: transparent;
+    stroke: Theme.text-disabled;
+    stroke-width: 1.6px;
+    commands: "M 3 7.5 C 3 6.4 3.9 5.1 5 5.1 L 8.6 5.1 L 10.8 7.6 L 19 7.6 C 20.1 7.6 21 8.5 21 9.6 L 21 16.5 C 21 17.6 20.1 18.9 19 18.9 L 5 18.9 C 3.9 18.9 3 17.6 3 16.5 Z";
+}
+
+// --- Controls --------------------------------------------------------------
+
+// Square 32x32 navigation button (Back / Forward / Up). The glyph is passed
+// as a child and must be centered by the caller.
+export component NavIconButton inherits Rectangle {
+    in property <string> label;
+    in property <string> shortcut;
+    accessible-role: button; accessible-label: root.label; accessible-description: root.shortcut; accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    forward-focus: nav-focus;
+    nav-focus := FocusScope { key-pressed(event) => { if root.enabled && (event.text == Key.Return || event.text == " ") { root.clicked(); accept } else { reject } } }
+    border-width: nav-focus.has-focus ? 1px : 0px; border-color: Theme.accent;
+    HoverTip { text: root.label + (root.shortcut == "" ? "" : " · " + root.shortcut); hovered: btn-ta.has-hover; }
+
+    in property <bool> enabled: true;
+    callback clicked();
+
+    // Explicit width: without it the toolbar layout stretches the button.
+    width: 32px;
+    height: 32px;
+    border-radius: Metrics.radius-md;
+    background: !enabled
+        ? transparent
+        : (btn-ta.pressed ? Theme.surface-pressed : (btn-ta.has-hover ? Theme.surface-hover : transparent));
+
+    btn-ta := NavTouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    @children
+}
+
+// Compact "New Folder" action aligned with the nav buttons.
+export component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <string> shortcut;
+    in property <bool> enabled: true;
+    in property <bool> show-label: true;
+    callback triggered();
+    width: show-label ? 96px : 36px; height: 34px;
+    border-radius: Metrics.radius-sm;
+    background: !enabled ? transparent : (action-ta.pressed ? Theme.surface-pressed : (action-ta.has-hover ? Theme.surface-hover : transparent));
+    accessible-role: button;
+    accessible-label: label;
+    accessible-description: shortcut;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.triggered(); } }
+    forward-focus: action-focus;
+    action-focus := FocusScope { key-pressed(event) => { if root.enabled && (event.text == Key.Return || event.text == " ") { root.triggered(); accept } else { reject } } }
+    border-width: action-focus.has-focus ? 1px : 0px; border-color: Theme.accent;
+    HoverTip { text: root.label + (root.shortcut == "" ? "" : " · " + root.shortcut); hovered: action-ta.has-hover; }
+
+    Text { x: 34px; width: parent.width - 38px; height: parent.height; text: root.label; visible: root.show-label; font-size: 12px; color: root.enabled ? Theme.text-primary : Theme.text-disabled; vertical-alignment: center; }
+    action-ta := NavTouchArea { enabled: root.enabled; clicked => { root.triggered(); } }
+    @children
+}
+
+// Themed single-line text field (address bar, dialogs). Built directly on
+// TextInput so the visual language (radius, borders, focus ring) matches the
+// rest of Kova instead of the stock widget style.
+//
+// `quiet` renders the field without a resting border (address bar style);
+// `right-inset` reserves space so trailing @children (e.g. the embedded
+// refresh button) do not overlap the text.
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> accent: false;
+    callback clicked();
+    forward-focus: button-focus;
+    width: 104px; height: 32px; border-radius: 5px;
+    background: touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-hover : root.accent ? Theme.selection : Theme.surface;
+    border-width: 1px; border-color: button-focus.has-focus ? Theme.accent : root.accent ? Theme.accent.with-alpha(0.4) : Theme.border-subtle;
+    Text { text: root.text; color: !root.enabled ? Theme.text-disabled : root.accent ? Theme.accent : Theme.text-primary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+    button-focus := FocusScope { key-pressed(event) => { if root.enabled && (event.text == Key.Return || event.text == " ") { root.clicked(); accept } else { reject } } }
+    touch := NavTouchArea { enabled: root.enabled; clicked => { button-focus.focus(); root.clicked(); } }
+    accessible-role: button; accessible-label: root.text; accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+}
+
+export component InputField inherits Rectangle {
+    in property <string> placeholder: "";
+    in property <length> font-size: 13px;
+    in property <length> right-inset: 10px;
+    in property <length> left-inset: 12px;
+    in property <bool> quiet: false;
+    in property <bool> navigation: false;
+    in property <bool> inline-mode: false;
+    out property <bool> editing: ti.has-focus;
+    in-out property <string> text <=> ti.text;
+    callback accepted();
+    callback cancelled();
+    callback edited(string);
+
+    public function focus-field() { ti.focus(); }
+    public function select-all-text() { ti.select-all(); }
+    public function focus-name(end: int) { ti.focus(); ti.set-selection-offsets(0, end); }
+
+    forward-focus: ti;
+    height: 32px;
+    border-radius: Metrics.radius-md;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: ti.has-focus
+        ? Theme.accent
+        : (fld-ta.has-hover ? Theme.border-subtle : (root.quiet ? transparent : Theme.border-subtle));
+
+    // Click-to-focus for the padding area around the text. The TextInput on
+    // top handles clicks within the text region itself (caret placement,
+    // selection).
+    fld-ta := TouchArea {
+        clicked => { ti.focus(); }
+    }
+
+    VerticalLayout {
+        padding-left: root.left-inset;
+        padding-right: root.right-inset;
+        alignment: center;
+
+        ti := TextInput {
+
+            font-size: root.font-size;
+            color: root.navigation && !ti.has-focus ? transparent : Theme.text-primary;
+            selection-background-color: root.navigation && !ti.has-focus ? transparent : Theme.selection-strong;
+            selection-foreground-color: root.navigation && !ti.has-focus ? transparent : Theme.text-primary;
+            accessible-label: root.navigation ? "Folder address" : root.placeholder;
+            accepted => { root.accepted(); }
+            edited => { root.edited(self.text); }
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.cancelled();
+                    accept
+                } else { reject }
+            }
+        }
+    }
+
+    Text {
+        text: root.placeholder;
+        visible: ti.text == "";
+        color: Theme.text-disabled;
+        font-size: root.font-size;
+        x: root.left-inset;
+        height: parent.height;
+        vertical-alignment: center;
+    }
+
+    ContextMenuArea {
+        Menu {
+            MenuItem { title: @tr("Cut"); activated => { ti.cut(); } }
+            MenuItem { title: @tr("Copy"); activated => { ti.copy(); } }
+            MenuItem { title: @tr("Paste"); activated => { ti.paste(); } }
+            MenuSeparator { }
+            MenuItem { title: @tr("Select All"); activated => { ti.select-all(); } }
+        }
+    }
+
+    @children
+}
+
+export component IconHome inherits Path {
+    in property <color> tint: Theme.text-secondary;
+    width: 18px; height: 18px;
+    viewbox-width: 20; viewbox-height: 20;
+    fill: transparent; stroke: root.tint; stroke-width: 1.5px;
+    commands: "M 2 9 L 10 2.5 L 18 9 M 4 7.5 L 4 17 L 8 17 L 8 11 L 12 11 L 12 17 L 16 17 L 16 7.5";
+}
+
+export component SidebarButton inherits Rectangle {
+    forward-focus: sidebar-focus;
+    border-width: sidebar-focus.has-focus ? 1px : 0px; border-color: Theme.accent;
+    sidebar-focus := FocusScope { key-pressed(event) => { if root.target != "" && (event.text == Key.Return || event.text == " ") { AppState.request_navigate(root.target); accept } else { reject } } }
+
+    accessible-role: button; accessible-label: root.text; accessible-description: root.target;
+    accessible-action-default => { if root.target != "" { AppState.request_navigate(root.target); } }
+
+    DropZone { target: root.target; clip-top: Metrics.tabs-height + Metrics.toolbar-height + Metrics.actions-height; }
+
+    in property <string> text;
+    in property <image> icon;
+    in property <string> target: "";
+    in property <bool> selected: false;
+    in property <bool> home: false;
+    in property <bool> collection: false;
+    callback context-requested(length, length);
+    in property <int> count: -1;
+    in property <color> base-background: transparent;
+
+    height: Metrics.sidebar-item-height;
+    animate background { duration: AppState.animations ? 120ms : 0ms; }
+    border-radius: Metrics.radius-md;
+    background: selected ? Theme.sidebar-selected : (side-ta.pressed ? Theme.surface-pressed : (side-ta.has-hover ? Theme.sidebar-hover : root.base-background));
+
+    Rectangle { x: 0; y: (parent.height - 14px) / 2; width: 3px; height: 14px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: Metrics.space-sm;
+
+        VerticalLayout {
+            width: 18px;
+            alignment: center;
+            if root.home: IconHome { tint: root.selected ? Theme.accent : Theme.text-secondary; }
+            if root.collection: Path { width: 18px; height: 18px; viewbox-width: 18; viewbox-height: 18; fill: transparent; stroke: Theme.accent; stroke-width: 1.2px; commands: "M2 2H7V7H2ZM11 2H16V7H11ZM2 11H7V16H2ZM11 11H16V16H11Z"; }
+            if !root.home && !root.collection: Image {
+                source: root.icon;
+                width: 18px;
+                height: 18px;
+                image-rendering: smooth;
+            }
+        }
+
+        Text {
+            text: root.text;
+            color: selected ? Theme.text-primary : Theme.text-secondary;
+            font-size: 14px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if root.count >= 0: Text { text: "" + root.count; color: Theme.text-muted; font-size: 11px; vertical-alignment: center; }
+    }
+
+    side-ta := NavTouchArea {
+        secondary-clicked(x, y) => { root.context-requested(x, y); }
+        clicked => { if root.target != "" { AppState.request_navigate(root.target); } }
+    }
+}
+
+// Fixed icon/text anchors keep drive names aligned with the Places links.
+export component DriveRow inherits Rectangle {
+    accessible-role: button; accessible-label: root.drive.name; accessible-description: root.drive.path;
+    accessible-action-default => { AppState.request_navigate(root.drive.path); }
+
+    DropZone { target: root.drive.path; clip-top: Metrics.tabs-height + Metrics.toolbar-height + Metrics.actions-height; }
+
+    in property <DriveItem> drive;
+    property <bool> selected: AppState.current-path == drive.path;
+
+    height: Metrics.sidebar-drive-height;
+    border-width: selected ? 1px : 0px; border-color: Theme.accent;
+    border-radius: Metrics.radius-md;
+    background: selected ? Theme.sidebar-selected : (drive-ta.pressed ? Theme.surface-pressed : (drive-ta.has-hover ? Theme.sidebar-hover : transparent));
+
+    Rectangle { x: 0; y: (parent.height - 14px) / 2; width: 3px; height: 14px; border-radius: 1.5px; background: Theme.accent; visible: root.selected; }
+    Image { x: 12px; y: 13px; source: drive.icon; width: 20px; height: 20px; image-rendering: smooth; }
+    Text {
+        x: 40px; y: 9px; width: parent.width - 46px; height: 20px;
+        text: drive.name; color: root.selected ? Theme.text-primary : Theme.text-secondary;
+        font-size: 14px; vertical-alignment: center; overflow: elide;
+    }
+    Rectangle {
+        x: 40px; y: 35px; width: parent.width - 54px; height: 6px;
+        border-radius: 2px; background: Theme.surface-hover;
+        visible: drive.capacity-known;
+        Rectangle {
+            x: 0; y: 0;
+            height: parent.height;
+            width: parent.width * Math.clamp(drive.usage, 0, 1);
+            border-radius: 2px;
+            background: drive.usage > 0.9 ? Theme.danger : Theme.accent;
+            animate width { duration: AppState.animations ? 240ms : 0ms; easing: ease-out; }
+        }
+    }
+    Text {
+        x: 40px; y: 47px; width: parent.width - 48px; height: 18px;
+        text: drive.capacity-known ? drive.free-text + " free of " + drive.total-text : drive.detail; color: Theme.text-muted;
+        font-size: 11px; vertical-alignment: center; overflow: elide;
+    }
+
+    drive-ta := NavTouchArea {
+        clicked => { if drive.path != "" { AppState.request_navigate(drive.path); } }
+    }
+}
+
+export component SectionLabel inherits Rectangle {
+    in property <string> text;
+    in property <string> detail;
+    height: 36px;
+    Text { x: 12px; height: parent.height; text: root.text; color: Theme.text-secondary; font-size: 14px; font-weight: 400; vertical-alignment: center; }
+    Text { x: parent.width - 64px; width: 52px; height: parent.height; text: root.detail; color: Theme.text-disabled; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
+}
+
+export component HeaderCell inherits Rectangle {
+    accessible-role: button; accessible-label: "Sort by " + root.text;
+    accessible-description: AppState.sort_column == root.column ? (AppState.sort_ascending ? "Ascending" : "Descending") : "";
+    accessible-action-default => { AppState.request_sort(root.column); }
+    forward-focus: header-focus;
+    border-width: header-focus.has-focus ? 1px : 0px; border-color: Theme.accent;
+    header-focus := FocusScope { key-pressed(event) => { if event.text == Key.Return || event.text == " " { AppState.request_sort(root.column); accept } else { reject } } }
+
+    in property <string> text;
+    in property <int> column;
+    in property <length> text-indent: 8px;
+    in property <bool> right-align: false;
+
+    height: 100%;
+    background: header-ta.pressed ? Theme.surface-pressed : (header-ta.has-hover ? Theme.surface-hover : transparent);
+
+    label := Text {
+        x: root.right-align ? root.width - self.width - 24px : root.text-indent;
+        width: self.preferred-width; height: root.height;
+        text: root.text; color: Theme.text-secondary; font-size: 13px;
+        vertical-alignment: center;
+    }
+    Path {
+        x: label.x + label.width + 7px; y: (root.height - 5px) / 2;
+        width: 8px; height: 5px; viewbox-width: 8; viewbox-height: 5;
+        visible: AppState.sort_column == root.column;
+        commands: AppState.sort_ascending ? "M1 4L4 1L7 4" : "M1 1L4 4L7 1";
+        fill: transparent; stroke: Theme.accent; stroke-width: 1.2px;
+    }
+
+    header-ta := NavTouchArea {
+        clicked => { AppState.request_sort(root.column); }
+    }
+}
+
+export component ResizeEdge inherits TouchArea {
+    in property <int> direction;
+    callback resize(int);
+    mouse-cursor: direction == 0 || direction == 4 ? ns-resize : (direction == 2 || direction == 6 ? ew-resize : (direction == 1 || direction == 5 ? nesw-resize : nwse-resize));
+    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize(root.direction); } }
+}
+export component ColumnGrip inherits Rectangle {
+    callback moved-by(length);
+    width: 10px;
+    Rectangle { x: 4px; y: 6px; width: 1px; height: parent.height - 12px; background: grip.has-hover || grip.pressed ? Theme.accent : Theme.border; }
+    grip := TouchArea {
+        mouse-cursor: ew-resize;
+        property <length> last-position;
+        pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { self.last-position = self.mouse-x + root.x; } }
+        moved => { if self.pressed { let current-position = self.mouse-x + root.x; root.moved-by(current-position - self.last-position); self.last-position = current-position; } }
+    }
+}
+
+export component NameDialog inherits Rectangle {
+    in-out property <string> title <=> AppState.dialog_title;
+    visible: AppState.dialog_visible;
+    background: #000000aa;
+    TouchArea {}
+
+    Rectangle {
+        width: 420px;
+        height: root.title == "Error" ? 236px : 184px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.surface-alt;
+        border-radius: Metrics.radius-lg;
+        border-width: 1px;
+        border-color: Theme.border;
+        drop-shadow-blur: 20px;
+        drop-shadow-color: Theme.shadow;
+        drop-shadow-offset-y: 6px;
+
+        Text {
+            x: 24px; y: 20px; width: 372px; height: 24px;
+            text: root.title;
+            color: root.title == "Error" ? Theme.danger : Theme.text-primary;
+            font-size: 18px; font-weight: 600;
+        }
+
+        dialog-scope := FocusScope {
+            x: 24px; y: 60px; width: 372px;
+            height: root.title == "Error" ? 104px : 36px;
+            key-pressed(event) => {
+                if event.text == Key.Escape || (event.text == Key.Return && root.title == "Error") {
+                    AppState.request_dialog_cancel();
+                    accept
+                } else { reject }
+            }
+            name-input := InputField {
+                x: 0; y: 0; width: 372px; height: 36px;
+                visible: root.title != "Error";
+                font-size: 13px;
+                text <=> AppState.dialog_value;
+                accepted => { AppState.request_dialog_confirm(AppState.dialog_value); }
+            }
+            Text {
+                x: 0; y: 0; width: 372px; height: 104px;
+                visible: root.title == "Error";
+                text: AppState.dialog_value;
+                color: Theme.text-secondary;
+                font-size: 12px;
+                wrap: word-wrap;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            x: 220px; y: parent.height - 54px; width: 84px; height: 30px;
+            visible: root.title != "Error";
+            background: cancel-ta.pressed ? Theme.surface-pressed : Theme.surface-hover;
+            border-radius: Metrics.radius-md;
+            Text { text: @tr("Cancel"); color: Theme.text-primary; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+            cancel-ta := TouchArea { clicked => { AppState.request_dialog_cancel(); } }
+        }
+        Rectangle {
+            x: 312px; y: parent.height - 54px; width: 84px; height: 30px;
+            background: ok-ta.pressed ? Theme.text-secondary : Theme.accent;
+            border-radius: Metrics.radius-md;
+            Text { text: root.title == "Error" ? "Close" : (root.title == "Rename" ? "Rename" : "Create"); color: Theme.window-bg; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+            ok-ta := TouchArea { clicked => { AppState.request_dialog_confirm(AppState.dialog_value); } }
+        }
+    }
+    changed visible => {
+        if self.visible {
+            if root.title == "Error" { dialog-scope.focus(); }
+            else { name-input.focus-field(); name-input.select-all-text(); }
+        }
+    }
+}
+

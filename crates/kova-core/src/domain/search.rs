@@ -47,6 +47,16 @@ impl SearchQuery {
     }
 
     pub fn matches(&self, entry: &FileEntry) -> bool {
+        self.matches_with_size(
+            entry,
+            entry.metadata.size.map(|bytes| super::EffectiveSize {
+                bytes,
+                complete: true,
+            }),
+        )
+    }
+
+    pub fn matches_with_size(&self, entry: &FileEntry, size: Option<super::EffectiveSize>) -> bool {
         let name = entry.name.to_lowercase();
         let ext = entry.extension_lower();
         self.terms.iter().all(|term| name.contains(term))
@@ -80,10 +90,10 @@ impl SearchQuery {
                     _ => ext == *kind,
                 }))
             && self.sizes.iter().all(|(op, wanted)| {
-                entry.metadata.size.is_some_and(|size| match op {
-                    '>' => size > *wanted,
-                    '<' => size < *wanted,
-                    _ => size == *wanted,
+                size.is_some_and(|size| match op {
+                    '>' => size.bytes > *wanted,
+                    '<' => size.complete && size.bytes < *wanted,
+                    _ => size.complete && size.bytes == *wanted,
                 })
             })
             && self
@@ -119,6 +129,19 @@ fn parse_size(value: &str) -> Option<(char, u64)> {
 mod tests {
     use super::*;
     use crate::domain::{FileKind, FileMetadata};
+    #[test]
+    fn incomplete_folder_sizes_never_claim_an_upper_bound_or_exact_match() {
+        let mut folder = entry();
+        folder.kind = FileKind::Directory;
+        folder.metadata.size = None;
+        let size = Some(crate::domain::EffectiveSize {
+            bytes: 2048,
+            complete: false,
+        });
+        assert!(SearchQuery::parse("size:>1KiB", Local::now()).matches_with_size(&folder, size));
+        assert!(!SearchQuery::parse("size:<3KiB", Local::now()).matches_with_size(&folder, size));
+        assert!(!SearchQuery::parse("size:2KiB", Local::now()).matches_with_size(&folder, size));
+    }
     fn entry() -> FileEntry {
         FileEntry {
             name: "Holiday.JPG".into(),

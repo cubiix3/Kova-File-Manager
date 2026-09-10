@@ -354,7 +354,7 @@ unsafe fn read_drop_effect_while_open() -> bool {
 /// Parse a double-NUL-terminated wide path list from a DROPFILES image.
 /// Returns an empty list for a null pointer.
 /// SAFETY: A non-null `ptr` must point to `total` readable bytes.
-unsafe fn parse_hdrop(ptr: *const u8, total: usize) -> Vec<PathBuf> {
+pub(crate) unsafe fn parse_hdrop(ptr: *const u8, total: usize) -> Vec<PathBuf> {
     unsafe {
         if ptr.is_null() || total < std::mem::size_of::<DROPFILES_HEADER>() {
             return Vec::new();

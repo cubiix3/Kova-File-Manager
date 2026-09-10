@@ -1,4 +1,12 @@
-# Approved desktop design
+# Approved desktop design — historical report
+
+This report records the earlier English-interface design milestone. Its runtime
+counts, fixed date/number formatting and non-persistent column widths describe
+that build. Kova 0.2 uses Windows regional formatting and persists column widths
+with the workspace. The current feature contract is in the [user guide](NEXTGEN.md);
+see [0.2 verification](DAILY_DRIVER_VERIFICATION.md) and [current screenshots](DEMO.md).
+
+The statements below are retained as historical evidence.
 
 The implemented design follows the user's approved mockup: a standalone K mark,
 tabs beside it, a framed breadcrumb bar, full-width file commands, a graphite

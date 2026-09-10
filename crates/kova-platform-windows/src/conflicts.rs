@@ -128,9 +128,12 @@ fn describe(metadata: &std::fs::Metadata) -> String {
         .modified()
         .ok()
         .map(chrono::DateTime::<chrono::Local>::from)
-        .map(|date| date.format("%d %b %Y, %H:%M:%S").to_string())
+        .map(|date| crate::formatting::date(date, true))
         .unwrap_or_else(|| "Unknown date".into());
-    format!("{} bytes · {modified}", metadata.len())
+    format!(
+        "{} bytes · {modified}",
+        crate::formatting::integer(metadata.len())
+    )
 }
 
 fn unique_name(

@@ -12,13 +12,14 @@ Thanks for your interest in improving Kova!
   environment, e.g.:
 
   ```powershell
-  .\scripts\cargo-msvc.ps1 cargo test --workspace
+  .\scripts\cargo-msvc.ps1 test --locked --workspace
   ```
 
 ## Required quality gates
 
-CI runs these on every push and pull request; please make sure they pass
-locally before opening a PR:
+CI runs these on pull requests and pushes to `main`; please make sure they pass
+locally before opening a PR. The `windows` job runs the gates; `CI` reports its
+result for branch protection. Both existing required checks must pass:
 
 ```powershell
 cargo fmt --all -- --check
@@ -26,6 +27,29 @@ cargo check --workspace --all-targets
 cargo test --workspace
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
+
+## Interaction and performance verification
+
+For changes to navigation, selection, file operations or session restoration,
+exercise the actual Windows UI on an interactive desktop:
+
+```powershell
+.\scripts\cargo-msvc.ps1 build --locked --workspace --release
+.\scripts\test-ui.ps1 -Executable target/release/kova-desktop.exe
+```
+
+The test uses isolated files and preferences, checks real file contents, and
+retains logs and screenshots under `target/runtime`. It sends keyboard/mouse input
+and uses the Windows clipboard, so leave its test window available while it runs.
+
+For changes to enumeration, filtering, sorting or row rendering, use
+`scripts/benchmark-ui.ps1 -PrepareFixtures`. It creates 1k/10k/100k test folders;
+see the [measurement method and limitations](docs/DAILY_DRIVER_VERIFICATION.md).
+
+Update affected user documentation and the changelog with behavior changes. If a
+visible flow changes, refresh its [real product captures](docs/DEMO.md); keep older
+milestone evidence labeled as historical. See [Windows packaging](docs/WINDOWS_RELEASE.md)
+for installer and packaged-UI verification before publication.
 
 ## Architecture rules
 

@@ -46,6 +46,7 @@ pub struct TransferState {
 
 #[derive(Clone, Debug)]
 pub struct TransferHandle {
+    pub undo: Arc<crate::undo::History>,
     pub state: Arc<Mutex<TransferState>>,
     pub cancelled: Arc<AtomicBool>,
     pub moved: Arc<Mutex<Vec<(PathBuf, PathBuf)>>>,
@@ -69,6 +70,7 @@ pub struct ShellRequest {
 
 #[derive(Default)]
 pub struct TransferQueue {
+    pub undo: Arc<crate::undo::History>,
     next: AtomicU64,
     entries: Mutex<Vec<TransferHandle>>,
     moved: Arc<Mutex<Vec<(PathBuf, PathBuf)>>>,
@@ -131,6 +133,7 @@ impl TransferQueue {
             conflict: None,
         };
         let handle = TransferHandle {
+            undo: self.undo.clone(),
             state: Arc::new(Mutex::new(state)),
             cancelled: Arc::new(AtomicBool::new(false)),
             moved: self.moved.clone(),

@@ -1,0 +1,256 @@
+// Theme tokens — central place for colors and metrics.
+export global Theme {
+    out property <color> window-bg: #20262c;
+    // Raised fill used by the address bar and other inset controls.
+    out property <color> surface: #262d34;
+    out property <color> surface-alt: #2c343d;
+    out property <color> surface-hover: #303943;
+    out property <color> surface-pressed: #3a4652;
+    out property <color> sidebar-bg: #242b32;
+    out property <color> sidebar-selected: #293d4a;
+    out property <color> sidebar-hover: #2b343d;
+    out property <color> selection: #2e4053;
+    out property <color> selection-strong: #374e65;
+    out property <color> border: #434c55;
+    out property <color> border-subtle: #39424b;
+    out property <color> text-primary: #f2f2f4;
+    out property <color> text-secondary: #c5cbd1;
+    out property <color> text-muted: #a7afb8;
+    out property <color> text-disabled: #73808b;
+    out property <color> accent: #75c5ee;
+    out property <color> danger: #e5534b;
+    out property <color> content-bg: #252c33;
+    out property <color> tabs-bg: #1b2127;
+    out property <color> shadow: #00000066;
+}
+
+export struct Breadcrumb { label: string, path: string }
+export struct InfoItem { label: string, value: string }
+export struct StorageItem { name: string, path: string, kind: string, size: string, fraction: float }
+export struct LibraryItem { name: string, key: string, count: int, tag: bool }
+export struct TransferItem { id: int, title: string, source: string, destination: string, current: string, status: string, progress: float, has-progress: bool, detail: string, error: string, running: bool }
+
+export struct FileListItem {
+    path: string,
+    name: string,
+    type_name: string,
+    size_text: string,
+    modified_text: string,
+    icon-id: int,
+    thumbnail: image,
+    has-thumbnail: bool,
+    is-dir: bool,
+    selected: bool,
+}
+
+export struct DriveItem {
+    name: string,
+    path: string,
+    icon: image,
+    // Fraction of the drive in use, 0..1 (0 when unknown).
+    usage: float,
+    // e.g. "120 GB free of 476 GB"; empty when unknown.
+    detail: string,
+    file-system: string,
+    drive-type: string,
+    total-text: string,
+    free-text: string,
+    used-text: string,
+    capacity-known: bool,
+}
+
+export global AppState {
+    callback start-drag();
+    callback register-drop-zone(int, string, float, float, float, float, int);
+    in-out property <int> drop-epoch: 0;
+    in-out property <string> drop-feedback: "";
+    in-out property <string> drop-path: "";
+    in-out property <[string]> tab-paths: [];
+    callback request-undo();
+    callback confirm-undo();
+    in-out property <bool> undo-visible: false;
+    in-out property <string> undo-description;
+    in-out property <string> undo-label: "";
+    callback copy-text(string);
+    in-out property <string> tooltip: "";
+    in-out property <length> tooltip-x: 0px;
+    in-out property <length> tooltip-y: 0px;
+    in-out property <[Breadcrumb]> recent-folders: [];
+    in-out property <bool> show-hidden: false;
+    in-out property <bool> show-system: false;
+    in-out property <bool> show-extensions: true;
+    in-out property <bool> preview-visible: false;
+    in-out property <bool> compact-rows: true;
+    in-out property <bool> alternating-rows: false;
+    in-out property <bool> animations: true;
+    in-out property <bool> drive-overview: false;
+    in-out property <bool> drives-loading: true;
+    in-out property <bool> folder-sizes: false;
+    in-out property <bool> gallery: false;
+    in-out property <int> gallery-size: 1;
+    in-out property <string> search-text: "";
+    callback request-search(string);
+    callback request-filter(int, int);
+    in-out property <int> filter-type: 0;
+    in-out property <int> filter-size: 0;
+    in-out property <int> filter-date: 0;
+    callback request-search-scope(bool);
+    in-out property <bool> search-recursive: false;
+    in-out property <string> search-progress: "";
+    in-out property <bool> search-pending: false;
+    callback request-grid-marquee(int, int, int, int, int, int, bool);
+    in-out property <bool> storage-visible: false;
+    in-out property <bool> storage-busy: false;
+    in-out property <string> storage-path: "";
+    in-out property <string> storage-total: "";
+    in-out property <string> storage-status: "";
+    in-out property <[StorageItem]> storage-items: [];
+    callback request-analyze(string);
+    callback cancel-analysis();
+    in-out property <bool> filesystem-location: false;
+    in-out property <bool> library-visible: false;
+    in-out property <bool> library-writable: true;
+    in-out property <string> library-error: "";
+    in-out property <string> library-name: "";
+    in-out property <[LibraryItem]> quick-access: [];
+    in-out property <[LibraryItem]> library-groups: [];
+    callback library-action(int, string, string);
+    in-out property <bool> transfers-visible: false;
+    in-out property <[TransferItem]> transfers: [];
+    in-out property <int> transfer-count: 0;
+    in-out property <int> context-pin: -1;
+    in-out property <string> context-group-key;
+    in-out property <string> context-group-name;
+    in-out property <bool> context-group-tag;
+    in-out property <string> context-drive;
+    in-out property <string> transfer-summary: "";
+    callback cancel-transfer(int);
+    callback clear-transfers();
+    in-out property <bool> conflict-visible: false;
+    in-out property <int> conflict-id: -1;
+    in-out property <string> conflict-incoming-name;
+    in-out property <string> conflict-existing-name;
+    in-out property <string> conflict-incoming: "";
+    in-out property <string> conflict-existing: "";
+    in-out property <string> conflict-incoming-info: "";
+    in-out property <string> conflict-existing-info: "";
+    in-out property <bool> conflict-all: false;
+    callback resolve-conflict(int, bool);
+    callback request-view-option(int);
+    in-out property <string> preview-path: "";
+    in-out property <string> preview-title: "Preview";
+    in-out property <string> preview-text: "Select a file to preview";
+    in-out property <image> preview-image;
+    in-out property <bool> preview-has-image: false;
+    in-out property <bool> preview-animated: false;
+    in-out property <bool> preview-paused: false;
+    in-out property <int> preview-page: 0;
+    in-out property <int> preview-pages: 0;
+    in-out property <int> preview-revision: 0;
+    in-out property <string> preview-info: "";
+    in-out property <[InfoItem]> inspector-info: [];
+    in-out property <string> selection-info: "";
+    in-out property <int> primary-row: -1;
+    in-out property <int> preview-pixel-width: 0;
+    in-out property <int> preview-pixel-height: 0;
+    in-out property <[Breadcrumb]> breadcrumbs: [];
+    in-out property <string> address_path: "";
+    in-out property <string> status_text: "Ready";
+    in-out property <int> item_count: 0;
+    in-out property <int> filtered-count: 0;
+    in-out property <int> selected_count: 0;
+    in-out property <bool> loading: false;
+    in-out property <string> directory-error: "";
+    in-out property <string> current-path: "";
+    in-out property <[FileListItem]> files: [];
+    in-out property <[string]> tabs: [];
+    in-out property <[DriveItem]> drives: [];
+    in-out property <[image]> icons: [];
+    in-out property <int> first-visible-row: 0;
+    in-out property <int> visible-row-count: 40;
+    in-out property <int> active_tab: 0;
+    in-out property <bool> can_go_back: false;
+    in-out property <bool> can_go_forward: false;
+    in-out property <bool> can_go_parent: false;
+
+    in-out property <string> home_path: "";
+    in-out property <string> desktop_path: "";
+    in-out property <string> documents_path: "";
+    in-out property <string> downloads_path: "";
+    in-out property <image> home_icon;
+    in-out property <image> desktop_icon;
+    in-out property <image> documents_icon;
+    in-out property <image> downloads_icon;
+
+    in-out property <int> sort_column: 0;
+    in-out property <bool> sort_ascending: true;
+
+    in-out property <bool> inline-visible: false;
+    in-out property <bool> creating-folder: false;
+    in-out property <int> inline-row: -1;
+    in-out property <int> inline-selection-end: 0;
+    in-out property <string> inline-path: "";
+    in-out property <bool> dialog_visible: false;
+    in-out property <string> dialog_title: "";
+    in-out property <string> dialog_value: "";
+
+    callback request_navigate(string);
+    callback request_back();
+    callback request_forward();
+    callback request_parent();
+    callback request_refresh();
+    callback request_new_tab();
+    callback request_duplicate_location();
+    callback request_close_tab(int);
+    callback request_switch_tab(int);
+    callback request_select(int);
+    callback request_toggle(int);
+    callback request_range(int);
+    callback request_select_all();
+    callback request_clear_selection();
+    callback request_marquee(int, int, int, bool);
+    in-out property <bool> integration-busy: false;
+    callback request-default-manager(bool);
+    callback request_activate(int);
+    callback request_new_folder();
+    callback request_rename(int);
+    callback request_dialog_confirm(string);
+    callback request_dialog_cancel();
+    callback request_sort(int);
+    callback request_context_open_in_new_tab(int);
+    // Explorer clipboard integration.
+    callback request_copy();
+    callback request_cut();
+    callback request_paste();
+    callback request_delete();
+    // Native Windows shell context menu for a row.
+    callback request_shell_menu(int);
+}
+
+// Layout metrics (single source of truth for the window skeleton).
+export global Metrics {
+    out property <length> space-xs: 4px;
+    out property <length> space-sm: 8px;
+    out property <length> space-md: 12px;
+    out property <length> space-lg: 16px;
+    out property <length> space-xl: 24px;
+    out property <length> radius-sm: 4px;
+    out property <length> radius-md: 6px;
+    out property <length> radius-lg: 8px;
+    out property <length> tabs-height: 44px;
+    out property <length> toolbar-height: 48px;
+    out property <length> statusbar-height: 34px;
+    out property <length> sidebar-width: 224px;
+    out property <length> sidebar-item-height: 36px;
+    out property <length> sidebar-drive-height: 72px;
+    out property <length> actions-height: 48px;
+    out property <length> panel-gap: 0px;
+    out property <length> header-height: 34px;
+    out property <length> row-height: AppState.compact-rows ? 34px : 40px;
+    out property <length> icon-size: 20px;
+    out property <length> icon-size-sm: 16px;
+    out property <length> col-type: 108px;
+    out property <length> col-size: 88px;
+    out property <length> col-modified: 146px;
+}
+

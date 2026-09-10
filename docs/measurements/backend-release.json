@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-10",
+  "application_version": "0.2.0",
+  "source_commit": "acc780a7a742fa6160e1218c025e42f0228f5ce4",
+  "method": "Release-mode real temporary filesystem fixture, 3 repetitions per size, warm local SSD, medians in milliseconds. Separate enumeration, natural sorting, and matching Image 99 ext:txt. No UI, typing debounce, redraw or GPU presentation included.",
+  "results": [
+    {"entries": 1000, "directory_ms": 1.175, "natural_sort_ms": 0.610, "search_match_ms": 0.106},
+    {"entries": 10000, "directory_ms": 12.342, "natural_sort_ms": 11.115, "search_match_ms": 1.329},
+    {"entries": 100000, "directory_ms": 131.773, "natural_sort_ms": 124.044, "search_match_ms": 15.352}
+  ]
+}

@@ -48,6 +48,9 @@ impl GenerationCounter {
 /// Worker command type used internally by the ops runtime.
 #[derive(Debug)]
 pub enum WorkerCommand {
+    Undo {
+        id: u64,
+    },
     CancelEnumeration {
         tab_id: TabId,
     },
@@ -62,6 +65,7 @@ pub enum WorkerCommand {
         location: Location,
         request_id: u64,
         background: bool,
+        recursive: bool,
     },
     NewFolder {
         parent: Location,
@@ -80,13 +84,32 @@ pub enum WorkerCommand {
 ///
 /// The worker runs on a dedicated Tokio task and is the only place that
 /// performs filesystem I/O for the UI.
-pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Sender<KovaEvent>) {
+pub fn spawn_worker(
+    mut rx: mpsc::UnboundedReceiver<WorkerCommand>,
+    tx: mpsc::Sender<KovaEvent>,
+    undo: std::sync::Arc<kova_platform_windows::undo::History>,
+) {
     tokio::spawn(async move {
         let mut enumerations: HashMap<TabId, tokio::task::JoinHandle<()>> = HashMap::new();
         while let Some(cmd) = rx.recv().await {
             enumerations.retain(|_, task| !task.is_finished());
             use WorkerCommand::*;
             match cmd {
+                Undo { id } => {
+                    let history = undo.clone();
+                    let result = tokio::task::spawn_blocking(move || history.apply(id))
+                        .await
+                        .map_err(|e| e.to_string())
+                        .and_then(|result| result);
+                    let event = match result {
+                        Ok((old_path, new_path)) => KovaEvent::ItemRenamed { old_path, new_path },
+                        Err(error_message) => KovaEvent::OperationError {
+                            context: "undo".into(),
+                            error_message,
+                        },
+                    };
+                    let _ = tx.send(event).await;
+                }
                 CancelEnumeration { tab_id } => {
                     if let Some(task) = enumerations.remove(&tab_id) {
                         task.abort();
@@ -119,6 +142,7 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                     location,
                     request_id,
                     background,
+                    recursive,
                 } => {
                     if let Some(previous) = enumerations.remove(&tab_id) {
                         previous.abort();
@@ -135,12 +159,19 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                                     request_id
                                 );
                             }
-                            match crate::enumerate::enumerate_directory(
-                                location.clone(),
-                                request_id,
-                            )
-                            .await
-                            {
+                            let result = if recursive {
+                                crate::enumerate::enumerate_tree(
+                                    location.clone(),
+                                    request_id,
+                                    tab_id,
+                                    &tx,
+                                )
+                                .await
+                            } else {
+                                crate::enumerate::enumerate_directory(location.clone(), request_id)
+                                    .await
+                            };
+                            match result {
                                 Ok(snapshot) => {
                                     if !background {
                                         tracing::info!(
@@ -192,6 +223,13 @@ pub fn spawn_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>, tx: mpsc::Se
                     let old_path = path.clone();
                     match crate::file_ops::rename(&path, &new_name).await {
                         Ok(new_path) => {
+                            let history = undo.clone();
+                            let old = old_path.clone();
+                            let new = new_path.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                history.record(&old, &new, true)
+                            })
+                            .await;
                             let _ = tx.send(KovaEvent::ItemRenamed { old_path, new_path }).await;
                         }
                         Err(error) => {
