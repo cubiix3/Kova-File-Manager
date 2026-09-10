@@ -1,3 +1,10 @@
+Kova 0.2.1 fixes file menus closing immediately during automatic refresh and
+folder sizes repeatedly disappearing while being recalculated.
+
+Background changes wait until a file menu closes. Unchanged metadata preserves
+the existing view, and ordinary browsing no longer watches the entire subtree.
+Recursive search and folder-size calculations still monitor nested changes.
+
 Kova 0.2 adds workspace restoration, recursive folder search, native Windows drag
 & drop, safer conflict handling and a reviewable Undo for supported renames/file moves.
 Large folders use background natural sorting/filtering and a lazy UI model.

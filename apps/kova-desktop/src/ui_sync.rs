@@ -114,7 +114,7 @@ pub(crate) fn update_ui(
         );
 
         models.render_key.set(render_key);
-        if controller.item_count() >= 2000 {
+        if controller.item_count() >= 2000 && std::env::var_os("KOVA_PERF").is_some() {
             tracing::info!(
                 entries = controller.item_count(),
                 elapsed_ms = model_started.elapsed().as_secs_f64() * 1000.,

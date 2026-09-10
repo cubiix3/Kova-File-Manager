@@ -79,6 +79,11 @@ try {
     $kovaItem = Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)
     $kovaItem.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     Open-FileMenu
+    # A real notification must wait while a menu is in use, including a refresh
+    # already in flight before the menu opened. No file content is changed here.
+    [IO.File]::SetLastWriteTimeUtc((Join-Path $kovaFiles 'Before.txt'), [DateTime]::UtcNow.AddMinutes(1))
+    Start-Sleep -Milliseconds 1200
+    if (-not (Find-FileMenu)) { throw 'External metadata refresh dismissed the open file menu' }
     Invoke-FileMenu 'Copy path'
     Wait-TestCondition { [Windows.Forms.Clipboard]::GetText() -eq (Join-Path $kovaFiles 'Before.txt') } 'copied full path'
     Wait-TestCondition { -not (Find-FileMenu) } 'menu closes after an action'
@@ -108,7 +113,11 @@ try {
     Open-FileMenu
     $kovaRefreshFile=Join-Path $kovaFiles 'MenuRefresh.tmp'
     [IO.File]::WriteAllText($kovaRefreshFile,'External refresh fixture.')
-    Wait-TestCondition { -not (Find-FileMenu) } 'snapshot changes dismiss stale menu actions'
+    Start-Sleep -Milliseconds 1200
+    if (-not (Find-FileMenu)) { throw 'External file creation dismissed the open menu' }
+    Invoke-FileMenu 'Copy path'
+    Wait-TestCondition { [Windows.Forms.Clipboard]::GetText() -eq (Join-Path $kovaFiles 'Before.txt') } 'queued refresh preserves the menu target'
+    Wait-TestCondition { -not (Find-FileMenu) } 'chosen action closes the menu'
     Wait-TestCondition { Find-TestElement 'MenuRefresh.tmp' ([Windows.Automation.ControlType]::ListItem) } 'external file appears'
     Remove-Item -LiteralPath $kovaRefreshFile
     Wait-TestCondition { -not (Find-TestElement 'MenuRefresh.tmp' ([Windows.Automation.ControlType]::ListItem)) } 'external fixture cleanup'

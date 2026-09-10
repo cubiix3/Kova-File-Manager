@@ -42,6 +42,7 @@ pub struct AppController {
     pub folder_sizes_enabled: bool,
     pub folder_sizes: kova_core::domain::FolderSizes,
     request_ids: HashMap<TabId, u64>,
+    completed_enumerations: HashMap<TabId, u64>,
     status_text: String,
     pending: HashSet<TabId>,
     background_pending: HashSet<TabId>,
@@ -70,6 +71,7 @@ impl AppController {
             folder_sizes_enabled: false,
             folder_sizes: HashMap::new(),
             request_ids: HashMap::new(),
+            completed_enumerations: HashMap::new(),
             status_text: "Ready".into(),
             pending: HashSet::new(),
             background_pending: HashSet::new(),
@@ -161,8 +163,45 @@ impl AppController {
     }
 
     pub fn record_background_request(&mut self, tab: TabId, request: u64) {
-        self.record_request(tab, request);
+        // A notification is not a visible change. Keep the current view/source
+        // and its pending filter work until fresh metadata actually differs.
+        self.request_ids.insert(tab, request);
+        self.pending.insert(tab);
         self.background_pending.insert(tab);
+    }
+
+    pub fn folder_scan_generation(&self) -> Option<u64> {
+        self.completed_enumerations
+            .get(&self.active_tab_id())
+            .copied()
+    }
+
+    fn unchanged_entries(&self, tab: TabId, next: &DirectorySnapshot) -> bool {
+        let Some(current) = self.sources.get(&tab).or_else(|| self.snapshots.get(&tab)) else {
+            return false;
+        };
+        if current.location != next.location {
+            return false;
+        }
+        let excluded = if self.sources.contains_key(&tab) {
+            None
+        } else {
+            self.excluded.get(&tab)
+        };
+        if current.entries.len() + excluded.map_or(0, Vec::len) != next.entries.len() {
+            return false;
+        }
+        let previous: HashMap<_, _> = current
+            .entries
+            .iter()
+            .chain(excluded.into_iter().flatten())
+            .map(|entry| (&entry.path, entry))
+            .collect();
+        next.entries.iter().all(|entry| {
+            previous.get(&entry.path).is_some_and(|old| {
+                old.name == entry.name && old.kind == entry.kind && old.metadata == entry.metadata
+            })
+        })
     }
 
     pub fn directory_error(&self) -> String {
@@ -248,6 +287,14 @@ impl AppController {
             return;
         }
 
+        self.completed_enumerations
+            .insert(tab_id, snapshot.request_id);
+        if self.background_pending.contains(&tab_id) && self.unchanged_entries(tab_id, &snapshot) {
+            self.pending.remove(&tab_id);
+            self.background_pending.remove(&tab_id);
+            self.errors.remove(&tab_id);
+            return;
+        }
         self.revision = self.revision.wrapping_add(1);
         self.cancel_view(tab_id);
         if snapshot.entries.len() >= crate::search::BACKGROUND_THRESHOLD {
@@ -391,6 +438,7 @@ impl AppController {
         self.searches.remove(&id);
         self.excluded.remove(&id);
         self.request_ids.remove(&id);
+        self.completed_enumerations.remove(&id);
         self.pending.remove(&id);
         self.background_pending.remove(&id);
         self.errors.remove(&id);
@@ -691,7 +739,10 @@ impl AppController {
             .unwrap_or_default();
         let mut dirty = false;
         for result in results {
-            if !self.is_current_request(result.tab, result.snapshot.request_id)
+            if self
+                .sources
+                .get(&result.tab)
+                .is_none_or(|source| source.request_id != result.snapshot.request_id)
                 || self.view_generations.get(&result.tab).is_none_or(|g| {
                     g.load(std::sync::atomic::Ordering::Relaxed) != result.generation
                 })
@@ -711,12 +762,16 @@ impl AppController {
                 tab.selection.clear();
             }
             self.revision = self.revision.wrapping_add(1);
+            let completes_enumeration =
+                self.is_current_request(result.tab, result.snapshot.request_id);
             self.snapshots
                 .insert(result.tab, std::sync::Arc::new(result.snapshot));
             self.excluded.insert(result.tab, result.excluded);
             self.view_pending.remove(&result.tab);
-            self.pending.remove(&result.tab);
-            self.background_pending.remove(&result.tab);
+            if completes_enumeration {
+                self.pending.remove(&result.tab);
+                self.background_pending.remove(&result.tab);
+            }
             self.errors.remove(&result.tab);
             if result.tab == self.active_tab_id() {
                 self.status_text = "Ready".into();
@@ -868,6 +923,77 @@ fn dummy_snapshot(request_id: u64, name: &str) -> DirectorySnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unchanged_background_notifications_preserve_view_and_filter_work() {
+        for count in [3, 2500] {
+            let mut ctrl = AppController::new(Location::new("C:\\dummy".into()));
+            let id = ctrl.active_tab_id();
+            let mut source = dummy_snapshot(1, "unused");
+            source.entries = (0..count)
+                .map(|i| dummy_snapshot(1, &format!("Folder {i}")).entries.remove(0))
+                .collect();
+            ctrl.record_request(id, 1);
+            ctrl.apply_snapshot(id, source.clone());
+            settle(&mut ctrl);
+            ctrl.set_search("Folder 1".into());
+            settle(&mut ctrl);
+            ctrl.selection_mut().unwrap().select_single(0);
+            let selected = ctrl.selected_paths();
+            let original = ctrl.snapshot_shared().unwrap();
+            let revision = ctrl.revision;
+            ctrl.record_background_request(id, 2);
+            assert_eq!(
+                ctrl.revision, revision,
+                "starting a refresh must not redraw or dismiss menus"
+            );
+            source.request_id = 2;
+            source.entries.reverse(); // Enumeration order is not visible sort order.
+            ctrl.apply_snapshot(id, source.clone());
+            assert_eq!(ctrl.revision, revision);
+            assert!(std::sync::Arc::ptr_eq(
+                &original,
+                &ctrl.snapshot_shared().unwrap()
+            ));
+            assert_eq!(ctrl.selected_paths(), selected);
+            assert!(!ctrl.request_in_flight(id));
+            assert_eq!(ctrl.folder_scan_generation(), Some(2));
+
+            ctrl.set_search("Folder 2".into());
+            ctrl.record_background_request(id, 3);
+            settle(&mut ctrl); // A cached transform may finish while enumeration is pending.
+            assert!(ctrl.request_in_flight(id));
+            source.request_id = 3;
+            ctrl.apply_snapshot(id, source.clone());
+            settle(&mut ctrl);
+            assert!(!ctrl.request_in_flight(id));
+            assert!(!ctrl.snapshot().unwrap().entries.is_empty());
+            assert!(
+                ctrl.snapshot()
+                    .unwrap()
+                    .entries
+                    .iter()
+                    .all(|e| e.name.contains('2'))
+            );
+
+            let revision = ctrl.revision;
+            ctrl.record_background_request(id, 4);
+            source.request_id = 4;
+            source
+                .entries
+                .iter_mut()
+                .find(|e| e.name == "Folder 2")
+                .unwrap()
+                .metadata
+                .modified = Some(chrono::Local::now());
+            ctrl.apply_snapshot(id, source);
+            settle(&mut ctrl);
+            assert!(
+                ctrl.revision > revision,
+                "real metadata changes must still appear"
+            );
+        }
+    }
 
     #[test]
     fn computed_folder_sizes_drive_display_filter_and_sort_after_queries() {

@@ -66,9 +66,9 @@ and Delete. Multi-selection keeps the applicable transfer actions and offers
 and clipboard handling.
 
 Use arrow keys and Enter to choose an action; Escape, Tab or an outside click
-closes the menu. It stays inside the current window and closes if navigation or a
-background refresh changes its file snapshot, so a stale row cannot trigger an
-action on a different file.
+closes the menu. It stays inside the current window. Background notifications wait
+until the menu closes; navigation and explicit selection changes dismiss it so a
+stale row cannot trigger an action on a different file.
 
 **More Windows options** opens the complete Windows Shell menu with installed
 extensions. **Shift+F10** remains a direct shortcut from the list; the same shortcut
@@ -175,7 +175,9 @@ save its old library snapshot on exit.
 Open folders listen for native Windows file notifications, including changes
 made by other applications. Short bursts are coalesced before a background
 refresh; selection and search remain attached to file paths. Refresh is deferred
-while an inline name is being edited. Recursive notifications also reconcile
-changes inside displayed folders. Unsupported or temporarily unavailable paths
+while an inline name is being edited or the file menu is open. Normal browsing
+monitors the current directory; recursive search and folder sizes enable subtree
+notifications. Unchanged metadata does not replace the view. Existing folder-size
+values remain visible during recalculation. Unsupported or temporarily unavailable paths
 are retried in the background. This is not a hard real-time guarantee for network
 providers. Drive discovery additionally follows the Windows drive map.
