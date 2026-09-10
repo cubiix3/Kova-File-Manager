@@ -18,16 +18,16 @@ Kova combines tabbed browsing, a thumbnail gallery, native Windows context menus
 and an inspector in a compact desktop interface. Built with **Rust, Slint and Win32/Shell APIs** for
 Windows 10/11 x64. No Electron or WebView.
 
-> **0.2.1 preview:** Download the current Windows build from
-> [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.1).
+> **0.2.2 preview:** Download the current Windows build from
+> [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.2).
 > Setup and portable ZIP include the features shown here. No build tools or GitHub sign-in are required.
 > See [verification and limits](docs/DAILY_DRIVER_VERIFICATION.md) and the [changelog](CHANGELOG.md).
 
 ## Download & install
 
-- **[Download Setup for Windows x64](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.1/Kova-Setup-0.2.1-x64.exe)** — recommended; includes Start menu integration and an uninstaller.
-- **[Download portable ZIP](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.1/Kova-0.2.1-x64.zip)** — extract all files and run **Kova.exe**.
-- **[Release notes and checksums](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.1)**.
+- **[Download Setup for Windows x64](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.2/Kova-Setup-0.2.2-x64.exe)** — recommended; includes Start menu integration and an uninstaller.
+- **[Download portable ZIP](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.2/Kova-0.2.2-x64.zip)** — extract all files and run **Kova.exe**.
+- **[Release notes and checksums](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.2)**.
 
 After Setup, launch Kova from the Start menu. A desktop shortcut is optional.
 
