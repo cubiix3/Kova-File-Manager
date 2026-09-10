@@ -27,6 +27,12 @@ public static class KovaWindowTest {
         EnumWindows((hwnd,parameter)=>{uint owner;GetWindowThreadProcessId(hwnd,out owner);if(owner==pid && IsWindowVisible(hwnd) && GetWindow(hwnd,4)==IntPtr.Zero && GetWindowTextLength(hwnd)>0){found=hwnd;return false;}return true;},IntPtr.Zero);
         return found;
     }
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd,System.Text.StringBuilder name,int count);
+    public static IntPtr NativeMenuWindow(int pid) {
+        IntPtr found=IntPtr.Zero;
+        EnumWindows((hwnd,parameter)=>{uint owner;GetWindowThreadProcessId(hwnd,out owner);var name=new System.Text.StringBuilder(256);GetClassName(hwnd,name,256);if(owner==pid && IsWindowVisible(hwnd) && name.ToString()=="#32768"){found=hwnd;return false;}return true;},IntPtr.Zero);
+        return found;
+    }
     public static bool OwnsForeground(int pid) {uint owner;GetWindowThreadProcessId(GetForegroundWindow(),out owner);return owner==pid;}
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a,uint b,bool attach);

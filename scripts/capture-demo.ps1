@@ -70,8 +70,13 @@ try {
     Invoke-DemoButton 'Details'
     Select-DemoFile 'README.md'
     Invoke-DemoButton 'Close inspector'
+    Select-DemoFile 'README.md'
     Send-DemoKeys '+{F10}'
-    Start-Sleep -Milliseconds 1000
+    $kovaMenuDeadline=[DateTime]::UtcNow.AddSeconds(10)
+    while([KovaWindowTest]::NativeMenuWindow($kovaProcess.Id) -eq [IntPtr]::Zero){
+        if([DateTime]::UtcNow -gt $kovaMenuDeadline){throw 'Shift+F10 did not open a native Windows menu'}
+        Start-Sleep -Milliseconds 100
+    }
     Save-Demo 'native'
     Send-DemoKeys '{ESC}'
     Select-DemoFile 'README.md'
