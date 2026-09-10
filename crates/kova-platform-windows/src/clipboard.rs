@@ -7,7 +7,7 @@
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 
-use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
+use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     RegisterClipboardFormatW, SetClipboardData,
@@ -88,6 +88,27 @@ pub struct ClipboardFiles {
     pub cut: bool,
 }
 
+/// Clipboard readers (including Explorer and accessibility clients) briefly
+/// exclude other users. Retry only opening, before any data is modified, with a
+/// small upper bound so a persistently locked clipboard still reports an error.
+fn open_clipboard(owner: Option<HWND>) -> Result<(), ClipboardError> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+    loop {
+        // SAFETY: the optional owner belongs to the calling thread and outlives
+        // this call. Each caller closes the clipboard after successful opening.
+        match unsafe { OpenClipboard(owner) } {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if error.code() == windows::core::HRESULT::from_win32(ERROR_ACCESS_DENIED.0)
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
 /// Copy `text` to the Windows clipboard as CF_UNICODETEXT.
 ///
 /// The allocated global memory block is handed to the clipboard and must not
@@ -102,7 +123,7 @@ pub fn set_clipboard_text(text: &str) -> Result<(), ClipboardError> {
     // memory block is written while locked and handed to the clipboard
     // afterwards; the system owns it from the successful SetClipboardData on.
     unsafe {
-        OpenClipboard(Some(owner.0))?;
+        open_clipboard(Some(owner.0))?;
         let result = write_text_while_open(&wide, byte_len);
         // CloseClipboard must run regardless of the inner result.
         let _ = CloseClipboard();
@@ -136,7 +157,7 @@ pub fn get_clipboard_text() -> Result<Option<String>, ClipboardError> {
     // memory owned by the clipboard is only read while locked and never
     // freed by us.
     unsafe {
-        OpenClipboard(None)?;
+        open_clipboard(None)?;
         let result = read_text_while_open();
         let _ = CloseClipboard();
         result
@@ -225,7 +246,7 @@ pub fn set_clipboard_files(paths: &[PathBuf], cut: bool) -> Result<(), Clipboard
     // are fully written while locked and then handed to the clipboard, which
     // owns them from the successful SetClipboardData on.
     unsafe {
-        OpenClipboard(Some(owner.0))?;
+        open_clipboard(Some(owner.0))?;
         let result = write_files_while_open(&hdrop_image, &effect_bytes);
         let _ = CloseClipboard();
         result
@@ -289,7 +310,7 @@ pub fn get_clipboard_files() -> Result<Option<ClipboardFiles>, ClipboardError> {
     // SAFETY: Open/Get/Lock/Unlock/Close run in sequence on one thread; the
     // clipboard-owned memory is only read while locked and never freed here.
     unsafe {
-        OpenClipboard(None)?;
+        open_clipboard(None)?;
         let result = read_files_while_open();
         let _ = CloseClipboard();
         result
@@ -396,10 +417,59 @@ pub(crate) unsafe fn parse_hdrop(ptr: *const u8, total: usize) -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
-    /// The clipboard is a per-process global resource; every test that touches
+    /// The clipboard is a shared desktop resource; every test here that touches
     /// it must hold this lock so parallel test threads cannot interleave
     /// OpenClipboard/EmptyClipboard/GetClipboardData sequences.
     static CLIPBOARD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    #[ignore = "requires an isolated interactive clipboard; overwrites user clipboard formats"]
+    fn clipboard_recovers_from_short_contention_and_bounds_persistent_contention() {
+        let _guard = CLIPBOARD_TEST_LOCK.lock().unwrap();
+        let (opened_tx, opened_rx) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let owner = ClipboardOwner::new().unwrap();
+            open_clipboard(Some(owner.0)).unwrap();
+            opened_tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            // SAFETY: this thread successfully opened the clipboard above.
+            unsafe { CloseClipboard().unwrap() };
+        });
+        opened_rx.recv().unwrap();
+        let copied = set_clipboard_text("clipboard contention recovery");
+        holder.join().unwrap();
+        copied.expect("a short-lived clipboard reader should not lose Copy path");
+        assert_eq!(
+            get_clipboard_text().unwrap().as_deref(),
+            Some("clipboard contention recovery")
+        );
+
+        let (opened_tx, opened_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let owner = ClipboardOwner::new().unwrap();
+            open_clipboard(Some(owner.0)).unwrap();
+            opened_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            // SAFETY: this thread successfully opened the clipboard above.
+            unsafe { CloseClipboard().unwrap() };
+        });
+        opened_rx.recv().unwrap();
+        let start = std::time::Instant::now();
+        let copied = set_clipboard_text("must not overwrite while locked");
+        let elapsed = start.elapsed();
+        release_tx.send(()).unwrap();
+        holder.join().unwrap();
+        assert!(
+            copied.is_err(),
+            "a persistently held clipboard must report failure"
+        );
+        assert!(elapsed < std::time::Duration::from_secs(1));
+        assert_eq!(
+            get_clipboard_text().unwrap().as_deref(),
+            Some("clipboard contention recovery")
+        );
+    }
 
     #[test]
     fn hdrop_buffer_roundtrip_parses_paths() {
