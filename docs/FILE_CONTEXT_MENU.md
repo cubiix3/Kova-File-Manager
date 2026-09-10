@@ -1,5 +1,10 @@
 # File context actions
 
+Commands highlight on mouse hover without pressing a button, using a short
+90 ms transition. Keyboard focus follows the hovered command, so Enter invokes
+the highlighted action. Ctrl+Z in the file view restores the last selection
+deleted by Kova into the Recycle Bin during this session.
+
 Right-click and the toolbar's **More** button open a file menu using the existing
 app palette, icons and typography. The menu groups common actions and displays
 their shortcuts. It offers file/folder-specific actions for single selections and

@@ -97,18 +97,41 @@ pub fn spawn_worker(
             match cmd {
                 Undo { id } => {
                     let history = undo.clone();
+                    let recycled = history.is_recycle(id);
                     let result = tokio::task::spawn_blocking(move || history.apply(id))
                         .await
                         .map_err(|e| e.to_string())
                         .and_then(|result| result);
-                    let event = match result {
-                        Ok((old_path, new_path)) => KovaEvent::ItemRenamed { old_path, new_path },
-                        Err(error_message) => KovaEvent::OperationError {
-                            context: "undo".into(),
-                            error_message,
-                        },
-                    };
-                    let _ = tx.send(event).await;
+                    match result {
+                        Ok(items) if recycled => {
+                            let _ = tx
+                                .send(KovaEvent::ItemsRestored {
+                                    paths: items.into_iter().map(|(_, path)| path).collect(),
+                                })
+                                .await;
+                        }
+                        Ok(items) => {
+                            for (old_path, new_path) in items {
+                                let _ =
+                                    tx.send(KovaEvent::ItemRenamed { old_path, new_path }).await;
+                            }
+                        }
+                        Err(error_message) => {
+                            if recycled {
+                                // A batch may have restored some items before a
+                                // conflict. Reconcile that partial result too.
+                                let _ = tx
+                                    .send(KovaEvent::ItemsRestored { paths: Vec::new() })
+                                    .await;
+                            }
+                            let _ = tx
+                                .send(KovaEvent::OperationError {
+                                    context: "undo".into(),
+                                    error_message,
+                                })
+                                .await;
+                        }
+                    }
                 }
                 CancelEnumeration { tab_id } => {
                     if let Some(task) = enumerations.remove(&tab_id) {

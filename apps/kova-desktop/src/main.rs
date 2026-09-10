@@ -612,6 +612,21 @@ async fn main() {
                         reload_ref.refresh_tabs();
                         return;
                     }
+                    KovaEvent::ItemsRestored { paths } => {
+                        if let Some(path) = paths.iter().find(|path| {
+                            ctrl.current_directory()
+                                .is_some_and(|loc| Some(loc.path.as_path()) == path.parent())
+                        }) {
+                            reveal = Some((ctrl.active_tab_id(), path.clone(), false));
+                        }
+                        ctrl.set_status(format!(
+                            "Restored {} item(s) from Recycle Bin",
+                            paths.len()
+                        ));
+                        drop(ctrl);
+                        reload_ref.refresh_tabs();
+                        return;
+                    }
                     KovaEvent::OperationError {
                         context,
                         error_message,

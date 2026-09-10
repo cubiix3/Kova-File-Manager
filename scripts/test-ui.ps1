@@ -26,8 +26,8 @@ function Start-TestWindow {
     try { Start-Process -FilePath $kovaExe -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $kovaFixture 'app.log') -RedirectStandardError (Join-Path $kovaFixture 'error.log') }
     finally { $env:LOCALAPPDATA = $kovaPrevious }
 }
-function Wait-TestCondition([scriptblock]$Condition, [string]$Description) {
-    $kovaDeadline = [DateTime]::UtcNow.AddSeconds(10)
+function Wait-TestCondition([scriptblock]$Condition, [string]$Description, [int]$TimeoutSeconds = 10) {
+    $kovaDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
         if (& $Condition) { return }
         Start-Sleep -Milliseconds 100
@@ -71,7 +71,9 @@ function Close-TestWindow {
 }
 $kovaProcess = Start-TestWindow
 try {
-    Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'initial folder enumeration and accessibility tree'
+    # Fresh runner VMs can spend over ten seconds initializing the first GPU/UIA
+    # window. Keep normal action deadlines short; allow startup its own budget.
+    Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'initial folder enumeration and accessibility tree' 30
     $kovaWindowInfo=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
     $kovaScale=$kovaWindowInfo.Dpi/96.0
     $kovaScreen=[Windows.Forms.Screen]::PrimaryScreen.WorkingArea
@@ -87,6 +89,15 @@ try {
     Invoke-FileMenu 'Copy path'
     Wait-TestCondition { [Windows.Forms.Clipboard]::GetText() -eq (Join-Path $kovaFiles 'Before.txt') } 'copied full path'
     Wait-TestCondition { -not (Find-FileMenu) } 'menu closes after an action'
+    Open-FileMenu
+    $kovaHoverBounds=(Find-FileMenuButton 'Copy path').Current.BoundingRectangle
+    $kovaWindowInfo=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Hover -X ([int]($kovaHoverBounds.Left+60-$kovaWindowInfo.Left)) -Y ([int]($kovaHoverBounds.Top+$kovaHoverBounds.Height/2-$kovaWindowInfo.Top)) | Out-Null
+    Wait-TestCondition { [Windows.Automation.AutomationElement]::FocusedElement.Current.Name -eq 'Copy path' } 'hover without a pressed mouse button updates the active command'
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Screenshot -OutputPath (Join-Path $kovaFixture 'menu-hover.png') | Out-Null
+    [Windows.Forms.Clipboard]::Clear()
+    Send-TestKeys '{ENTER}'
+    Wait-TestCondition { [Windows.Forms.Clipboard]::GetText() -eq (Join-Path $kovaFiles 'Before.txt') } 'Enter invokes the hovered command'
     $kovaItemBounds=$kovaItem.Current.BoundingRectangle
     $kovaWindowInfo=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
     & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action RightClick -X ([int]($kovaItemBounds.Right-24-$kovaWindowInfo.Left)) -Y ([int]($kovaItemBounds.Top+$kovaItemBounds.Height/2-$kovaWindowInfo.Top)) | Out-Null
@@ -146,7 +157,17 @@ try {
     Wait-TestCondition { [Windows.Forms.Clipboard]::GetText() -eq (Join-Path $kovaFiles 'Before.txt') } 'Gallery menu targets the clicked file'
     Send-TestKeys '^1'
     Wait-TestCondition { -not (Find-TestElement 'Gallery' ([Windows.Automation.ControlType]::Text)) } 'Details view restored'
+    (Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Send-TestKeys '^a{DELETE}'
+    Wait-TestCondition { -not (Test-Path -LiteralPath (Join-Path $kovaFiles 'Before.txt')) -and -not (Test-Path -LiteralPath (Join-Path $kovaFiles 'Nested')) } 'file and folder recycled'
+    Wait-TestCondition { (Find-TestElement 'Undo' ([Windows.Automation.ControlType]::Button)).Current.IsEnabled } 'Recycle Bin restore available'
+    Send-TestKeys '^z'
+    Wait-TestCondition { (Test-Path -LiteralPath (Join-Path $kovaFiles 'Before.txt')) -and (Test-Path -LiteralPath (Join-Path $kovaFiles 'Nested/Needle.txt')) } 'Ctrl+Z restores the entire deleted selection without another dialog'
+    if ([IO.File]::ReadAllText((Join-Path $kovaFiles 'Before.txt')) -ne 'Preserve these contents.' -or [IO.File]::ReadAllText((Join-Path $kovaFiles 'Nested/Needle.txt')) -ne 'Recursive match.') { throw 'Recycle Bin restore changed contents' }
+    Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'restored items visible without manual refresh'
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Screenshot -OutputPath (Join-Path $kovaFixture 'recycle-undo.png') | Out-Null
     $kovaItem = Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)
+    $kovaItem.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     $kovaSourceBounds = $kovaItem.Current.BoundingRectangle
     $kovaTargetBounds = (Find-TestElement 'Nested' ([Windows.Automation.ControlType]::ListItem)).Current.BoundingRectangle
     $kovaBounds = & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json

@@ -18,16 +18,16 @@ Kova combines tabbed browsing, a thumbnail gallery, native Windows context menus
 and an inspector in a compact desktop interface. Built with **Rust, Slint and Win32/Shell APIs** for
 Windows 10/11 x64. No Electron or WebView.
 
-> **0.2.1 preview:** Download the current Windows build from
-> [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.1).
+> **0.2.2 preview:** Download the current Windows build from
+> [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.2).
 > Setup and portable ZIP include the features shown here. No build tools or GitHub sign-in are required.
 > See [verification and limits](docs/DAILY_DRIVER_VERIFICATION.md) and the [changelog](CHANGELOG.md).
 
 ## Download & install
 
-- **[Download Setup for Windows x64](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.1/Kova-Setup-0.2.1-x64.exe)** — recommended; includes Start menu integration and an uninstaller.
-- **[Download portable ZIP](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.1/Kova-0.2.1-x64.zip)** — extract all files and run **Kova.exe**.
-- **[Release notes and checksums](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.1)**.
+- **[Download Setup for Windows x64](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.2/Kova-Setup-0.2.2-x64.exe)** — recommended; includes Start menu integration and an uninstaller.
+- **[Download portable ZIP](https://github.com/cubiix3/Kova-File-Manager/releases/download/v0.2.2/Kova-0.2.2-x64.zip)** — extract all files and run **Kova.exe**.
+- **[Release notes and checksums](https://github.com/cubiix3/Kova-File-Manager/releases/tag/v0.2.2)**.
 
 After Setup, launch Kova from the Start menu. A desktop shortcut is optional.
 
@@ -61,7 +61,7 @@ replace Win+E, Windows file pickers or every explicit Explorer invocation.
 | **Find files** | Name search with optional Type / Size / Date filters; cancellable Include subfolders; natural filename ordering |
 | **Check storage** | Drive type, file system and capacity; cancellable background analysis with largest folders/files and proportional bars |
 | **Resume work** | Restore tabs, active location, searches, window state, columns, gallery and inspector; debounced atomic preferences |
-| **Undo safely** | Review supported renames and same-volume file moves; identity checks refuse changed items or occupied destinations |
+| **Undo safely** | Restore deleted files and folders from the Recycle Bin with Ctrl+Z; review supported renames and file moves; preserve occupied destinations |
 | **Adjust the view** | Hidden/system files, file extensions, row density, alternating rows and a resizable preview pane |
 | **Use Windows tools** | Native Shell menus with installed extensions, associated applications, Explorer-compatible clipboard and bidirectional drag & drop |
 
@@ -134,7 +134,7 @@ collisions wait for your choice; folder merges retain native Windows handling.
 | Native Windows options | `Shift+F10` |
 | Details / Gallery | `Ctrl+1` / `Ctrl+2` |
 | Search the current folder/tree | `Ctrl+F` |
-| Review the last supported Undo | `Ctrl+Z` |
+| Restore recycled items / undo a supported rename or move | `Ctrl+Z` |
 | Switch tabs | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 
 ## Build from source
@@ -165,7 +165,7 @@ See [Contributing](CONTRIBUTING.md) for quality checks and
 - [Documentation index and historical reports](docs/README.md)
 
 Current source includes recursive folder search, native Windows drag & drop,
-session restoration and identity-checked Undo for supported renames/file moves.
+session restoration and Undo for recycled items, supported renames and file moves.
 System-wide indexing, split panes and batch rename remain future work. See the
 [feature guide](docs/NEXTGEN.md) for exact limits.
 

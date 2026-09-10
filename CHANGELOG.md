@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2
+
+- File context menus highlight commands on normal mouse hover, with a short,
+  subtle transition; keyboard navigation follows the hovered command.
+- Ctrl+Z restores files and folders deleted by Kova into the Recycle Bin,
+  including multi-selection batches, during the current session.
+- Restore preserves occupied destinations and keeps pending items retryable
+  after a conflict or partial failure. Permanent deletions cannot be undone.
+
 ## 0.2.1 — refresh and context-menu fixes
 
 - Keep file context menus open while background directory changes arrive; apply

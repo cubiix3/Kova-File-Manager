@@ -77,6 +77,7 @@ impl CommandDispatcher {
             return;
         }
         self.send(WorkerCommand::Undo { id });
+        self.set_status_message("Undoing the last operation...".into());
     }
 
     pub fn request_enumeration(&self, tab_id: TabId, location: Location) {
