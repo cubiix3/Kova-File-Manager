@@ -20,7 +20,7 @@ Windows 10/11 x64. No Electron or WebView.
 
 > **0.2 release candidate:** The current source includes the daily-driver changes below.
 > The published v0.1.0 installer predates these changes. Get the 0.2.0 Setup
-> and ZIP from the [candidate workflow artifacts](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34483751031)
+> and ZIP from the [candidate workflow artifacts](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34487070491)
 > (GitHub sign-in required). No new public release has been published.
 > See [verification and limits](docs/DAILY_DRIVER_VERIFICATION.md) and the [changelog](CHANGELOG.md).
 
@@ -28,7 +28,7 @@ Windows 10/11 x64. No Electron or WebView.
 
 Choose the build you want:
 
-- **0.2.0 candidate shown here:** open the [candidate package run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34483751031),
+- **0.2.0 candidate shown here:** open the [candidate package run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34487070491),
   after its checks pass, sign in to GitHub and download **kova-windows-x64** under **Artifacts**. Extract
   that download, then run `Kova-Setup-0.2.0-x64.exe`.
 - **Published preview:** open [GitHub Releases](https://github.com/cubiix3/Kova-File-Manager/releases)

@@ -2,13 +2,13 @@
 
 The README uses unedited window captures of the 0.2 candidate taken on
 10 September 2026 on an interactive Windows Server 2025 hosted desktop at 100%
-scaling (984 × 680 physical window pixels). The application source is `866b88a`.
+scaling (984 × 680 physical window pixels). The application source is `a527789`.
 Files and preferences use isolated fixtures on a temporary SUBST drive.
 
-The [Windows interaction run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34483172250)
+The [Windows interaction run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34486247256)
 passed the menu, clipboard, keyboard, refresh, Gallery and native-extension flows
 and retained its debug-build captures. The matching
-[candidate package workflow](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34483751031)
+[candidate package workflow](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34487070491)
 builds Setup and ZIP from the same application source.
 
 - [Details](images/daily-driver-details.png): tabs, readable search/filter controls and details.

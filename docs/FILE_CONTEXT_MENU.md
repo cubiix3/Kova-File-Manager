@@ -41,8 +41,20 @@ The initial interactive run exposed a focus error when a menu entry disappeared
 for multi-selection. Focus is now changed before showing/hiding those nodes;
 that transition remains covered by the multi-selection interaction test.
 
-The [Windows CI run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34483172250)
-passed format/check, 90 tests, warning-free Clippy and all actual UI interactions
-for application source `866b88a`. Build/run evidence is recorded alongside the [product captures](DEMO.md).
+The [Windows CI run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34486247256)
+passed format/check, 90 tests plus 3 isolated clipboard tests, warning-free Clippy and all actual UI interactions
+for application source `a527789`. Build/run evidence is recorded alongside the [product captures](DEMO.md).
 The broader [hardening verification and performance baseline](DAILY_DRIVER_VERIFICATION.md)
 remains available with its original build provenance.
+
+A repeated UI run exposed a briefly occupied Windows clipboard during Copy path.
+Clipboard opening now retries access-denied errors for up to approximately 100 ms,
+before modifying any data. Persistent locks still produce an error. Isolated
+Windows CI tests exercise both transient recovery and persistent contention, plus
+text and Explorer-compatible file round trips. This follows the exclusive-access
+behavior documented for [OpenClipboard](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-openclipboard).
+
+Native-menu handoff requests a redraw and briefly defers the blocking Shell call,
+so the dismissed themed menu is painted away first. The captured tab, target path
+and selection must still match before Windows options opens. The final captures
+verify that the two menus are no longer drawn over one another.
