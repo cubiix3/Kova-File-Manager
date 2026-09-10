@@ -7,7 +7,8 @@ browsing, familiar interactions and visible file-operation outcomes.
 
 - Home with recent/pinned folders, drive capacity, free space, file system and usage bars.
 - Tabbed browsing, breadcrumbs, history, known folders and direct folder launches.
-- Native Windows Shell menus, associated application launch and file clipboard.
+- Themed file actions, with native Windows Shell extensions available through More Windows options.
+- Associated application launch and Explorer-compatible file clipboard.
 - Copy, move and Recycle Bin deletion through Windows `IFileOperation`.
 - Inline New Folder and Rename, including filename validation.
 - Sorting, resizable columns, Ctrl/Shift selection and mouse selection rectangle.

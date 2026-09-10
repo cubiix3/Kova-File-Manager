@@ -1,19 +1,20 @@
 # Product captures
 
-The README uses unedited window captures of the 0.2 release candidate taken on
+The README uses unedited window captures of the 0.2 candidate taken on
 10 September 2026 on an interactive Windows Server 2025 hosted desktop at 100%
-scaling (984 × 680 physical window pixels). The executable comes from the verified
-[0.2.0 package](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34473650758),
-application source `ea92807`. Files and preferences use isolated fixtures on a
-temporary SUBST drive.
+scaling (984 × 680 physical window pixels). The application source is `866b88a`.
+Files and preferences use isolated fixtures on a temporary SUBST drive.
 
-[View/conflict captures and performance](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34475306852)
-and the [verified native-menu capture](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34476071198)
-retain their raw logs and images as workflow artifacts.
+The [Windows interaction run](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34483172250)
+passed the menu, clipboard, keyboard, refresh, Gallery and native-extension flows
+and retained its debug-build captures. The matching
+[candidate package workflow](https://github.com/cubiix3/Kova-File-Manager/actions/runs/34483751031)
+builds Setup and ZIP from the same application source.
 
 - [Details](images/daily-driver-details.png): tabs, readable search/filter controls and details.
 - [Text inspector](images/daily-driver-inspector.png): text preview and Copy Path.
 - [Gallery](images/daily-driver-gallery.png): gallery and inspector with copyable metadata.
+- [Themed file actions](images/daily-driver-context.png): matching icons, grouped actions and shortcuts.
 - [Native Windows menu](images/daily-driver-native.png): the real Windows Shell context menu.
 - [Home](images/daily-driver-home.png): recent folders, favorites and drives.
 - [File conflicts](images/daily-driver-conflict.png): incoming/existing comparison and explicit choices.

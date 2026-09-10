@@ -57,6 +57,24 @@ sorting. An incomplete scan is a lower bound: it cannot prove an upper bound or
 an exact size. Search is scoped to the open folder/tree; system-wide indexed
 search is not included.
 
+## File context actions
+
+Right-click a selected file or use **More** to open the themed file menu. It offers
+Open, Open in new tab for folders, Preview for files, Cut, Copy, Rename, Copy path
+and Delete. Multi-selection keeps the applicable transfer actions and offers
+**Copy paths**, one full path per line. These actions use Kova's existing operation
+and clipboard handling.
+
+Use arrow keys and Enter to choose an action; Escape, Tab or an outside click
+closes the menu. It stays inside the current window and closes if navigation or a
+background refresh changes its file snapshot, so a stale row cannot trigger an
+action on a different file.
+
+**More Windows options** opens the complete Windows Shell menu with installed
+extensions. **Shift+F10** remains a direct shortcut from the list; the same shortcut
+inside the themed menu opens Windows options. Native extension commands retain
+their own operation UI and remain outside Kova's Undo history.
+
 ## Transfers and conflicts
 
 Copy, cut/paste and deletion use Windows **IFileOperation**, on a dedicated STA
