@@ -52,8 +52,11 @@ try {
     Save-Demo 'inspector'
     Send-DemoKeys ('^l'+$kovaProject+'\Assets{ENTER}')
     Select-DemoFile 'Kova.png'
-    Invoke-DemoButton 'Gallery'
+    Send-DemoKeys '^2'
+    $null=Wait-DemoElement 'Gallery' ([Windows.Automation.ControlType]::Text)
     Save-Demo 'gallery'
+    Send-DemoKeys '^1'
+    if(Find-DemoElement 'Gallery' ([Windows.Automation.ControlType]::Text)){throw 'Ctrl+1 did not restore Details view'}
     Send-DemoKeys '^t'
     $null=Wait-DemoElement 'Recent folders' ([Windows.Automation.ControlType]::Text)
     Save-Demo 'home'
