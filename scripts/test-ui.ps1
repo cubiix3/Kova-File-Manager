@@ -26,8 +26,8 @@ function Start-TestWindow {
     try { Start-Process -FilePath $kovaExe -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $kovaFixture 'app.log') -RedirectStandardError (Join-Path $kovaFixture 'error.log') }
     finally { $env:LOCALAPPDATA = $kovaPrevious }
 }
-function Wait-TestCondition([scriptblock]$Condition, [string]$Description) {
-    $kovaDeadline = [DateTime]::UtcNow.AddSeconds(10)
+function Wait-TestCondition([scriptblock]$Condition, [string]$Description, [int]$TimeoutSeconds = 10) {
+    $kovaDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
         if (& $Condition) { return }
         Start-Sleep -Milliseconds 100
@@ -71,7 +71,9 @@ function Close-TestWindow {
 }
 $kovaProcess = Start-TestWindow
 try {
-    Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'initial folder enumeration and accessibility tree'
+    # Fresh runner VMs can spend over ten seconds initializing the first GPU/UIA
+    # window. Keep normal action deadlines short; allow startup its own budget.
+    Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'initial folder enumeration and accessibility tree' 30
     $kovaWindowInfo=& "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
     $kovaScale=$kovaWindowInfo.Dpi/96.0
     $kovaScreen=[Windows.Forms.Screen]::PrimaryScreen.WorkingArea
