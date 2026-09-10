@@ -61,6 +61,15 @@ try {
     Wait-TestCondition { Find-TestElement 'Undo operation' ([Windows.Automation.ControlType]::Text) } 'reviewable Undo dialog'
     Send-TestKeys '{ENTER}'
     Wait-TestCondition { Test-Path -LiteralPath (Join-Path $kovaFiles 'Before.txt') } 'Undo restored original path'
+    Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'restored selection model'
+    $kovaItem = Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem)
+    $kovaItem.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $kovaSourceBounds = $kovaItem.Current.BoundingRectangle
+    $kovaTargetBounds = (Find-TestElement 'Nested' ([Windows.Automation.ControlType]::ListItem)).Current.BoundingRectangle
+    $kovaBounds = & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Inspect | ConvertFrom-Json
+    & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Drag -X ([int]($kovaSourceBounds.Left + 90 - $kovaBounds.Left)) -Y ([int]($kovaSourceBounds.Top + $kovaSourceBounds.Height/2 - $kovaBounds.Top)) -EndX ([int]($kovaTargetBounds.Left + 90 - $kovaBounds.Left)) -EndY ([int]($kovaTargetBounds.Top + $kovaTargetBounds.Height/2 - $kovaBounds.Top)) -Modifier Copy | Out-Null
+    Wait-TestCondition { Test-Path -LiteralPath (Join-Path $kovaFiles 'Nested/Before.txt') } 'Ctrl-drag of an already selected file'
+    if ([IO.File]::ReadAllText((Join-Path $kovaFiles 'Before.txt')) -ne [IO.File]::ReadAllText((Join-Path $kovaFiles 'Nested/Before.txt'))) { throw 'Ctrl-drag must preserve original and copied contents' }
     Send-TestKeys '^fNeedle'
     $kovaScope = Find-TestElement 'Include subfolders' ([Windows.Automation.ControlType]::CheckBox)
     if (-not $kovaScope) { throw 'Recursive scope lacks an accessible checkbox' }
@@ -79,7 +88,7 @@ try {
     Send-TestKeys '^{TAB}'
     Wait-TestCondition { Find-TestElement 'Before.txt' ([Windows.Automation.ControlType]::ListItem) } 'restored first tab'
     & "$PSScriptRoot/runtime-window.ps1" -ProcessId $kovaProcess.Id -Action Screenshot -OutputPath (Join-Path $kovaFixture 'verified.png') | Out-Null
-    [pscustomobject]@{Result='PASS';Flows='open/select/rename/refresh/undo/recursive search/global address/tabs/debounced save/restart';Fixture=$kovaFixture} | ConvertTo-Json
+    [pscustomobject]@{Result='PASS';Flows='open/select/rename/refresh/undo/Ctrl-drag copy/recursive search/global address/tabs/debounced save/restart';Fixture=$kovaFixture} | ConvertTo-Json
 } finally {
     if (-not $kovaProcess.HasExited) { Close-TestWindow }
 }

@@ -737,6 +737,8 @@ export component MainWindow inherits Window {
                         property <bool> dragging: false;
                         property <bool> additive: false;
                         property <bool> drag-source: false;
+                        property <int> pending-click: 0;
+                        property <int> pressed-row: -1;
                         property <length> start-x;
                         property <length> start-y;
                         property <int> hover-row: Math.floor((self.mouse-y - file-viewport.viewport-y) / file-list.item-height) * file-list.columns + (AppState.gallery ? Math.clamp(Math.floor(self.mouse-x / file-list.tile-width), 0, file-list.columns - 1) : 0);
@@ -750,7 +752,7 @@ export component MainWindow inherits Window {
                         }
                         function finish(cancel: bool) {
                             if self.armed { AppState.request-grid-marquee(cancel ? 3 : 2, 0, 0, 0, 0, file-list.columns, false); }
-                            self.armed = false; self.dragging = false;
+                            self.armed = false; self.dragging = false; self.pending-click = 0;
                         }
                         pointer-event(event) => {
                             if event.kind == PointerEventKind.down {
@@ -765,18 +767,29 @@ export component MainWindow inherits Window {
                                 } else if event.button == PointerEventButton.left && !AppState.loading {
                                     if AppState.inline-visible { AppState.request_dialog_confirm(AppState.dialog_value); }
                                     self.armed = true; self.dragging = false;
+                                    self.pending-click = 0; self.pressed-row = self.hover-row;
                                     self.drag-source = self.hover-row >= 0 && self.hover-row < AppState.files.length;
                                     self.start-x = self.mouse-x;
                                     self.start-y = self.mouse-y - file-viewport.viewport-y;
                                     self.additive = event.modifiers.control || event.modifiers.shift;
                                     AppState.request-grid-marquee(0, 0, 0, 0, 0, file-list.columns, self.additive);
                                     if self.hover-row >= 0 && self.hover-row < AppState.files.length {
-                                        if event.modifiers.control { AppState.request_toggle(self.hover-row); }
+                                        if event.modifiers.control {
+                                            // A selected item must remain in the drag payload.
+                                            // Ctrl-click toggles it only after a non-drag release.
+                                            if AppState.files[self.hover-row].selected { self.pending-click = 1; }
+                                            else { AppState.request_toggle(self.hover-row); }
+                                        }
                                         else if event.modifiers.shift { AppState.request_range(self.hover-row); }
                                         else if !AppState.files[self.hover-row].selected { AppState.request_select(self.hover-row); }
+                                        else { self.pending-click = 2; }
                                     } else if !self.additive { AppState.request_clear_selection(); }
                                 }
                             } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                                if self.armed && !self.dragging && self.pressed-row >= 0 && self.pressed-row < AppState.files.length {
+                                    if self.pending-click == 1 { AppState.request_toggle(self.pressed-row); }
+                                    else if self.pending-click == 2 { AppState.request_select(self.pressed-row); }
+                                }
                                 self.finish(false);
                             } else if event.kind == PointerEventKind.cancel { self.finish(true); }
                         }
@@ -1158,4 +1171,3 @@ export component MainWindow inherits Window {
     }
 
 }
-

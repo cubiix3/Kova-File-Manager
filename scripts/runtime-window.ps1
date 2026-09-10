@@ -62,9 +62,9 @@ if ($kovaHandle -eq [IntPtr]::Zero) { throw 'The specified process has no visibl
 $kovaBounds = New-Object KovaWindowTest+Rect
 [void][KovaWindowTest]::GetWindowRect($kovaHandle,[ref]$kovaBounds)
 if ($Action -in @('Keys','Click','Drag','Resize','Wheel','Restore','RightClick')) {
-    if (-not [KovaWindowTest]::OwnsForeground($ProcessId)) {
+    for ($kovaFocusAttempt=0; $kovaFocusAttempt -lt 4 -and -not [KovaWindowTest]::OwnsForeground($ProcessId); $kovaFocusAttempt++) {
         [KovaWindowTest]::FocusWindow($kovaHandle)
-        Start-Sleep -Milliseconds 150
+        Start-Sleep -Milliseconds 250
     }
     if (-not [KovaWindowTest]::OwnsForeground($ProcessId)) { throw 'Refusing input: the test application is not the foreground window.' }
 }
