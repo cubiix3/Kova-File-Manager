@@ -409,7 +409,7 @@ fn capitalize(word: &str) -> String {
 }
 
 /// SAFETY: COM STA must be initialized on the calling thread.
-unsafe fn shell_item(path: &Path) -> Result<IShellItem, String> {
+pub(crate) unsafe fn shell_item(path: &Path) -> Result<IShellItem, String> {
     unsafe {
         let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
         wide.push(0);

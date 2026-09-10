@@ -1,10 +1,6 @@
 //! IFileOperation notifications remain inside the worker's COM apartment.
 use crate::transfers::TransferHandle;
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    sync::Mutex,
-};
+use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 use windows::{
     Win32::{
         System::Com::CoTaskMemFree,
@@ -21,7 +17,7 @@ pub struct ProgressSink {
     record_undo: bool,
     handle: TransferHandle,
     sizes: Mutex<HashMap<PathBuf, u64>>,
-    roots: Mutex<HashSet<PathBuf>>,
+    roots: Mutex<HashMap<PathBuf, PathBuf>>,
     base: f32,
     weight: f32,
     recycled: Mutex<Vec<crate::undo::Recycled>>,
@@ -38,7 +34,23 @@ impl ProgressSink {
             record_undo,
             handle,
             sizes: Mutex::new(HashMap::new()),
-            roots: Mutex::new(sources.iter().cloned().collect()),
+            roots: Mutex::new(
+                sources
+                    .iter()
+                    .map(|path| {
+                        // Match the Shell's path spelling before the operation removes
+                        // it. In particular, GetTempPath may use an 8.3 user directory
+                        // while callbacks return its long name. Keep the requested path
+                        // as the value for undo and library references.
+                        // SAFETY: every ProgressSink is constructed on its operation's STA.
+                        let shell_path = unsafe { crate::shell_ops::shell_item(path) }
+                            .ok()
+                            .and_then(|item| item_path(Some(&item)))
+                            .unwrap_or_else(|| path.clone());
+                        (shell_path, path.clone())
+                    })
+                    .collect(),
+            ),
             base,
             weight,
             recycled: Mutex::new(Vec::new()),
@@ -84,7 +96,12 @@ impl ProgressSink {
                 .lock()
                 .ok()
                 .and_then(|mut sizes| sizes.remove(&path));
-            let root_done = self.roots.lock().is_ok_and(|mut roots| roots.remove(&path));
+            let original = self
+                .roots
+                .lock()
+                .ok()
+                .and_then(|mut roots| roots.remove(&path));
+            let root_done = original.is_some();
             self.handle.update(|state| {
                 if root_done && state.progress.is_none() {
                     state.remaining = state.remaining.saturating_sub(1);
@@ -105,10 +122,14 @@ impl ProgressSink {
             if is_move && result.is_ok() && result != COPYENGINE_S_USER_IGNORED {
                 if let Some(destination) = item_path(moved.as_ref()) {
                     if root_done && self.record_undo {
-                        self.handle.undo.record(&path, &destination, false);
+                        self.handle.undo.record(
+                            original.as_ref().unwrap_or(&path),
+                            &destination,
+                            false,
+                        );
                     }
                     if let Ok(mut moves) = self.handle.moved.lock() {
-                        moves.push((path, destination));
+                        moves.push((original.unwrap_or(path), destination));
                     }
                 }
             }
@@ -213,19 +234,15 @@ impl IFileOperationProgressSink_Impl for ProgressSink_Impl {
         result: HRESULT,
         new: Ref<'_, IShellItem>,
     ) -> windows::core::Result<()> {
-        #[cfg(test)]
-        eprintln!(
-            "recycle callback: original={:?}, result={result:?}, new={}, new_path={:?}, roots={:?}",
-            item_path(item.as_ref()),
-            new.as_ref().is_some(),
-            item_path(new.as_ref()),
-            self.roots
-        );
         if result.is_ok() && result != COPYENGINE_S_USER_IGNORED {
             if let (Some(path), Some(new)) = (item_path(item.as_ref()), new.as_ref()) {
-                let root = self.roots.lock().is_ok_and(|roots| roots.contains(&path));
-                if root {
-                    if let Some(recycled) = crate::undo::Recycled::capture(path, new) {
+                let original = self
+                    .roots
+                    .lock()
+                    .ok()
+                    .and_then(|roots| roots.get(&path).cloned());
+                if let Some(original) = original {
+                    if let Some(recycled) = crate::undo::Recycled::capture(original, new) {
                         if let Ok(mut items) = self.recycled.lock() {
                             items.push(recycled);
                         }
