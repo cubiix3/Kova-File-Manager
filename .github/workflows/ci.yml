@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci:
-    name: CI
+  windows:
+    name: windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,3 +38,20 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  # Both the repository ruleset (windows) and branch protection (CI) are required.
+  # Keep CI as an aggregate of the actual Windows quality gates, including failures.
+  ci:
+    name: CI
+    needs: windows
+    if: ${{ always() }}
+    runs-on: windows-latest
+    steps:
+      - name: Require successful Windows quality gates
+        shell: pwsh
+        env:
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+        run: |
+          if ($env:WINDOWS_RESULT -ne 'success') {
+            throw "Windows quality gates did not pass: $env:WINDOWS_RESULT"
+          }

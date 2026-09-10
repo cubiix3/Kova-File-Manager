@@ -18,7 +18,8 @@ Thanks for your interest in improving Kova!
 ## Required quality gates
 
 CI runs these on pull requests and pushes to `main`; please make sure they pass
-locally before opening a PR:
+locally before opening a PR. The `windows` job runs the gates; `CI` reports its
+result for branch protection. Both existing required checks must pass:
 
 ```powershell
 cargo fmt --all -- --check
