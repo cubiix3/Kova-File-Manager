@@ -30,7 +30,7 @@ operation dispatchers, including conflict handling and Recycle Bin deletion.
 
 `scripts/test-ui.ps1` exercises toolbar and mouse opening, viewport bounds, full
 path copying, keyboard rename, Undo, multiple selections, Escape, native menu
-handoff, refresh invalidation and Gallery targeting. The existing drag/drop,
+handoff, deferred refresh and Gallery targeting. The existing drag/drop,
 recursive search and restored-session flows run afterward. The Windows CI job
 runs these against the actual application and uploads logs and screenshots.
 
